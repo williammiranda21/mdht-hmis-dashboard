@@ -92,6 +92,16 @@ export async function GET(req: Request) {
   }
   const served = servedBy.size;
 
+  // Names for the SERVING project. bnl_clients carries the client's *current*
+  // project, which is not necessarily the one that served them in this period —
+  // showing that would quietly contradict the selection the user just made.
+  const { data: projRows } = await sb
+    .from('projects').select('project_id, name').in('project_id', ids);
+  const projName = new Map<number, string>(
+    (projRows ?? []).map((p: { project_id: number; name: string | null }) =>
+      [Number(p.project_id), p.name ?? `Project ${p.project_id}`]),
+  );
+
   if (!served) {
     return NextResponse.json({
       served: 0, matched: 0, unmatched: 0,
@@ -123,7 +133,11 @@ export async function GET(req: Request) {
     const hit = rows.filter((r) => servedBy.has(r.pid));
     hit.forEach((r) => matchedPids.add(r.pid));
     return hit
-      .map((r) => ({ ...r, project_id: servedBy.get(r.pid) }))  // serving project, not current
+      .map((r) => {
+        const pidProj = servedBy.get(r.pid)!;
+        // serving project, not the client's current one
+        return { ...r, project_id: pidProj, project: projName.get(pidProj) ?? null };
+      })
       .sort(sort)
       .slice(0, LIMIT);
   };

@@ -388,6 +388,13 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .dd-head{cursor:pointer;align-items:flex-start}
 .dd-head .meta{max-width:78ch;line-height:1.45}
 .dd-caret{color:var(--muted);font-size:14px;flex:none;padding-top:2px}
+/* hashed PersonalID — the value pasted into HMIS client search */
+.dd-pid{display:inline-block;margin-top:4px;padding:2px 7px;border-radius:5px;cursor:pointer;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;
+  background:var(--primary-soft);color:var(--muted);border:1px solid var(--hair);
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dd-pid:hover{color:var(--text);border-color:var(--border-strong)}
+.dd-pid.ok{background:var(--accent-light);color:var(--accent);border-color:var(--accent)}
 
 /* ── Print / PDF for the project panel ──
    The static dashboard cloned the panel into a hidden overlay to print it.

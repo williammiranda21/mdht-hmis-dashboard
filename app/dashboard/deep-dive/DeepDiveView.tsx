@@ -47,6 +47,27 @@ const LISTS: { key: ListKey; title: string; why: string; empty: string }[] = [
 
 const days = (n: number | null) => (n == null ? '—' : `${n.toLocaleString()}d`);
 
+/** Click-to-copy hashed PersonalID — this is the value you paste into HMIS
+ *  client search, so it needs to be one click away on every row. */
+function CopyId({ pid }: { pid: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      className={`dd-pid${done ? ' ok' : ''}`}
+      title={`${pid} — click to copy for HMIS lookup`}
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard?.writeText(pid);
+        setDone(true);
+        setTimeout(() => setDone(false), 1200);
+      }}
+    >
+      {done ? 'copied ✓' : pid}
+    </button>
+  );
+}
+
 interface DeepDiveData {
   served: number; matched: number; unmatched: number; restricted?: boolean;
   lists: Record<ListKey, Client[]>;
@@ -169,7 +190,21 @@ export default function DeepDiveView({
                     <h3>{l.title} <span className="bnl-sub">({rows.length}{rows.length === 100 ? '+' : ''})</span></h3>
                     <div className="meta">{l.why}</div>
                   </div>
-                  <span className="dd-caret">{isOpen ? '▾' : '▸'}</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {rows.length > 0 && (
+                      <button className="btn" title="Copy every PersonalID in this list"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // newline-separated so it pastes straight into a
+                          // spreadsheet column or an HMIS batch lookup
+                          navigator.clipboard?.writeText(rows.map((r) => r.pid).join('\n'));
+                          const el = e.currentTarget;
+                          el.textContent = 'Copied ✓';
+                          setTimeout(() => { el.textContent = '⧉ Copy IDs'; }, 1200);
+                        }}>⧉ Copy IDs</button>
+                    )}
+                    <span className="dd-caret">{isOpen ? '▾' : '▸'}</span>
+                  </span>
                 </div>
 
                 {isOpen && (
@@ -192,6 +227,7 @@ export default function DeepDiveView({
                                 <td>
                                   <div className="bnl-nm">{c.name}</div>
                                   <div className="bnl-sub">{c.detail}</div>
+                                  <CopyId pid={c.pid} />
                                 </td>
                                 <td className="num">{c.age ?? '—'}</td>
                                 <td>
