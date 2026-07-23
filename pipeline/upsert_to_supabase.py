@@ -422,8 +422,12 @@ def build_bnl_clients(bnl: dict | None) -> list[dict]:
         rows.append({
             "pid": r["pid"], "as_of": bnl["as_of"], "name": r["name"], "age": r["age"],
             "status": r["status"], "detail": r["detail"], "enrolled": r["enrolled"],
+            "project_id": r.get("project_id"),
             "project": r["project"], "ptype": r["ptype"], "entry": r["entry"],
             "last_contact": r["last_contact"],
+            # deep-dive worklist flags (computed in bnl_core)
+            "long_stay": r.get("long_stay", False),
+            "open_suspect": r.get("open_suspect", False),
             "days_since_contact": r["days_since_contact"], "days_homeless": r["days_homeless"],
             "ep_start": r["ep_start"], "sys_days3": r["sys_days3"], "episodes3": r["episodes3"],
             "times3_sr": r["times3_sr"], "months3_sr": r["months3_sr"],

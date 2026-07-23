@@ -67,7 +67,19 @@ function percentile(sorted: number[], p: number): number | null {
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' ? v : null);
-const pctOrDash = (v: number | null): string => (v == null ? '—' : `${v.toFixed(1)}%`);
+
+/**
+ * Format a metric for display. Derived rates (band/exits*100) arrive as raw
+ * floats — 13.253012048192772 — so everything that can be derived MUST go
+ * through here. Rates get 2 decimals; days get 1, matching the rest of the app.
+ * Trailing zeros are trimmed so "20.00%" reads as "20%".
+ */
+const fmtMetric = (v: number | null, unit: string): string => {
+  if (v == null) return '—';
+  const dp = unit === '%' ? 2 : 1;
+  return `${Number(v.toFixed(dp))}${unit}`;
+};
+const pctOrDash = (v: number | null): string => fmtMetric(v, '%');
 /** 20%+ two-year return rate is the flag threshold used on the Returns tab. */
 const ret2Flagged = (h: HistRow | null): boolean => {
   const r = rate(h?.returns_2yr, h?.total_ph_exits);
@@ -244,7 +256,7 @@ export default function ProjectPanel({
                         <div className="hc-bwrap">
                           <div className="hc-blab">
                             <span>{DEST[code] ?? `Destination ${code}`}</span>
-                            <b>{d.returns}/{d.exits} ({r == null ? '—' : `${r.toFixed(1)}%`})</b>
+                            <b>{d.returns}/{d.exits} ({pctOrDash(r)})</b>
                           </div>
                           <div className="hc-bar">
                             <i style={{
@@ -421,17 +433,17 @@ function PeerBench({
           <div className="peer-row" key={m.key}>
             <div className="peer-label">{m.label}</div>
             <div className="peer-track"
-              title={`Min ${vmin}${m.unit} · P25 ${p25.toFixed(1)}${m.unit} · Median ${med.toFixed(1)}${m.unit} · P75 ${p75.toFixed(1)}${m.unit} · Max ${vmax}${m.unit}`}>
+              title={`Min ${fmtMetric(vmin, m.unit)} · P25 ${fmtMetric(p25, m.unit)} · Median ${fmtMetric(med, m.unit)} · P75 ${fmtMetric(p75, m.unit)} · Max ${fmtMetric(vmax, m.unit)}`}>
               <div className="peer-iqr" style={{ left: `${pct(p25)}%`, width: `${pct(p75) - pct(p25)}%` }} />
               <div className="peer-median" style={{ left: `${pct(med)}%` }} />
               {mine != null && (
                 <div className={`peer-dot${better ? ' above-median' : worse ? ' below-median' : ''}`}
                   style={{ left: `${pct(mine)}%` }}
-                  title={`This project: ${mine}${m.unit} · peer median ${med.toFixed(1)}${m.unit}`} />
+                  title={`This project: ${fmtMetric(mine, m.unit)} · peer median ${fmtMetric(med, m.unit)}`} />
               )}
             </div>
             <div className="peer-val">
-              {mine != null ? `${mine}${m.unit}` : '—'}
+              {fmtMetric(mine, m.unit)}
               <span>{rank != null ? `#${rank} of ${vals.length + 1}` : ''}</span>
             </div>
           </div>
