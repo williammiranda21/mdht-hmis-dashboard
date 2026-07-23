@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 import type { Granularity } from '../../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../../lib/types';
 import { periodLabel, lookbackLabel, fmtInt, DEST_LABELS } from '../../../lib/format';
+import ProjectPanel from '../ProjectPanel';
 
 type Row = {
   project_id: number; name: string; type_name: string; project_type: number | null;
@@ -30,6 +31,9 @@ export default function ReturnsView({ periods, granularity, period, household, s
   const router = useRouter();
   const [typeFilter, setTypeFilter] = useState('All');
   const [query, setQuery] = useState('');
+  /** Returns-mode project panel — same component as Project Performance, with
+   *  returns KPIs, destination breakdown and return-rate benchmarking. */
+  const [panelProject, setPanelProject] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('exits');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
 
@@ -191,7 +195,14 @@ export default function ReturnsView({ periods, granularity, period, household, s
             <tbody>
               {sorted.map((r) => (
                 <tr key={r.project_id}>
-                  <td><span className="nm">{r.name}</span></td>
+                  <td>
+                    <span className="nm pp-link" role="button" tabIndex={0}
+                      title="Open returns detail"
+                      onClick={() => setPanelProject(r.project_id)}
+                      onKeyDown={(e) => e.key === 'Enter' && setPanelProject(r.project_id)}>
+                      {r.name}
+                    </span>
+                  </td>
                   <td><span className="ty">{r.type_name}</span></td>
                   <td className="num"><strong>{fmtInt(r.exits)}</strong></td>
                   <td className="num">{fmtInt(r.lt6)}</td>
@@ -251,6 +262,18 @@ export default function ReturnsView({ periods, granularity, period, household, s
           </table>
         </div>
       </div>
+
+      {panelProject != null && (
+        <ProjectPanel
+          mode="returns"
+          projectId={panelProject}
+          granularity={granularity}
+          period={period}
+          household={household}
+          subpopulation={subpopulation}
+          onClose={() => setPanelProject(null)}
+        />
+      )}
     </>
   );
 }

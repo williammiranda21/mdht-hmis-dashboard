@@ -28,6 +28,8 @@ export async function GET(req: Request) {
   const period = sp.get('period') ?? '';
   const household = sp.get('household') ?? 'All';
   const subpopulation = sp.get('subpopulation') ?? 'All';
+  // 'snapshot' = Project Performance; 'returns' = the Returns tab's panel.
+  const mode = sp.get('mode') === 'returns' ? 'returns' : 'snapshot';
 
   if (!Number.isFinite(projectId)) {
     return NextResponse.json({ error: 'project_id required' }, { status: 400 });
@@ -43,16 +45,27 @@ export async function GET(req: Request) {
   if (projErr) return NextResponse.json({ error: projErr.message }, { status: 500 });
   if (!proj) return NextResponse.json({ error: 'project not found' }, { status: 404 });
 
+  // returns_metrics stores COUNTS only — every rate is derived as
+  // band / total_ph_exits * 100, matching the Returns tab and the Python source.
+  // Do not add rate columns here; deriving keeps one definition.
+  const table = mode === 'returns' ? 'returns_metrics' : 'project_metrics';
+  const histCols = mode === 'returns'
+    ? 'period, total_ph_exits, returns_lt6mo, returns_6to12mo, returns_13to24mo, returns_2yr'
+    : 'period, clients_served, leavers, exits_ph, ph_exit_rate, exits_unsub, unsub_rate, avg_los, is_partial, data';
+  const peerCols = mode === 'returns'
+    ? 'project_id, total_ph_exits, returns_lt6mo, returns_6to12mo, returns_13to24mo, returns_2yr'
+    : 'project_id, ph_exit_rate, avg_los, unsub_rate, data';
+
   const [historyRes, peerRes] = await Promise.all([
-    sb.from('project_metrics')
-      .select('period, clients_served, leavers, exits_ph, ph_exit_rate, exits_unsub, unsub_rate, avg_los, is_partial, data')
+    sb.from(table)
+      .select(histCols)
       .eq('project_id', projectId)
       .eq('granularity', granularity)
       .eq('household_type', household)
       .eq('subpopulation', subpopulation)
       .order('period'),
     // Peers: every project of the same type in this period. project_type is on
-    // `projects`, not project_metrics, so filter by the id list rather than a join.
+    // `projects`, not the metrics tables, so filter by id list rather than a join.
     sb.from('projects').select('project_id').eq('project_type', proj.project_type),
   ]);
 
@@ -62,8 +75,8 @@ export async function GET(req: Request) {
   if (!peerRes.error && peerRes.data?.length && period) {
     const ids = peerRes.data.map((p: { project_id: number }) => p.project_id);
     const { data } = await sb
-      .from('project_metrics')
-      .select('project_id, ph_exit_rate, avg_los, unsub_rate, data')
+      .from(table)
+      .select(peerCols)
       .eq('period', period)
       .eq('granularity', granularity)
       .eq('household_type', household)
@@ -72,5 +85,20 @@ export async function GET(req: Request) {
     peers = data ?? [];
   }
 
-  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers });
+  // Destination breakdown — returns panel only. Monthly-keyed (no granularity
+  // column on this table), so it is only meaningful for a monthly period.
+  let dest: Record<string, unknown> | null = null;
+  if (mode === 'returns' && period) {
+    const { data } = await sb
+      .from('returns_by_dest')
+      .select('data')
+      .eq('period', period)
+      .eq('project_id', projectId)
+      .eq('household_type', household)
+      .eq('subpopulation', subpopulation)
+      .maybeSingle();
+    dest = (data?.data as Record<string, unknown>) ?? null;
+  }
+
+  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers, dest });
 }

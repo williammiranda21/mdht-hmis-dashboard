@@ -23,14 +23,39 @@ interface HistRow {
   avg_los: number | null;
   is_partial: boolean | null;
   data: Record<string, unknown> | null;
+  /* returns mode — counts only; every rate below is derived */
+  total_ph_exits?: number | null;
+  returns_lt6mo?: number | null;
+  returns_6to12mo?: number | null;
+  returns_13to24mo?: number | null;
+  returns_2yr?: number | null;
 }
+
+export type PanelMode = 'snapshot' | 'returns';
+
+/** rate = band / total_ph_exits × 100 — the single definition used by the
+ *  Returns tab and apr_monthly_report.py. returns_metrics stores no rates. */
+const rate = (band: number | null | undefined, exits: number | null | undefined): number | null =>
+  band == null || !exits ? null : (band / exits) * 100;
 interface PeerRow {
   project_id: number;
   ph_exit_rate: number | null;
   avg_los: number | null;
   unsub_rate: number | null;
   data: Record<string, unknown> | null;
+  total_ph_exits?: number | null;
+  returns_lt6mo?: number | null;
+  returns_6to12mo?: number | null;
+  returns_13to24mo?: number | null;
+  returns_2yr?: number | null;
 }
+
+/** HUD destination codes → label, for the returns destination breakdown. */
+const DEST: Record<string, string> = {
+  '410': 'Rental, no subsidy', '411': 'Owned, no subsidy',
+  '421': 'Owned, with subsidy', '422': 'Staying w/ family (perm)',
+  '423': 'Staying w/ friends (perm)', '426': 'HOPWA PH', '435': 'Rental, with subsidy',
+};
 
 /** Linear-interpolated percentile — same formula as _percentile() in
  *  apr_monthly_report.py, so ranks match the static dashboard exactly. */
@@ -42,6 +67,12 @@ function percentile(sorted: number[], p: number): number | null {
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' ? v : null);
+const pctOrDash = (v: number | null): string => (v == null ? '—' : `${v.toFixed(1)}%`);
+/** 20%+ two-year return rate is the flag threshold used on the Returns tab. */
+const ret2Flagged = (h: HistRow | null): boolean => {
+  const r = rate(h?.returns_2yr, h?.total_ph_exits);
+  return r != null && r >= 20;
+};
 
 interface PeerMetric {
   key: string;
@@ -51,6 +82,8 @@ interface PeerMetric {
   higherBetter: boolean;
   /** Lives inside the `data` jsonb rather than as its own column. */
   fromData?: boolean;
+  /** A returns COUNT that must be divided by total_ph_exits to become a rate. */
+  derived?: boolean;
 }
 
 const METRICS: PeerMetric[] = [
@@ -58,6 +91,15 @@ const METRICS: PeerMetric[] = [
   { key: 'avg_los', label: 'Avg LOS', unit: 'd', higherBetter: false },
   { key: 'unsub_rate', label: 'Unsub Rate', unit: '%', higherBetter: true },
   { key: 'EarnedIncomeImprovementRate', label: 'Income Impr.', unit: '%', higherBetter: true, fromData: true },
+];
+
+/** Returns benchmarking. Every metric is a RETURN rate, so lower is better
+ *  throughout — the opposite of the snapshot panel. */
+const RET_METRICS: PeerMetric[] = [
+  { key: 'returns_lt6mo', label: 'Returns <6 mo', unit: '%', higherBetter: false, derived: true },
+  { key: 'returns_6to12mo', label: 'Returns 6–12 mo', unit: '%', higherBetter: false, derived: true },
+  { key: 'returns_13to24mo', label: 'Returns 13–24 mo', unit: '%', higherBetter: false, derived: true },
+  { key: 'returns_2yr', label: '2-year return rate', unit: '%', higherBetter: false, derived: true },
 ];
 
 const LOS_BANDS = [
@@ -69,31 +111,33 @@ const LOS_BANDS = [
 ];
 
 export default function ProjectPanel({
-  projectId, granularity, period, household, subpopulation, onClose,
+  projectId, granularity, period, household, subpopulation, onClose, mode = 'snapshot',
 }: {
   projectId: number; granularity: string; period: string;
-  household: string; subpopulation: string; onClose: () => void;
+  household: string; subpopulation: string; onClose: () => void; mode?: PanelMode;
 }) {
   const [proj, setProj] = useState<ProjRec | null>(null);
   const [history, setHistory] = useState<HistRow[] | null>(null);
   const [peers, setPeers] = useState<PeerRow[]>([]);
+  const [dest, setDest] = useState<Record<string, { exits: number; returns: number }> | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const isRet = mode === 'returns';
 
   useEffect(() => {
     let live = true;
-    setProj(null); setHistory(null); setErr(null);
+    setProj(null); setHistory(null); setErr(null); setDest(null);
     const qs = new URLSearchParams({
-      project_id: String(projectId), granularity, period, household, subpopulation,
+      project_id: String(projectId), granularity, period, household, subpopulation, mode,
     });
     fetch(`/api/project?${qs}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((j) => {
         if (!live) return;
-        setProj(j.project); setHistory(j.history); setPeers(j.peers ?? []);
+        setProj(j.project); setHistory(j.history); setPeers(j.peers ?? []); setDest(j.dest ?? null);
       })
       .catch(() => { if (live) { setErr('Could not load this project.'); setHistory([]); } });
     return () => { live = false; };
-  }, [projectId, granularity, period, household, subpopulation]);
+  }, [projectId, granularity, period, household, subpopulation, mode]);
 
   const latest = useMemo(
     () => history?.find((h) => h.period === period) ?? history?.[history.length - 1] ?? null,
@@ -109,9 +153,13 @@ export default function ProjectPanel({
    */
   const trend = useMemo(() => {
     if (!history) return [];
-    const first = history.findIndex((h) => h.ph_exit_rate != null);
-    return first < 0 ? [] : history.slice(first).filter((h) => h.ph_exit_rate != null);
-  }, [history]);
+    const val = (h: HistRow) => (isRet ? rate(h.returns_2yr, h.total_ph_exits) : h.ph_exit_rate);
+    const first = history.findIndex((h) => val(h) != null);
+    if (first < 0) return [];
+    return history.slice(first)
+      .filter((h) => val(h) != null)
+      .map((h) => ({ ...h, _y: val(h)! }));
+  }, [history, isRet]);
 
   const losTotal = useMemo(
     () => LOS_BANDS.reduce((s, b) => s + (num(latest?.data?.[b.key]) ?? 0), 0),
@@ -141,26 +189,78 @@ export default function ProjectPanel({
               {proj.operating_start && (
                 <> · {proj.operating_start.slice(0, 7)} – {proj.operating_end ? proj.operating_end.slice(0, 7) : 'ongoing'}</>
               )}
+              {isRet && <> · Returns detail</>}
             </div>
 
             {/* KPI row */}
             <div className="hc-tiles" style={{ marginTop: 14 }}>
-              <div className="hc-t">
-                <div className="k">Clients ({periodLabel(period)})</div>
-                <div className="v">{fmtInt(latest?.clients_served ?? 0)}</div>
-              </div>
-              <div className="hc-t">
-                <div className="k">PH exit rate</div>
-                <div className="v">{latest?.ph_exit_rate != null ? `${latest.ph_exit_rate}%` : '—'}</div>
-              </div>
-              <div className="hc-t">
-                <div className="k">Avg LOS</div>
-                <div className="v">{latest?.avg_los != null ? `${latest.avg_los}d` : '—'}</div>
-              </div>
+              {isRet ? (
+                <>
+                  <div className="hc-t">
+                    <div className="k">PH exits (2yr window)</div>
+                    <div className="v">{fmtInt(latest?.total_ph_exits ?? 0)}</div>
+                  </div>
+                  <div className="hc-t">
+                    <div className="k">Returns &lt;6 mo</div>
+                    <div className="v">{pctOrDash(rate(latest?.returns_lt6mo, latest?.total_ph_exits))}</div>
+                  </div>
+                  <div className="hc-t">
+                    <div className="k">2-year return rate</div>
+                    {/* 20%+ is the flag threshold used on the Returns tab */}
+                    <div className="v" style={ret2Flagged(latest) ? { color: 'var(--danger)' } : undefined}>
+                      {pctOrDash(rate(latest?.returns_2yr, latest?.total_ph_exits))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="hc-t">
+                    <div className="k">Clients ({periodLabel(period)})</div>
+                    <div className="v">{fmtInt(latest?.clients_served ?? 0)}</div>
+                  </div>
+                  <div className="hc-t">
+                    <div className="k">PH exit rate</div>
+                    <div className="v">{latest?.ph_exit_rate != null ? `${latest.ph_exit_rate}%` : '—'}</div>
+                  </div>
+                  <div className="hc-t">
+                    <div className="k">Avg LOS</div>
+                    <div className="v">{latest?.avg_los != null ? `${latest.avg_los}d` : '—'}</div>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* Length-of-stay distribution */}
-            {losTotal > 0 && (
+            {/* Destination breakdown — returns mode only */}
+            {isRet && dest && Object.keys(dest).length > 0 && (
+              <>
+                <div className="hc-sub">Returns by exit destination — {periodLabel(period)}</div>
+                {Object.entries(dest)
+                  .sort((a, b) => (b[1].exits ?? 0) - (a[1].exits ?? 0))
+                  .map(([code, d]) => {
+                    const r = rate(d.returns, d.exits);
+                    return (
+                      <div className="hc-row" key={code}>
+                        <span className="hc-pill">{code}</span>
+                        <div className="hc-bwrap">
+                          <div className="hc-blab">
+                            <span>{DEST[code] ?? `Destination ${code}`}</span>
+                            <b>{d.returns}/{d.exits} ({r == null ? '—' : `${r.toFixed(1)}%`})</b>
+                          </div>
+                          <div className="hc-bar">
+                            <i style={{
+                              width: `${Math.min(100, r ?? 0)}%`,
+                              background: (r ?? 0) >= 20 ? 'var(--danger)' : 'var(--warn)',
+                            }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </>
+            )}
+
+            {/* Length-of-stay distribution — snapshot only */}
+            {!isRet && losTotal > 0 && (
               <>
                 <div className="hc-sub">Length of stay — {periodLabel(period)}</div>
                 <div className="pp-losbar">
@@ -192,11 +292,16 @@ export default function ProjectPanel({
             )}
 
             {/* Peer benchmarking */}
-            <div className="hc-sub">Peer benchmarking — same project type</div>
-            <PeerBench proj={proj} latest={latest} peers={peers} period={period} />
+            <div className="hc-sub">
+              Peer benchmarking — {isRet ? 'return rates, same project type' : 'same project type'}
+            </div>
+            <PeerBench proj={proj} latest={latest} peers={peers} period={period}
+              metrics={isRet ? RET_METRICS : METRICS} />
 
             {/* Trend */}
-            <div className="hc-sub">PH exit rate — historical trend</div>
+            <div className="hc-sub">
+              {isRet ? '2-year return rate' : 'PH exit rate'} — historical trend
+            </div>
             {trend.length < 2 ? (
               <div className="hc-none">Not enough history to chart.</div>
             ) : (
@@ -204,30 +309,63 @@ export default function ProjectPanel({
             )}
 
             {/* History table */}
-            <div className="hc-sub">Performance history ({history?.length ?? 0} periods)</div>
+            <div className="hc-sub">
+              {isRet ? 'Returns history' : 'Performance history'} ({history?.length ?? 0} periods)
+            </div>
             <div className="scroll pp-hist">
               <table className="bnl-table">
                 <thead>
-                  <tr>
-                    <th>Period</th><th className="num">Clients</th><th className="num">Leavers</th>
-                    <th className="num">→ PH</th><th className="num">PH rate</th>
-                    <th className="num">Unsub rate</th><th className="num">Avg LOS</th>
-                  </tr>
+                  {isRet ? (
+                    <tr>
+                      <th>Period</th><th className="num">PH exits</th>
+                      <th className="num">&lt;6 mo</th><th className="num">6–12 mo</th>
+                      <th className="num">13–24 mo</th><th className="num">2yr returns</th>
+                      <th className="num">2yr rate</th>
+                    </tr>
+                  ) : (
+                    <tr>
+                      <th>Period</th><th className="num">Clients</th><th className="num">Leavers</th>
+                      <th className="num">→ PH</th><th className="num">PH rate</th>
+                      <th className="num">Unsub rate</th><th className="num">Avg LOS</th>
+                    </tr>
+                  )}
                 </thead>
                 <tbody>
-                  {[...(history ?? [])].reverse().map((h) => (
-                    <tr key={h.period} className={h.period === period ? 'pp-cur' : undefined}>
+                  {[...(history ?? [])].reverse().map((h) => {
+                    const cur = h.period === period ? 'pp-cur' : undefined;
+                    const label = (
                       <td style={{ whiteSpace: 'nowrap' }}>
                         {periodLabel(h.period)}{h.is_partial ? <span className="bnl-sub"> (partial)</span> : null}
                       </td>
-                      <td className="num">{fmtInt(h.clients_served ?? 0)}</td>
-                      <td className="num">{fmtInt(h.leavers ?? 0)}</td>
-                      <td className="num">{fmtInt(h.exits_ph ?? 0)}</td>
-                      <td className="num">{h.ph_exit_rate != null ? `${h.ph_exit_rate}%` : '—'}</td>
-                      <td className="num">{h.unsub_rate != null ? `${h.unsub_rate}%` : '—'}</td>
-                      <td className="num">{h.avg_los != null ? `${h.avg_los}d` : '—'}</td>
-                    </tr>
-                  ))}
+                    );
+                    if (isRet) {
+                      const r2 = rate(h.returns_2yr, h.total_ph_exits);
+                      return (
+                        <tr key={h.period} className={cur}>
+                          {label}
+                          <td className="num">{fmtInt(h.total_ph_exits ?? 0)}</td>
+                          <td className="num">{fmtInt(h.returns_lt6mo ?? 0)}</td>
+                          <td className="num">{fmtInt(h.returns_6to12mo ?? 0)}</td>
+                          <td className="num">{fmtInt(h.returns_13to24mo ?? 0)}</td>
+                          <td className="num">{fmtInt(h.returns_2yr ?? 0)}</td>
+                          <td className="num" style={(r2 ?? 0) >= 20 ? { color: 'var(--danger)', fontWeight: 700 } : undefined}>
+                            {pctOrDash(r2)}
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return (
+                      <tr key={h.period} className={cur}>
+                        {label}
+                        <td className="num">{fmtInt(h.clients_served ?? 0)}</td>
+                        <td className="num">{fmtInt(h.leavers ?? 0)}</td>
+                        <td className="num">{fmtInt(h.exits_ph ?? 0)}</td>
+                        <td className="num">{h.ph_exit_rate != null ? `${h.ph_exit_rate}%` : '—'}</td>
+                        <td className="num">{h.unsub_rate != null ? `${h.unsub_rate}%` : '—'}</td>
+                        <td className="num">{h.avg_los != null ? `${h.avg_los}d` : '—'}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -240,24 +378,31 @@ export default function ProjectPanel({
 
 /* ── peer benchmarking rows ──────────────────────────────────────────────── */
 function PeerBench({
-  proj, latest, peers, period,
-}: { proj: ProjRec; latest: HistRow | null; peers: PeerRow[]; period: string }) {
+  proj, latest, peers, period, metrics,
+}: {
+  proj: ProjRec; latest: HistRow | null; peers: PeerRow[];
+  period: string; metrics: PeerMetric[];
+}) {
   const others = peers.filter((p) => p.project_id !== proj.project_id);
   if (others.length < 2) {
     return <div className="hc-none">Fewer than 2 peer projects with data — benchmarking not available.</div>;
   }
 
-  const pick = (r: PeerRow | HistRow | null, m: PeerMetric): number | null =>
-    !r ? null
-      : m.fromData ? num(r.data?.[m.key])
-        : num((r as unknown as Record<string, unknown>)[m.key]);
+  const pick = (r: PeerRow | HistRow | null, m: PeerMetric): number | null => {
+    if (!r) return null;
+    const rec = r as unknown as Record<string, unknown>;
+    // Returns metrics are stored as counts — convert to a rate before comparing,
+    // or projects with more exits would look worse purely for being larger.
+    if (m.derived) return rate(num(rec[m.key]), num(rec.total_ph_exits));
+    return m.fromData ? num(r.data?.[m.key]) : num(rec[m.key]);
+  };
 
   return (
     <>
       <div className="bnl-sub" style={{ marginBottom: 8 }}>
         {others.length} peer project{others.length === 1 ? '' : 's'} · {proj.type_name} · {periodLabel(period)}
       </div>
-      {METRICS.map((m) => {
+      {metrics.map((m) => {
         const vals = others.map((p) => pick(p, m)).filter((v): v is number => v != null).sort((a, b) => a - b);
         if (vals.length < 2) return null;
         const mine = pick(latest, m);
@@ -301,7 +446,7 @@ function Trend({ rows, current }: { rows: HistRow[]; current: string }) {
   const W = 1000, H = 210, L = 34, R = 10, T = 10, B = 30;
   const pts = rows.map((r, i) => {
     const x = L + (i * (W - L - R)) / Math.max(rows.length - 1, 1);
-    const y = T + (H - T - B) * (1 - (r.ph_exit_rate ?? 0) / 100);
+    const y = T + (H - T - B) * (1 - ((r as HistRow & { _y?: number })._y ?? r.ph_exit_rate ?? 0) / 100);
     return { x, y, r };
   });
   const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
