@@ -450,6 +450,75 @@ def build_bnl_clients(bnl: dict | None) -> list[dict]:
     return rows
 
 
+# ── Time to housing (Kaplan-Meier). Source: outputs/netlify/analytics.json ───
+# (written by ../generate_analytics.py §3b — see supabase/survival.sql)
+def load_analytics() -> dict | None:
+    p = NETLIFY / "analytics.json"
+    if not p.exists():
+        print(
+            "  analytics.json not found — run generate_analytics.py first; "
+            "skipping survival_metrics",
+            flush=True,
+        )
+        return None
+    print(f"  reading {p.name} ({p.stat().st_size / 1e6:.1f} MB) …", flush=True)
+    with p.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_survival_metrics(an: dict | None) -> list[dict]:
+    """Flatten time_to_housing into one row per project and one per project type.
+
+    Both scopes come from the same generator block over the same 24-month entry
+    cohort, so a project row and its `type_*` baseline can never describe
+    different windows. `window_start`/`window_end` ride along on every row so a
+    stale load is visible rather than silently mixing cohorts.
+    """
+    if not an or not an.get("time_to_housing"):
+        return []
+    tth = an["time_to_housing"]
+    win = tth.get("window", {})
+    ws, we = win.get("start"), win.get("end")
+
+    def base(r: dict) -> dict:
+        return {
+            "event": r["event"],
+            "n": r["n"],
+            "n_housed": r["n_housed"],
+            # None = the curve never reached that quartile inside the window.
+            # A real answer ("most were still waiting"), never coerced to 0 —
+            # 0 is also a real and different answer for PH projects that record
+            # the move-in on the entry date.
+            "median_days": r.get("median"),
+            "q1_days": r.get("q1"),
+            "q3_days": r.get("q3"),
+            "rate_90": r.get("rate_90"),
+            "rate_180": r.get("rate_180"),
+            "rate_365": r.get("rate_365"),
+            "curve": r.get("curve", []),
+            "window_start": ws,
+            "window_end": we,
+        }
+
+    rows: list[dict] = []
+    for pt_str, r in (tth.get("types") or {}).items():
+        rows.append({
+            "scope": "type", "ref_id": int(pt_str),
+            "project_type": int(pt_str), "label": r.get("label"),
+            **base(r),
+        })
+    for r in tth.get("projects") or []:
+        rows.append({
+            "scope": "project", "ref_id": int(r["project_id"]),
+            "project_type": r.get("project_type"), "label": r.get("project_name"),
+            "type_median": r.get("type_median"),
+            "type_rate_180": r.get("type_rate_180"),
+            "type_n": r.get("type_n"),
+            **base(r),
+        })
+    return _dedupe(rows, ("scope", "ref_id"))
+
+
 def build_bnl_flow(bnl: dict | None) -> list[dict]:
     if not bnl:
         return []
@@ -481,6 +550,16 @@ def build_all(dry: bool):
             bnl = load_bnl()
             bnl_loaded = True
         return bnl
+
+    analytics: dict | None = None
+    analytics_loaded = False
+
+    def get_analytics():
+        nonlocal analytics, analytics_loaded
+        if not analytics_loaded:
+            analytics = load_analytics()
+            analytics_loaded = True
+        return analytics
 
     return {
         "projects": (
@@ -527,6 +606,10 @@ def build_all(dry: bool):
             lambda: build_bnl_flow(get_bnl()),
             "month",
         ),
+        "survival_metrics": (
+            lambda: build_survival_metrics(get_analytics()),
+            "scope,ref_id",
+        ),
     }
 
 
@@ -547,6 +630,7 @@ ORDER = [
     "meta",
     "bnl_clients", # PII (names) — private table, no RLS select policy
     "bnl_flow",
+    "survival_metrics",  # time to housing (KM) — from analytics.json
 ]
 
 

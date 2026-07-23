@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { fmtInt, periodLabel } from '../../../lib/format';
+import PerformanceGrid from './PerformanceGrid';
 
 interface Opt { id: number; name: string; type: string }
 
@@ -162,6 +163,11 @@ export default function DeepDiveView({
             : 'Select at least one project to begin.'}
         </div>
       </div>
+
+      {/* Which PROJECTS need attention, before the worklists say which CLIENTS.
+          Driven by the selection only — the period picker scopes worklist
+          membership, while the grid always shows the trailing 24 months. */}
+      {sel.length > 0 && <PerformanceGrid projectIds={sel} options={options} />}
 
       {err && <div className="panel"><div className="bnl-dq">{err}</div></div>}
       {loading && <div className="panel"><div className="hc-none">Loading worklists…</div></div>}

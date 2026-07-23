@@ -513,3 +513,28 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .bnl-fp-fam{background:var(--primary-light);color:var(--secondary)}
 .bnl-rp{display:inline-block;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:800}
 .bnl-rp-hi{background:var(--danger-light);color:var(--danger)} .bnl-rp-md{background:var(--warn-light);color:var(--warn)} .bnl-rp-lo{background:var(--track);color:var(--muted)}
+
+/* ── Deep Dive Phase 2: time to housing + small-multiples grid ──
+   The grid deliberately uses ONE shared y-scale across every card (set in
+   PerformanceGrid.tsx, not here) — per-card auto-scaling would make a project
+   wobbling 4%–6% look identical to one swinging 10%–60%. */
+.tth-wrap{margin-top:12px;border:1px solid var(--hair);border-radius:10px;padding:10px 12px 4px;background:var(--primary-soft)}
+.tth-chart{width:100%;height:240px;display:block}
+.tth-note{margin-top:10px}
+.tth-win{font-weight:600;letter-spacing:0;text-transform:none;color:var(--muted)}
+
+.pg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:12px;margin-top:12px}
+.pg-card{border:1px solid var(--hair);border-radius:10px;padding:11px 12px 9px;background:var(--card);min-width:0}
+.pg-nm{font-size:12.5px;font-weight:700;color:var(--strong);line-height:1.3;
+  overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.pg-ty{margin-top:4px}
+.pg-val{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;margin-top:7px}
+.pg-val b{font-size:19px;font-weight:800;color:var(--strong);font-variant-numeric:tabular-nums}
+.pg-d{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
+.pg-d.up{color:var(--accent)} .pg-d.down{color:var(--danger)} .pg-d.flat{color:var(--muted)}
+.pg-part{font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--warn);background:var(--warn-light);border-radius:999px;padding:2px 7px}
+.pg-spark{width:100%;height:56px;display:block;margin-top:6px}
+.pg-tth{margin-top:7px;padding-top:7px;border-top:1px solid var(--hair);font-size:11.5px;color:var(--muted)}
+.pg-tth b{color:var(--text)}
+@media print{.pg-grid{grid-template-columns:repeat(3,1fr)}}

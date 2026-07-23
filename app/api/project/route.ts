@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
  *   • the project record (name, type, operating dates)
  *   • its full period history for the current household / subpopulation filter
  *   • peer rows — same project type, same period — for benchmarking
+ *   • time-to-housing (Kaplan-Meier) for the project and its type — snapshot only
  *
  * Peer statistics are computed on the CLIENT from the rows returned here, using
  * the same percentile/rank logic as the static dashboard's renderPeerBenchmark
@@ -100,5 +101,26 @@ export async function GET(req: Request) {
     dest = (data?.data as Record<string, unknown>) ?? null;
   }
 
-  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers, dest });
+  // Time to housing — Kaplan-Meier, computed in generate_analytics.py §3b over a
+  // rolling 24-month entry cohort. Two rows: this project, and the same-type
+  // baseline it is judged against. Both are fetched (rather than deriving the
+  // baseline from the project row's denormalised type_* fields) because the panel
+  // draws the peer CURVE, not just its median.
+  //
+  // Returns mode skips this: that panel answers "do exits stick?", and a
+  // time-to-housing curve there would just be a second unrelated chart.
+  let survival: { project: unknown | null; type: unknown | null } | null = null;
+  if (mode === 'snapshot') {
+    const [selfRes, typeRes] = await Promise.all([
+      sb.from('survival_metrics').select('*')
+        .eq('scope', 'project').eq('ref_id', projectId).maybeSingle(),
+      proj.project_type == null
+        ? Promise.resolve({ data: null })
+        : sb.from('survival_metrics').select('*')
+            .eq('scope', 'type').eq('ref_id', proj.project_type).maybeSingle(),
+    ]);
+    survival = { project: selfRes.data ?? null, type: typeRes.data ?? null };
+  }
+
+  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers, dest, survival });
 }

@@ -58,13 +58,15 @@ Postgres. Data refreshes are a Python upsert — no redeploy needed.
 |---|---|
 | `../refresh.py` | **ETL entry point.** Unzips the newest export → `hud_data/`, runs all four generators. Start here for a data refresh. |
 | `../apr_monthly_report.py` | **Source of truth for all metric logic.** SPM (M1–M7), Returns (M2), DQ, Unit Utilization. Never re-derive — port. |
-| `../generate_analytics.py` · `../generate_pathways.py` | Analytics + Pathways/Predictor pages (still static HTML, not yet in the web app) |
+| `../generate_analytics.py` | Analytics page (static HTML) **plus `outputs/netlify/analytics.json`** — §3b computes per-project time-to-housing (Kaplan-Meier) for the web app. See §11 |
+| `../generate_pathways.py` | Pathways/Predictor page (still static HTML, not yet in the web app) |
 | `../generate_bnl.py` | Builds the By-Name List roster (`outputs/bnl_data.json`). Also merges `hud_data/*referral*.csv` into the referral fields (see §6) |
 | `../bnl_core.py` | Shared BNL logic — status cascade, referral merge, flags |
 | `pipeline/upsert_to_supabase.py` | Loads all tables. `--dry-run`, `--only`, `--verify` |
 | `pipeline/recompute_util.py` | **Authoritative** utilization loader (DV-excluded, see §6) |
 | `pipeline/prune_stale_bnl.py` | Deletes BNL clients that left the roster (upsert never deletes — see §6) |
 | `supabase/schema.sql` | Data tables |
+| `supabase/survival.sql` | `survival_metrics` (time to housing) — run once in the SQL editor |
 | `supabase/auth_setup.sql` | Auth model — profiles, grants, RLS helpers |
 | `lib/queries.ts` | All data access. **Every call uses `supabaseServer()`** |
 | `lib/supabase-server.ts` | Request-scoped session client + `getViewer()` |
@@ -227,3 +229,52 @@ sidebar in both modes**, dark mode default.
 - Prefer extending `lib/queries.ts` over scattering Supabase calls.
 - Don't change metric math without checking `apr_monthly_report.py`.
 - Hashed PersonalIDs are not names, but `bnl_clients` **is** real PII — treat it accordingly.
+
+## 11. Time to housing (Kaplan-Meier) — Deep Dive Phase 2
+
+Where it lives: `../generate_analytics.py` §3b → `outputs/netlify/analytics.json` →
+`pipeline/upsert_to_supabase.py::build_survival_metrics` → `survival_metrics` →
+`/api/project` + `/api/grid` → `components/TimeToHousing.tsx` and
+`app/dashboard/deep-dive/PerformanceGrid.tsx`.
+
+**The event depends on the project type, and that is the point.**
+
+| Types | Event | Why |
+|---|---|---|
+| 3, 9, 10, 13 (PSH / PH-only / PH w-services / RRH) | recorded `MoveInDate` | These clients are enrolled in a housing programme; the question is when they are actually in a unit. HUD's move-in concept. |
+| 0, 2, 4, 8 (ES–Entry Exit / TH / SO / Safe Haven) | exit to a PH destination | There is no move-in in a shelter, so leaving for permanent housing is the housing event. |
+| 1 (ES – Night-by-Night) | **excluded** | Measured first: 3,197 enrolments, 2 recorded PH exits (0.06%), both projects `(INACTIVE)`. NbN records bed-nights, not destinations — the figure would report recordkeeping as an outcome. Same call as dropping the Last-contact column. |
+
+§3's older `survival.curve_ph` uses the exit-to-PH definition for *every* type, which
+reads as "time to leave" for a PSH project. It is left untouched because the static
+analytics page ships it — but it is **not** what `survival_metrics` reports. Don't
+cross-reference the two.
+
+### Things that will bite you
+
+- **Cohort is a rolling 24 months of ENTRIES**, ending at `REPORT_END`. The type
+  baseline is computed in the same block over the same window, so a project median and
+  the peer median it is shown against can never describe different cohorts. Every row
+  carries `window_start`/`window_end` — surface them, don't assume.
+- **`median_days = null` and `median_days = 0` are both real answers.** `null` = the
+  curve never crossed 50% within two years ("more than half were still waiting").
+  `0` = genuinely same-day, which PH projects that create the enrolment on move-in day
+  produce legitimately (10 of 97 projects). `median || 'n/a'` collapses the two and is
+  wrong; use `fmtDays()` in `components/TimeToHousing.tsx`.
+- **Statistics are read off the EXACT step function, the chart line off a grid.**
+  `tth_stats` samples the curve at `CHART_DAYS` for drawing, but medians, quartiles and
+  the 90/180/365-day rates come from `km_steps` unrounded. An earlier version read
+  `rate_180` off the nearest 7-day point (day 175) and was wrong by up to 9pp. 90, 180,
+  365 and 545 are forced into `CHART_DAYS` so the line passes through the days the panel
+  labels.
+- **Minimum cohort is 20 enrolments** (`TTH_MIN_N`); below that no row is emitted and the
+  UI says so rather than drawing a curve out of noise. 97 of 232 projects qualify.
+- Verified 2026-07-23: all 104 rows (7 types + 97 projects) match an independent
+  re-derivation from `hud_data/*.csv` — n, n_housed, median, q1, q3, all three rates,
+  and sampled curve points.
+
+### Small-multiples grid (`/api/grid`)
+Shares **one y-scale across every card** — per-card auto-scaling would make a project
+wobbling 4%–6% look identical to one swinging 10%–60%. Sorted worst-first, direction per
+metric; Clients served has no good direction and is sorted by size with the header saying
+so. Values are the stored `project_metrics` columns — nothing is recalculated client-side.

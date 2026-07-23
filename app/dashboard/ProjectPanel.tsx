@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { periodLabel, fmtInt } from '../../lib/format';
+import { TimeToHousing, type SurvivalRow } from '../../components/TimeToHousing';
 
 /* ── shapes returned by /api/project ─────────────────────────────────────── */
 interface ProjRec {
@@ -132,12 +133,13 @@ export default function ProjectPanel({
   const [history, setHistory] = useState<HistRow[] | null>(null);
   const [peers, setPeers] = useState<PeerRow[]>([]);
   const [dest, setDest] = useState<Record<string, { exits: number; returns: number }> | null>(null);
+  const [surv, setSurv] = useState<{ project: SurvivalRow | null; type: SurvivalRow | null } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const isRet = mode === 'returns';
 
   useEffect(() => {
     let live = true;
-    setProj(null); setHistory(null); setErr(null); setDest(null);
+    setProj(null); setHistory(null); setErr(null); setDest(null); setSurv(null);
     const qs = new URLSearchParams({
       project_id: String(projectId), granularity, period, household, subpopulation, mode,
     });
@@ -146,6 +148,7 @@ export default function ProjectPanel({
       .then((j) => {
         if (!live) return;
         setProj(j.project); setHistory(j.history); setPeers(j.peers ?? []); setDest(j.dest ?? null);
+        setSurv(j.survival ?? null);
       })
       .catch(() => { if (live) { setErr('Could not load this project.'); setHistory([]); } });
     return () => { live = false; };
@@ -300,6 +303,20 @@ export default function ProjectPanel({
                     );
                   })}
                 </div>
+              </>
+            )}
+
+            {/* Time to housing (Kaplan-Meier) — snapshot only. The returns panel
+                answers a different question and does not need a second curve. */}
+            {!isRet && surv && (
+              <>
+                <div className="hc-sub">
+                  Time to housing
+                  {surv.project?.window_end && (
+                    <span className="tth-win"> · 24-month cohort to {surv.project.window_end}</span>
+                  )}
+                </div>
+                <TimeToHousing self={surv.project} peer={surv.type} />
               </>
             )}
 
