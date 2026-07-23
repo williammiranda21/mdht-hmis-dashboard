@@ -368,6 +368,45 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .hc-ep.ph .d::before{background:var(--accent)}
 .hc-ep b{color:var(--strong);font-variant-numeric:tabular-nums;white-space:nowrap}
 .hc-none{text-align:center;font-size:12px;color:var(--muted);padding:10px 0}
+/* ── Project detail panel (Project Performance → click a project name) ── */
+.pp-link{cursor:pointer;border-bottom:1px dotted var(--secondary)}
+.pp-link:hover{color:var(--secondary)}
+.pp-modal{max-width:860px}
+.pp-losbar{display:flex;height:26px;border-radius:7px;overflow:hidden;background:var(--track)}
+.pp-losbar span{display:flex;align-items:center;justify-content:center;font-size:10.5px;
+  font-weight:700;color:#fff;min-width:0;transition:width .2s}
+.pp-loskey{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:11.5px;color:var(--muted)}
+.pp-loskey i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}
+.pp-trend{width:100%;height:210px;display:block}
+.pp-hist{max-height:320px;overflow-y:auto;border:1px solid var(--hair);border-radius:10px}
+.pp-hist thead th{position:sticky;top:0;z-index:1}
+.pp-hist tr.pp-cur{background:var(--primary-soft)}
+.pp-hist tr.pp-cur td{font-weight:700;color:var(--strong)}
+/* peer benchmarking — ported from apr_monthly_report.py so both versions match */
+.peer-row{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.peer-label{color:var(--muted);font-weight:600;white-space:nowrap;font-size:12px;min-width:104px}
+.peer-track{position:relative;flex:1;height:8px;background:var(--track);border-radius:4px}
+.peer-iqr{position:absolute;height:100%;background:var(--primary-soft);border-radius:2px}
+.peer-median{position:absolute;width:2px;height:150%;top:-25%;background:var(--primary);border-radius:1px}
+.peer-dot{position:absolute;width:10px;height:10px;border-radius:50%;top:50%;
+  transform:translate(-50%,-50%);border:2px solid var(--card);background:var(--muted)}
+.peer-dot.above-median{background:var(--accent)}
+.peer-dot.below-median{background:var(--danger)}
+.peer-val{font-weight:700;color:var(--strong);text-align:right;white-space:nowrap;
+  font-size:12.5px;min-width:74px;font-variant-numeric:tabular-nums}
+.peer-val span{display:block;font-size:10px;font-weight:600;color:var(--muted)}
+
+/* ── Client drill-down modal (Project Performance) ──
+   Reuses .bnl-ov / .bnl-modal for the shell; these style the ID list. */
+.dr-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin:14px 0 8px;font-size:13px;color:var(--text);flex-wrap:wrap}
+.dr-head b{color:var(--strong)}
+.dr-ids{display:flex;flex-wrap:wrap;gap:6px;max-height:340px;overflow-y:auto;
+  border:1px solid var(--hair);border-radius:10px;padding:11px;background:var(--primary-soft)}
+.dr-ids code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
+  background:var(--card);border:1px solid var(--border);border-radius:6px;
+  padding:3px 7px;color:var(--text);white-space:nowrap;user-select:all}
+
 /* ── Loading skeletons (app/dashboard/bnl/loading.tsx) ──
    `.sk` blocks shimmer via a moving gradient. Respects prefers-reduced-motion:
    the shimmer stops but the placeholder shape stays, so layout never jumps. */
