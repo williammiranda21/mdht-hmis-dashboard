@@ -131,7 +131,8 @@ export default function RankingsView({ rows, periods, granularity, period, house
             return (
               <div className="rkrow" key={r.project_id}>
                 <span className="rank">{i + 1}</span>
-                <span className="pnm">
+                {/* .nm is ellipsised at 300px, so carry the full name in a title */}
+                <span className="pnm" title={r.type_name ? `${r.project_name} · ${r.type_name}` : r.project_name ?? ''}>
                   <span className="nm">{r.project_name}</span>
                   <span className="ty">{r.type_name}</span>
                 </span>

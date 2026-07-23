@@ -110,7 +110,10 @@ export default function DeepDiveView({
 
         <div className="dd-opts">
           {shown.map((o) => (
-            <label key={o.id} className={`dd-opt${sel.includes(o.id) ? ' on' : ''}`}>
+            // Names are ellipsised to keep the grid tidy, so the full name lives
+            // in a title on the whole row — hovering anywhere reveals it.
+            <label key={o.id} className={`dd-opt${sel.includes(o.id) ? ' on' : ''}`}
+              title={o.type ? `${o.name} · ${o.type}` : o.name}>
               <input type="checkbox" checked={sel.includes(o.id)} onChange={() => toggle(o.id)} />
               <span className="dd-nm">{o.name}</span>
               {o.type && <span className="ty">{o.type}</span>}
