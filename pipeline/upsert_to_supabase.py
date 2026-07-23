@@ -426,6 +426,7 @@ def build_bnl_clients(bnl: dict | None) -> list[dict]:
             "project": r["project"], "ptype": r["ptype"], "entry": r["entry"],
             "last_contact": r["last_contact"],
             # deep-dive worklist flags (computed in bnl_core)
+            "days_at_project": r.get("days_at_project"),
             "long_stay": r.get("long_stay", False),
             "open_suspect": r.get("open_suspect", False),
             "days_since_contact": r["days_since_contact"], "days_homeless": r["days_homeless"],

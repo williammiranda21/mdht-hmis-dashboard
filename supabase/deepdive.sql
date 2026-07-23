@@ -34,3 +34,14 @@ analyze bnl_clients;
 --        count(*) filter (where open_suspect)           as open_suspect,
 --        count(*)                                       as total
 -- from bnl_clients;
+
+-- ── 2026-07-23 revision: long_stay now measures time AT THE PROJECT ─────────
+-- long_stay previously compared days_homeless (the self-reported 3.917 episode,
+-- which can span decades and many projects) against a system-wide median for
+-- the project TYPE. It surfaced chronically homeless clients regardless of how
+-- long they had been at the project — one enrolled 8 days earlier was listed as
+-- "staying far longer than typical" on a 24-year episode.
+-- It now compares days_at_project against that PROJECT'S OWN median (falling
+-- back to the type median under 10 clients). Re-run the pipeline after this.
+alter table bnl_clients add column if not exists days_at_project int;
+create index if not exists bnl_daysproj_idx on bnl_clients (project_id, days_at_project desc);

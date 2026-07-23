@@ -29,7 +29,7 @@ export const dynamic = 'force-dynamic';
 
 const ATTR_COLS =
   'pid, name, age, status, detail, ptype, entry, last_contact, days_since_contact, ' +
-  'days_homeless, sys_days3, episodes3, chronic, veteran, family, assessed, ' +
+  'days_homeless, days_at_project, sys_days3, episodes3, chronic, veteran, family, assessed, ' +
   'dq, dq_n, long_stay, open_suspect';
 
 const PAGE = 1000;   // Supabase caps a response at 1000 rows
@@ -105,26 +105,31 @@ export async function GET(req: Request) {
   if (!served) {
     return NextResponse.json({
       served: 0, matched: 0, unmatched: 0,
-      lists: { long_stay: [], awaiting_movein: [], open_suspect: [], data_quality: [] },
+      lists: { long_stay: [], awaiting_movein: [], open_suspect: [], data_quality: [], chronic: [] },
     });
   }
 
   // ── attributes: fetch each bounded flagged set, then intersect ────────────
-  let flagged: { long_stay: any[]; awaiting_movein: any[]; open_suspect: any[]; data_quality: any[] };
+  let flagged: { long_stay: any[]; awaiting_movein: any[]; open_suspect: any[]; data_quality: any[]; chronic: any[] };
   try {
-    const [longStay, awaiting, openSuspect, dq] = await Promise.all([
+    const [longStay, awaiting, openSuspect, dq, chronic] = await Promise.all([
       fetchFlagged(sb, (q) => q.eq('long_stay', true)),
       // `detail` is written by bnl_core's status cascade — this prefix is stable.
       fetchFlagged(sb, (q) => q.like('detail', 'Matched to%')),
       fetchFlagged(sb, (q) => q.eq('open_suspect', true)),
       fetchFlagged(sb, (q) => q.gt('dq_n', 0)),
+      // HUD chronic-homelessness flag. Kept as its own list because the old
+      // long_stay definition used to surface these people by accident, and the
+      // signal is genuinely useful for prioritisation — just not the same
+      // question as 'is this person stuck in my program'.
+      fetchFlagged(sb, (q) => q.eq('chronic', true)),
     ]);
-    flagged = { long_stay: longStay, awaiting_movein: awaiting, open_suspect: openSuspect, data_quality: dq };
+    flagged = { long_stay: longStay, awaiting_movein: awaiting, open_suspect: openSuspect, data_quality: dq, chronic };
   } catch (e) {
     // A user without BNL access trips RLS here — return counts, no names.
     return NextResponse.json({
       served, matched: 0, unmatched: served, restricted: true,
-      lists: { long_stay: [], awaiting_movein: [], open_suspect: [], data_quality: [] },
+      lists: { long_stay: [], awaiting_movein: [], open_suspect: [], data_quality: [], chronic: [] },
     });
   }
 
@@ -149,12 +154,15 @@ export async function GET(req: Request) {
     matched: matchedPids.size,
     unmatched: served - matchedPids.size,
     lists: {
-      long_stay: take(flagged.long_stay, desc('days_homeless')),
+      // longest at THIS project first
+      long_stay: take(flagged.long_stay, desc('days_at_project')),
       // oldest match first — these are the longest-stalled lease-ups
       awaiting_movein: take(flagged.awaiting_movein,
         (a, b) => String(a.entry ?? '').localeCompare(String(b.entry ?? ''))),
       open_suspect: take(flagged.open_suspect, desc('days_since_contact')),
       data_quality: take(flagged.data_quality, desc('dq_n')),
+      // longest-homeless first — this one IS about the 3.917 episode
+      chronic: take(flagged.chronic, desc('days_homeless')),
     },
   });
 }

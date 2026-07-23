@@ -9,12 +9,12 @@ interface Client {
   pid: string; name: string; age: number | null; status: string; detail: string;
   project_id: number | null; project: string | null; ptype: string | null;
   entry: string | null; last_contact: string; days_since_contact: number | null;
-  days_homeless: number; sys_days3: number; episodes3: number;
+  days_homeless: number; days_at_project: number | null; sys_days3: number; episodes3: number;
   chronic: boolean; veteran: boolean; family: boolean; assessed: string | null;
   dq: string[]; dq_n: number; long_stay: boolean; open_suspect: boolean;
 }
 
-type ListKey = 'long_stay' | 'open_suspect' | 'awaiting_movein' | 'data_quality';
+type ListKey = 'long_stay' | 'open_suspect' | 'awaiting_movein' | 'data_quality' | 'chronic';
 
 /** Each worklist states WHY a client is on it and what to do — a list of names
  *  with no rationale just gets ignored. */
@@ -22,8 +22,8 @@ const LISTS: { key: ListKey; title: string; why: string; empty: string }[] = [
   {
     key: 'long_stay',
     title: 'Staying far longer than typical',
-    why: 'Currently homeless and past 1.5× the median stay for their project type. Median, not mean — a few multi-year clients would otherwise hide everyone else.',
-    empty: 'No clients are past 1.5× the typical stay for their project type.',
+    why: 'Time AT THIS PROJECT is more than 1.5× the project’s own median stay (its project type’s median where a project has fewer than 10 clients). Median, not mean — a few very long stays would otherwise drag the bar up and hide everyone else. This is length of stay here, not how long the client has been homeless.',
+    empty: 'Nobody is staying much longer than usual at these projects.',
   },
   {
     key: 'awaiting_movein',
@@ -36,6 +36,12 @@ const LISTS: { key: ListKey; title: string; why: string; empty: string }[] = [
     title: 'Enrollment may have been left open',
     why: 'The client exited to permanent housing after this enrollment opened, or later enrollments have since opened and closed around it. Verify whether they are still active here.',
     empty: 'No enrollments look left open.',
+  },
+  {
+    key: 'chronic',
+    title: 'Chronically homeless',
+    why: 'Meets the HUD chronic-homelessness definition. Longest self-reported episode first. This is about the client’s history across the whole system — not their stay at your project — and it drives prioritisation for permanent housing.',
+    empty: 'No chronically homeless clients.',
   },
   {
     key: 'data_quality',
@@ -216,7 +222,7 @@ export default function DeepDiveView({
                           <thead>
                             <tr>
                               <th>Client</th><th className="num">Age</th><th>Project</th>
-                              <th className="num">Days homeless</th>
+                              <th className="num">Days here</th>
                               <th className="num">Last contact</th>
                               <th>{l.key === 'data_quality' ? 'Issues' : 'Status'}</th>
                             </tr>
@@ -233,7 +239,12 @@ export default function DeepDiveView({
                                 <td>
                                   {c.ptype && <span className="ty">{c.ptype}</span>} {c.project ?? '—'}
                                 </td>
-                                <td className="num">{days(c.days_homeless)}</td>
+                                <td className="num">
+                                  {days(c.days_at_project)}
+                                  <div className="bnl-sub" title="Self-reported homeless episode (HUD 3.917) — spans all projects">
+                                    {days(c.days_homeless)} homeless
+                                  </div>
+                                </td>
                                 <td className="num">
                                   {c.last_contact}
                                   <div className="bnl-sub">{days(c.days_since_contact)} ago</div>
