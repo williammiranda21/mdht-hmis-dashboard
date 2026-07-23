@@ -46,6 +46,30 @@ export async function getProjectsMap(): Promise<Record<number, ProjectInfo>> {
   return out;
 }
 
+/** System inflow + capacity forecast (Deep Dive Phase 3). Two keyed rows from
+ *  `system_forecast`; the payloads are computed in generate_analytics.py and are
+ *  system-level (not agency-scoped). Returns nulls when the table is unpopulated
+ *  so the page can show an empty state rather than throwing. */
+export interface SystemForecast {
+  generated: string | null;
+  inflow: Record<string, unknown> | null;
+  capacity: unknown[] | null;
+}
+export async function getSystemForecast(): Promise<SystemForecast> {
+  const { data, error } = await supabaseServer()
+    .from('system_forecast')
+    .select('key, value, generated');
+  if (error) throw error;
+  const byKey = new Map((data ?? []).map((r: any) => [r.key as string, r]));
+  const inflowRow = byKey.get('inflow');
+  const capacityRow = byKey.get('capacity');
+  return {
+    generated: (inflowRow?.generated ?? capacityRow?.generated ?? null) as string | null,
+    inflow: (inflowRow?.value as Record<string, unknown> | undefined) ?? null,
+    capacity: (capacityRow?.value as unknown[] | undefined) ?? null,
+  };
+}
+
 /** Periods that actually have Data Quality data, newest first (from meta.dq_periods). */
 export async function getDqPeriods(granularity: Granularity): Promise<string[]> {
   const { data, error } = await supabaseServer()

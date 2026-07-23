@@ -278,3 +278,53 @@ Shares **one y-scale across every card** — per-card auto-scaling would make a 
 wobbling 4%–6% look identical to one swinging 10%–60%. Sorted worst-first, direction per
 metric; Clients served has no good direction and is sorted by size with the header saying
 so. Values are the stored `project_metrics` columns — nothing is recalculated client-side.
+
+## 12. Deep Dive Phase 3 — project pathways · forecast · BNL affordance
+
+Three tracks, all shipped 2026-07-23. Data verified against raw CSVs / source payloads.
+
+### Project pathways (`project_pathways`) — agency-facing, on Deep Dive
+`generate_pathways.py` §5 → `outputs/netlify/pathways.json` →
+`build_project_pathways` → `project_pathways` → `/api/pathways` →
+`app/dashboard/deep-dive/ProjectPathways.tsx`.
+
+- **Cohort = clients a project served in the trailing 24 months, traced across their
+  WHOLE system pathway** (user decision 2026-07-23). The cohort is "served here recently";
+  the Sankey is built from those clients' *entire* enrollment history (reuses
+  `build_sankey_data` unchanged), so an ES sees where its people went *after* it, not just
+  its own exit door.
+- **One project at a time** — the picker chooses from the Deep Dive selection. Pooling
+  projects would double-count anyone two of them served; the payload is keyed per project.
+- **`PP_MIN_CLIENTS = 30`** → 83 of 232 projects qualify. Others return `{pathways:null}` and
+  the UI shows an explanatory empty state — not an error.
+- The diagram is a **bipartite one-step transition Sankey** ("came from" | "went to"): each
+  state appears once as a source (left) and once as a target (right). A conventional
+  single-node-per-state Sankey tangles because clients cycle (SO↔ES constantly); bipartite
+  keeps every flow legible. Node height and ribbon width share one scale.
+- Per-project `bottleneck` is **deliberately leaner** than the system block in
+  `generate_pathways.py` §2 — no 8-quarter trend, no opportunity projections (noise at project
+  scale). The system block is untouched; this is a separate `project_bottleneck()`.
+- Verified: all 83 projects' cohort sizes + per-state n / n_ph match a raw-CSV re-derivation.
+
+### System forecast (`system_forecast`) — leadership-facing, its own Forecast tab
+`generate_analytics.py` (`inflow`, `capacity`) → `build_system_forecast` (from
+`analytics.json`, the SAME file survival reads) → two keyed rows → `getSystemForecast` →
+`app/dashboard/forecast/`. New TabNav entry (`trend` icon), between System and Data Quality.
+- **Both inflow forecasts are shown** (weighted-average + linear-trend) on purpose — they
+  disagree, and the gap IS the uncertainty. Don't "clean this up" to one line.
+- Capacity table reads occupancy 30/60/90 days out; RRH etc. can exceed 100% (lease-up
+  target, not fixed beds) — same convention as Unit Utilization.
+
+### BNL magnifying glass
+`.bnl-drillname::after` puts a 🔍 next to each client name in the By-Name List roster (rows
+open the detail drawer). Mirrors the `.drill` affordance but does NOT recolor the name (the
+unsheltered-red inline style must survive). **Deliberately NOT added to the Deep Dive
+worklists** — those rows don't open anything, so a 🔍 there would be a false affordance.
+
+### Still excluded
+The **Housing Predictor** (`predictor_ml`) remains unbuilt — needs explicit sign-off on framing
+(see the Phase 3 memory). Do not surface a per-client success score without it.
+
+### Refresh runbook
+`refresh.py` runs `generate_pathways.py` + `generate_analytics.py` (writes both JSONs). The
+full upsert ORDER now covers `survival_metrics`, `project_pathways`, `system_forecast`.

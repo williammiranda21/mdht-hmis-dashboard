@@ -8,6 +8,7 @@ const TABS = [
   { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy' },
   { href: '/dashboard/returns', label: 'Returns', icon: 'return' },
   { href: '/dashboard/system', label: 'System Performance', icon: 'globe' },
+  { href: '/dashboard/forecast', label: 'Forecast', icon: 'trend' },
   { href: '/dashboard/dq', label: 'Data Quality', icon: 'search' },
   { href: '/dashboard/utilization', label: 'Unit Utilization', icon: 'bed' },
   { href: '/dashboard/bnl', label: 'By-Name List', icon: 'lock' },
@@ -39,6 +40,11 @@ const ICONS: Record<string, JSX.Element> = {
   search: (
     <>
       <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" />
+    </>
+  ),
+  trend: (
+    <>
+      <path d="M3 17l6-6 4 4 8-8" /><path d="M21 7h-5M21 7v5" />
     </>
   ),
   bed: (

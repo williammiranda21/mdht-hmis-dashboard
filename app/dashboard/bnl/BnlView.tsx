@@ -284,8 +284,8 @@ export default function BnlView({
               {rows.map((r) => {
                 const col = r.days_homeless >= 365 ? 'var(--danger)' : r.days_homeless >= 180 ? 'var(--warn)' : 'var(--secondary)';
                 return (
-                  <tr key={r.pid} onClick={() => openDrill(r)}>
-                    <td><div className="bnl-nm" style={/unsheltered/.test(r.detail ?? '') ? { color: 'var(--danger)' } : undefined}>{r.name}</div><div className="bnl-sub">{r.detail}</div></td>
+                  <tr key={r.pid} className="bnl-row" onClick={() => openDrill(r)}>
+                    <td><div className="bnl-nm bnl-drillname" style={/unsheltered/.test(r.detail ?? '') ? { color: 'var(--danger)' } : undefined}>{r.name}</div><div className="bnl-sub">{r.detail}</div></td>
                     <td className="num">{r.age ?? '—'}</td>
                     <td><span className={`bnl-chip bnl-${r.status}`}>{r.status === 'active' ? 'Active' : r.status === 'housed' ? 'Housed' : 'Inactive'}</span></td>
                     <td><Flags r={r} /></td>

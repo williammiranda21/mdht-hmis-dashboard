@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fmtInt, periodLabel } from '../../../lib/format';
 import PerformanceGrid from './PerformanceGrid';
+import ProjectPathways from './ProjectPathways';
 
 interface Opt { id: number; name: string; type: string }
 
@@ -168,6 +169,10 @@ export default function DeepDiveView({
           Driven by the selection only — the period picker scopes worklist
           membership, while the grid always shows the trailing 24 months. */}
       {sel.length > 0 && <PerformanceGrid projectIds={sel} options={options} />}
+
+      {/* Pathways — one project at a time (picker inside), so it sits below the
+          multi-project grid. Only projects meeting the cohort minimum return data. */}
+      {sel.length > 0 && <ProjectPathways projectIds={sel} options={options} />}
 
       {err && <div className="panel"><div className="bnl-dq">{err}</div></div>}
       {loading && <div className="panel"><div className="hc-none">Loading worklists…</div></div>}

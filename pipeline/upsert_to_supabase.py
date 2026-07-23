@@ -519,6 +519,71 @@ def build_survival_metrics(an: dict | None) -> list[dict]:
     return _dedupe(rows, ("scope", "ref_id"))
 
 
+# ── Project pathways. Source: outputs/netlify/pathways.json ──────────────────
+# (written by ../generate_pathways.py §5 — see supabase/phase3.sql)
+def load_pathways() -> dict | None:
+    p = NETLIFY / "pathways.json"
+    if not p.exists():
+        print(
+            "  pathways.json not found — run generate_pathways.py first; "
+            "skipping project_pathways",
+            flush=True,
+        )
+        return None
+    print(f"  reading {p.name} ({p.stat().st_size / 1e6:.1f} MB) …", flush=True)
+    with p.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_project_pathways(pp: dict | None) -> list[dict]:
+    """One row per project — the whole pathway payload lives in `data` jsonb.
+
+    window_start/window_end are lifted out of the shared window so a stale load
+    is visible per row, matching survival_metrics.
+    """
+    if not pp or not pp.get("projects"):
+        return []
+    win = pp.get("window", {})
+    ws, we = win.get("start"), win.get("end")
+    rows = []
+    for proj in pp["projects"].values():
+        rows.append({
+            "project_id": int(proj["project_id"]),
+            "project_name": proj.get("project_name"),
+            "project_type": proj.get("project_type"),
+            "n_clients": int(proj["n_clients"]),
+            "window_start": ws,
+            "window_end": we,
+            # The Sankey/bottleneck payload, minus the identity fields already
+            # promoted to columns above.
+            "data": {
+                "nodes": proj.get("nodes", []),
+                "links": proj.get("links", []),
+                "top_paths": proj.get("top_paths", {}),
+                "source_rates": proj.get("source_rates", {}),
+                "bottleneck": proj.get("bottleneck", {}),
+            },
+        })
+    return _dedupe(rows, ("project_id",))
+
+
+def build_system_forecast(an: dict | None) -> list[dict]:
+    """System inflow + capacity forecast → two keyed rows.
+
+    Source is analytics.json (generate_analytics.py), the SAME file survival
+    reads — both are already computed there, this just lifts them out whole.
+    """
+    if not an:
+        return []
+    gen = an.get("generated")
+    rows = []
+    if an.get("inflow"):
+        rows.append({"key": "inflow", "value": an["inflow"], "generated": gen})
+    if an.get("capacity"):
+        rows.append({"key": "capacity", "value": an["capacity"], "generated": gen})
+    return rows
+
+
 def build_bnl_flow(bnl: dict | None) -> list[dict]:
     if not bnl:
         return []
@@ -560,6 +625,16 @@ def build_all(dry: bool):
             analytics = load_analytics()
             analytics_loaded = True
         return analytics
+
+    pathways: dict | None = None
+    pathways_loaded = False
+
+    def get_pathways():
+        nonlocal pathways, pathways_loaded
+        if not pathways_loaded:
+            pathways = load_pathways()
+            pathways_loaded = True
+        return pathways
 
     return {
         "projects": (
@@ -610,6 +685,14 @@ def build_all(dry: bool):
             lambda: build_survival_metrics(get_analytics()),
             "scope,ref_id",
         ),
+        "project_pathways": (
+            lambda: build_project_pathways(get_pathways()),
+            "project_id",
+        ),
+        "system_forecast": (
+            lambda: build_system_forecast(get_analytics()),
+            "key",
+        ),
     }
 
 
@@ -631,6 +714,8 @@ ORDER = [
     "bnl_clients", # PII (names) — private table, no RLS select policy
     "bnl_flow",
     "survival_metrics",  # time to housing (KM) — from analytics.json
+    "project_pathways",  # per-project Sankey + bottleneck — from pathways.json
+    "system_forecast",   # inflow + capacity forecast — from analytics.json
 ]
 
 
