@@ -96,10 +96,14 @@ export async function GET(req: Request) {
   // project, which is not necessarily the one that served them in this period —
   // showing that would quietly contradict the selection the user just made.
   const { data: projRows } = await sb
-    .from('projects').select('project_id, name').in('project_id', ids);
-  const projName = new Map<number, string>(
-    (projRows ?? []).map((p: { project_id: number; name: string | null }) =>
-      [Number(p.project_id), p.name ?? `Project ${p.project_id}`]),
+    .from('projects').select('project_id, name, type_name').in('project_id', ids);
+  // Name AND type must come from the same place. Overriding only the name left
+  // rows reading "SO · Chapman Partnership Emergency Shelter" — the name from
+  // the serving project, the type from whichever enrollment anchors the client's
+  // homeless episode on their BNL row.
+  const projInfo = new Map<number, { name: string; type: string | null }>(
+    (projRows ?? []).map((p: { project_id: number; name: string | null; type_name: string | null }) =>
+      [Number(p.project_id), { name: p.name ?? `Project ${p.project_id}`, type: p.type_name }]),
   );
 
   if (!served) {
@@ -140,8 +144,9 @@ export async function GET(req: Request) {
     return hit
       .map((r) => {
         const pidProj = servedBy.get(r.pid)!;
-        // serving project, not the client's current one
-        return { ...r, project_id: pidProj, project: projName.get(pidProj) ?? null };
+        const info = projInfo.get(pidProj);
+        // serving project, not the client's current one — name and type together
+        return { ...r, project_id: pidProj, project: info?.name ?? null, ptype: info?.type ?? r.ptype };
       })
       .sort(sort)
       .slice(0, LIMIT);

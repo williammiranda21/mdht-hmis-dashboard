@@ -223,7 +223,6 @@ export default function DeepDiveView({
                             <tr>
                               <th>Client</th><th className="num">Age</th><th>Project</th>
                               <th className="num">Days here</th>
-                              <th className="num">Last contact</th>
                               <th>{l.key === 'data_quality' ? 'Issues' : 'Status'}</th>
                             </tr>
                           </thead>
@@ -244,10 +243,6 @@ export default function DeepDiveView({
                                   <div className="bnl-sub" title="Self-reported homeless episode (HUD 3.917) — spans all projects">
                                     {days(c.days_homeless)} homeless
                                   </div>
-                                </td>
-                                <td className="num">
-                                  {c.last_contact}
-                                  <div className="bnl-sub">{days(c.days_since_contact)} ago</div>
                                 </td>
                                 <td>
                                   {l.key === 'data_quality'
@@ -275,10 +270,10 @@ export default function DeepDiveView({
             <p className="bnl-method">
               Worklists are rebuilt each time the pipeline runs, from the same By-Name List
               logic used elsewhere — nothing here is recalculated in the browser.
-              <b> One caveat on “last contact”:</b> it is derived from enrollment entries and
-              exits, CurrentLivingSituation records and CE assessments — it does <i>not</i> yet
-              include service transactions, so a client receiving daily services can still show a
-              stale contact date. Treat the date as “last recorded HMIS event”, not “last seen”.
+              <b> Days here</b> is time at the currently-open enrollment; the smaller figure
+              beneath it is the client’s self-reported homeless episode (HUD 3.917), which spans
+              every project and can be far longer. Membership comes from who each project actually
+              served in the selected period, so clients who have since moved on still appear.
             </p>
           </div>
         </>
