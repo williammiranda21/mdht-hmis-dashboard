@@ -13,6 +13,7 @@ import type { Granularity } from '../../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../../lib/types';
 import { periodLabel, lookbackLabel, fmtInt, DEST_LABELS } from '../../../lib/format';
 import ProjectPanel from '../ProjectPanel';
+import { useClientDrill, DrillModal } from '../../../components/ClientDrill';
 
 type Row = {
   project_id: number; name: string; type_name: string; project_type: number | null;
@@ -36,6 +37,21 @@ export default function ReturnsView({ periods, granularity, period, household, s
   const [panelProject, setPanelProject] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('exits');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
+
+  // Client drill-down — the clients behind each returns count. drill_clients is
+  // monthly-only (and not household/subpop dimensioned), so the affordance shows
+  // on the monthly view at the aggregate; other views render plain numbers.
+  const drill = useClientDrill(period);
+  const canDrill = granularity === 'monthly' && household === 'All' && subpopulation === 'All';
+  const drillCell = (r: Row, metric: string, label: string, count: number) =>
+    canDrill && count > 0 ? (
+      <span className="drill" role="button" tabIndex={0}
+        title="Show the clients behind this number"
+        onClick={() => drill.open({ project: r.name, projectId: r.project_id, metric, label: `${label} — ${r.name}`, expected: count })}
+        onKeyDown={(e) => e.key === 'Enter' && drill.open({ project: r.name, projectId: r.project_id, metric, label: `${label} — ${r.name}`, expected: count })}>
+        {fmtInt(count)}
+      </span>
+    ) : fmtInt(count);
 
   const typeOptions = useMemo(() => {
     const s = new Set<string>();
@@ -173,7 +189,12 @@ export default function ReturnsView({ periods, granularity, period, household, s
 
       <div className="panel">
         <div className="panel-h">
-          <div><h3>Returns to Homelessness — by project</h3><div className="meta">{fmtInt(sorted.length)} projects · {fmtInt(tot.exits)} PH exits · 24-mo lookback: {lookbackLabel(period)}</div></div>
+          <div><h3>Returns to Homelessness — by project</h3><div className="meta">
+            {fmtInt(sorted.length)} projects · {fmtInt(tot.exits)} PH exits · 24-mo lookback: {lookbackLabel(period)}
+            {canDrill
+              ? ' · click a count to list the clients'
+              : ' · switch to the monthly, all-households view to list clients behind a count'}
+          </div></div>
         </div>
         <div className="scroll">
           <table>
@@ -204,14 +225,14 @@ export default function ReturnsView({ periods, granularity, period, household, s
                     </span>
                   </td>
                   <td><span className="ty">{r.type_name}</span></td>
-                  <td className="num"><strong>{fmtInt(r.exits)}</strong></td>
-                  <td className="num">{fmtInt(r.lt6)}</td>
+                  <td className="num"><strong>{drillCell(r, 'returns_exits', 'PH exits', r.exits)}</strong></td>
+                  <td className="num">{drillCell(r, 'returns_lt6', 'Returned within 6 months', r.lt6)}</td>
                   <RateCell band={r.lt6} exits={r.exits} />
-                  <td className="num">{fmtInt(r.r6)}</td>
+                  <td className="num">{drillCell(r, 'returns_6to12', 'Returned 6–12 months', r.r6)}</td>
                   <RateCell band={r.r6} exits={r.exits} />
-                  <td className="num">{fmtInt(r.r13)}</td>
+                  <td className="num">{drillCell(r, 'returns_13to24', 'Returned 13–24 months', r.r13)}</td>
                   <RateCell band={r.r13} exits={r.exits} />
-                  <td className="num"><strong>{fmtInt(r.r2)}</strong></td>
+                  <td className="num"><strong>{drillCell(r, 'returns_2yr', 'Returned within 2 years', r.r2)}</strong></td>
                   <RateCell band={r.r2} exits={r.exits} />
                 </tr>
               ))}
@@ -274,6 +295,9 @@ export default function ReturnsView({ periods, granularity, period, household, s
           onClose={() => setPanelProject(null)}
         />
       )}
+
+      <DrillModal drill={drill.drill} ids={drill.ids} err={drill.err}
+        period={period} onClose={drill.close} />
     </>
   );
 }

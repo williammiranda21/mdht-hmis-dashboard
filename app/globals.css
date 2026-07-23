@@ -559,7 +559,9 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .pp-sankey-wrap{margin-top:6px;border:1px solid var(--hair);border-radius:10px;padding:10px 12px;background:var(--card)}
 .pp-sankey-cols{display:flex;justify-content:space-between;font-size:10px;font-weight:700;letter-spacing:.05em;
   text-transform:uppercase;color:var(--faint);margin-bottom:4px}
-.pp-sankey{width:100%;height:auto;display:block}
+.pp-sankey{width:100%;height:auto;display:block;overflow:visible}
+/* halo so a label stays legible where it crosses a ribbon */
+.pp-sk-label{paint-order:stroke;stroke:var(--card);stroke-width:3px;stroke-linejoin:round}
 
 .pp-node{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;white-space:nowrap}
 .pp-paths{display:flex;flex-direction:column;gap:7px}

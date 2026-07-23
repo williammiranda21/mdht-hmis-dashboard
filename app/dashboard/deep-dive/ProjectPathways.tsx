@@ -30,15 +30,20 @@ interface PathwayData {
   project_id: number; project_name: string | null; project_type: number | null;
   n_clients: number; window_start: string | null; window_end: string | null;
   data: {
-    nodes: PathNode[]; links: PathLink[];
+    // before/after flow (per client) — drives the Sankey
+    flow: { nodes: PathNode[]; links: PathLink[] };
+    // full-journey context (per enrollment) — drives journeys + bottleneck
+    nodes: PathNode[];
     top_paths: { all: TopPath[]; housed: TopPath[]; churned: TopPath[] };
     source_rates: Record<string, { total: number; ph: number; ph_pct: number }>;
     bottleneck: Record<string, Bottleneck>;
   };
 }
 
-const OUTCOME = new Set(['Housed', 'Churned', 'Active']);
 const ORDER = ['SO', 'ES', 'SH', 'TH', 'RRH', 'PSH', 'Housed', 'Churned', 'Active'];
+// The flow Sankey adds a leftmost "First entry" column for clients with no prior
+// enrollment on record.
+const FLOW_ORDER = ['First', ...ORDER];
 const days = (n: number | null) => (n == null ? '—' : `${n.toLocaleString()}d`);
 
 export default function ProjectPathways({
@@ -82,8 +87,8 @@ export default function ProjectPathways({
         <div>
           <h3>Client pathways</h3>
           <div className="meta">
-            For the clients this project served, where they came from and went across the whole
-            system — one project at a time. Movement shown is per enrolment step, not per client.
+            For the clients this project served, the enrolment immediately before and after their
+            stay here — one project at a time, one row per client.
           </div>
         </div>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -117,10 +122,11 @@ export default function ProjectPathways({
                 <b>{fmtInt(data.n_clients)}</b> clients served
                 {data.window_start && data.window_end
                   ? <> between {data.window_start} and {data.window_end}</> : null}
-                , traced across every programme they touched.
+                . The flow below is one step each side per client; the journeys and stalls
+                further down trace their whole path through the system.
               </div>
 
-              <Sankey nodes={data.data.nodes} links={data.data.links} />
+              <Sankey flow={data.data.flow} />
 
               {/* Top pathways */}
               <div className="hc-sub" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -151,9 +157,20 @@ export default function ProjectPathways({
   );
 }
 
-/* ── Bipartite one-step Sankey ────────────────────────────────────────────── */
-function Sankey({ nodes, links }: { nodes: PathNode[]; links: PathLink[] }) {
+/* ── Before/after flow Sankey ─────────────────────────────────────────────────
+   Bipartite: each client contributes one "came from" (left) and one "went to"
+   (right), so both columns total the cohort. A state can appear in both columns
+   (someone was in ES before and someone went to ES after) — they are separate
+   visual nodes, which is why cyclic movement doesn't tangle the layout.
+
+   Node boxes carry a MIN height so a 9-client flow still gets a legible label,
+   and ribbons TAPER — a ribbon's thickness at each end is that flow's share of
+   the node it meets — so every box is filled exactly on both sides despite the
+   min-height inflation. */
+function Sankey({ flow }: { flow: { nodes: PathNode[]; links: PathLink[] } }) {
   const layout = useMemo(() => {
+    const nodes = flow?.nodes ?? [];
+    const links = flow?.links ?? [];
     const color = new Map(nodes.map((n) => [n.id, n.color]));
     const label = new Map(nodes.map((n) => [n.id, n.label]));
 
@@ -163,29 +180,31 @@ function Sankey({ nodes, links }: { nodes: PathNode[]; links: PathLink[] }) {
       srcTotals.set(l.source, (srcTotals.get(l.source) ?? 0) + l.value);
       tgtTotals.set(l.target, (tgtTotals.get(l.target) ?? 0) + l.value);
     }
-    const sources = ORDER.filter((s) => srcTotals.has(s));
-    const targets = ORDER.filter((s) => tgtTotals.has(s));
+    const sources = FLOW_ORDER.filter((s) => srcTotals.has(s));
+    const targets = FLOW_ORDER.filter((s) => tgtTotals.has(s));
     if (!sources.length || !targets.length) return null;
 
-    const W = 1000, H = Math.max(260, Math.max(sources.length, targets.length) * 52);
-    const NODE_W = 13, GAP = 10, T = 8, B = 8;
-    const LX = 4, RX = W - NODE_W - 4;
+    const NODE_W = 12, GAP = 12, T = 12, B = 12, MIN_H = 18;
+    // Reserve horizontal gutters for the labels so they never sit against the
+    // SVG edge — this is what the "too close to the edge" fix comes down to.
+    const GUT = 172;
+    const W = 1000;
+    const rows = Math.max(sources.length, targets.length);
+    const H = T + B + rows * MIN_H + (rows - 1) * GAP + 24;
+    const LX = GUT, RX = W - GUT - NODE_W;
 
-    // Scale so the taller column fills the height; both columns share the scale
-    // so a band's thickness means the same number of clients on either side.
-    const maxTotal = Math.max(
-      [...srcTotals.values()].reduce((a, b) => a + b, 0),
-      [...tgtTotals.values()].reduce((a, b) => a + b, 0),
-    );
-    const avail = (col: string[]) => H - T - B - (col.length - 1) * GAP;
-    const unit = Math.min(avail(sources), avail(targets)) / (maxTotal || 1);
-
+    // Per-column exact fill: every node gets MIN_H, the remainder is shared out
+    // in proportion to volume. Ribbon widths then use each node's own scale.
     const place = (col: string[], totals: Map<string, number>, x: number) => {
-      const m = new Map<string, { x: number; y: number; h: number; cursor: number }>();
+      const total = col.reduce((a, s) => a + (totals.get(s) ?? 0), 0) || 1;
+      const avail = H - T - B - (col.length - 1) * GAP;
+      const flex = Math.max(0, avail - col.length * MIN_H);
+      const m = new Map<string, { x: number; y: number; h: number; total: number; cursor: number }>();
       let y = T;
       for (const s of col) {
-        const h = Math.max(2, (totals.get(s) ?? 0) * unit);
-        m.set(s, { x, y, h, cursor: y });
+        const tot = totals.get(s) ?? 0;
+        const h = MIN_H + (tot / total) * flex;
+        m.set(s, { x, y, h, total: tot, cursor: y });
         y += h + GAP;
       }
       return m;
@@ -193,27 +212,27 @@ function Sankey({ nodes, links }: { nodes: PathNode[]; links: PathLink[] }) {
     const src = place(sources, srcTotals, LX);
     const tgt = place(targets, tgtTotals, RX);
 
-    // Ribbons, thickest first so thin flows draw on top and stay visible.
     const ribbons = [...links]
       .sort((a, b) => b.value - a.value)
       .map((l) => {
         const s = src.get(l.source)!, t = tgt.get(l.target)!;
-        const h = l.value * unit;
+        const hs = (l.value / s.total) * s.h;   // share of the source box
+        const ht = (l.value / t.total) * t.h;   // share of the target box
         const sy = s.cursor, ty = t.cursor;
-        s.cursor += h; t.cursor += h;
+        s.cursor += hs; t.cursor += ht;
         const x0 = LX + NODE_W, x1 = RX;
         const mx = (x0 + x1) / 2;
         return {
           key: `${l.source}-${l.target}`,
           d: `M${x0},${sy} C${mx},${sy} ${mx},${ty} ${x1},${ty} `
-           + `L${x1},${ty + h} C${mx},${ty + h} ${mx},${sy + h} ${x0},${sy + h} Z`,
+           + `L${x1},${ty + ht} C${mx},${ty + ht} ${mx},${sy + hs} ${x0},${sy + hs} Z`,
           color: color.get(l.source) ?? '#888',
           value: l.value, from: label.get(l.source), to: label.get(l.target),
         };
       });
 
     return { W, H, NODE_W, src, tgt, ribbons, color, label, srcTotals, tgtTotals };
-  }, [nodes, links]);
+  }, [flow]);
 
   if (!layout) return <div className="hc-none">Not enough flow to draw a pathway map.</div>;
   const { W, H, NODE_W, src, tgt, ribbons, color, label, srcTotals, tgtTotals } = layout;
@@ -222,8 +241,11 @@ function Sankey({ nodes, links }: { nodes: PathNode[]; links: PathLink[] }) {
     [...m.entries()].map(([id, p]) => (
       <g key={`${anchor}-${id}`}>
         <rect x={p.x} y={p.y} width={NODE_W} height={p.h} rx={2.5} fill={color.get(id) ?? '#888'} />
-        <text x={anchor === 'start' ? p.x + NODE_W + 5 : p.x - 5} y={p.y + p.h / 2 + 3.5}
-          textAnchor={anchor} fontSize={11} fontWeight={600} fill="var(--text)">
+        {/* paint-order stroke gives the label a halo so it stays readable where
+            it crosses a ribbon */}
+        <text x={anchor === 'start' ? p.x - 6 : p.x + NODE_W + 6} y={p.y + p.h / 2 + 3.5}
+          textAnchor={anchor === 'start' ? 'end' : 'start'} fontSize={11} fontWeight={600}
+          fill="var(--text)" className="pp-sk-label">
           {label.get(id)} <tspan fill="var(--muted)" fontWeight={400}>{fmtInt(totals.get(id) ?? 0)}</tspan>
         </text>
       </g>
@@ -235,9 +257,9 @@ function Sankey({ nodes, links }: { nodes: PathNode[]; links: PathLink[] }) {
         <span>Came from</span><span>Went to</span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="pp-sankey" role="img"
-        aria-label="Client flow between programme stages">
+        aria-label="Where clients were immediately before and after this project">
         {ribbons.map((r) => (
-          <path key={r.key} d={r.d} fill={r.color} fillOpacity={0.32}>
+          <path key={r.key} d={r.d} fill={r.color} fillOpacity={0.3}>
             <title>{`${r.from} → ${r.to}: ${fmtInt(r.value)}`}</title>
           </path>
         ))}

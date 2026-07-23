@@ -67,6 +67,11 @@ export default function DashboardView({
   /** Project detail panel — the equivalent of openProjPanel() on the static page. */
   const [panelProject, setPanelProject] = useState<number | null>(null);
 
+  // drill_clients holds only monthly periods, at the aggregate household/subpop.
+  // On any other view the stored row does not exist, so show plain numbers rather
+  // than a drill link that opens to an empty list.
+  const canDrill = granularity === 'monthly' && household === 'All' && subpopulation === 'All';
+
   async function openDrill(r: ProjectMetric, column: string, label: string, expected: number) {
     setDrill({ project: r.project_name ?? String(r.project_id), projectId: r.project_id, column, label, expected });
     setDrillIds(null);
@@ -75,7 +80,7 @@ export default function DashboardView({
       const qs = new URLSearchParams({
         period, project_id: String(r.project_id), metric: column,
       });
-      const res = await fetch(`/api/drill?${qs}`);
+      const res = await fetch(`/api/drill?${qs}`, { credentials: 'same-origin' });
       const j = await res.json();
       if (!res.ok) { setDrillErr(j.error ?? 'Could not load clients.'); setDrillIds([]); }
       else setDrillIds(j.ids as string[]);
@@ -310,7 +315,7 @@ export default function DashboardView({
                     </td>
                     <td><span className="ty">{r.type_name}</span></td>
                     <td className="num">
-                      {r.clients_served ? (
+                      {canDrill && r.clients_served ? (
                         <span className="drill" role="button" tabIndex={0}
                           title="Show the clients behind this number"
                           onClick={() => openDrill(r, 'clients_served', 'Clients served', r.clients_served!)}
@@ -321,7 +326,7 @@ export default function DashboardView({
                     </td>
                     <td className="num">{fmtInt(r.leavers)}</td>
                     <td className="num">
-                      {r.exits_ph ? (
+                      {canDrill && r.exits_ph ? (
                         <span className="drill" role="button" tabIndex={0}
                           title="Show the clients behind this number"
                           onClick={() => openDrill(r, 'exits_ph', 'Exits to permanent housing', r.exits_ph!)}

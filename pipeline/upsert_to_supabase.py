@@ -557,8 +557,10 @@ def build_project_pathways(pp: dict | None) -> list[dict]:
             # The Sankey/bottleneck payload, minus the identity fields already
             # promoted to columns above.
             "data": {
+                # before/after flow (per client) drives the Sankey; nodes/top_paths
+                # give the full-journey context below it.
+                "flow": proj.get("flow", {"nodes": [], "links": []}),
                 "nodes": proj.get("nodes", []),
-                "links": proj.get("links", []),
                 "top_paths": proj.get("top_paths", {}),
                 "source_rates": proj.get("source_rates", {}),
                 "bottleneck": proj.get("bottleneck", {}),
