@@ -11,6 +11,7 @@ const TABS = [
   { href: '/dashboard/dq', label: 'Data Quality', icon: 'search' },
   { href: '/dashboard/utilization', label: 'Unit Utilization', icon: 'bed' },
   { href: '/dashboard/bnl', label: 'By-Name List', icon: 'lock' },
+  { href: '/dashboard/deep-dive', label: 'Deep Dive', icon: 'search' },
 ] as const;
 
 /** Shown only to admins. */

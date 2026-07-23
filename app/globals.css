@@ -373,6 +373,22 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .hc-ep.ph .d::before{background:var(--accent)}
 .hc-ep b{color:var(--strong);font-variant-numeric:tabular-nums;white-space:nowrap}
 .hc-none{text-align:center;font-size:12px;color:var(--muted);padding:10px 0}
+/* ── Deep Dive (project picker + worklists) ── */
+.dd-pick{margin-top:0}
+.dd-opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px;
+  padding:12px 18px;max-height:300px;overflow-y:auto;border-top:1px solid var(--hair);margin-top:12px}
+.dd-opt{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;
+  border:1px solid var(--hair);cursor:pointer;font-size:12.5px;background:var(--card)}
+.dd-opt:hover{background:var(--rowhover)}
+.dd-opt.on{border-color:var(--primary);background:var(--primary-soft)}
+.dd-opt input{accent-color:var(--primary);flex:none}
+.dd-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.dd-kpi{cursor:pointer}
+.dd-kpi:hover{border-color:var(--primary)}
+.dd-head{cursor:pointer;align-items:flex-start}
+.dd-head .meta{max-width:78ch;line-height:1.45}
+.dd-caret{color:var(--muted);font-size:14px;flex:none;padding-top:2px}
+
 /* ── Print / PDF for the project panel ──
    The static dashboard cloned the panel into a hidden overlay to print it.
    Here it is pure CSS: hide the app, promote the modal to normal flow, and
