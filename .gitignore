@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+.env.local
+.env*.local
+# incremental TypeScript build cache — machine-specific, regenerated on build
+tsconfig.tsbuildinfo
+.DS_Store
+*.log
+pipeline/__pycache__/
+# Temp login credentials written by seed_users.py — never commit
+pipeline/.seeded_credentials.txt
