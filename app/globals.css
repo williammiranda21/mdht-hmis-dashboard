@@ -168,7 +168,12 @@ thead th .car{opacity:0;margin-left:4px;font-size:9px}
 thead th.sorted .car{opacity:1;color:var(--primary)}
 .pnm{display:flex;align-items:center;gap:8px}
 .rank{display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;border-radius:6px;background:var(--primary-soft);color:var(--primary);font-size:10.5px;font-weight:700;flex:none}
-.drill{color:var(--secondary);font-weight:600;cursor:pointer;border-bottom:1px dotted var(--secondary)}
+/* Clickable = bold + a magnifier, NOT a dotted underline (user preference).
+   The glyph is a ::after so no call site has to render it. */
+.drill{color:var(--secondary);font-weight:700;cursor:pointer;white-space:nowrap}
+.drill::after{content:"🔍";font-size:.78em;margin-left:5px;opacity:.5}
+.drill:hover{color:var(--primary)}
+.drill:hover::after{opacity:1}
 .mom.up{color:var(--accent);font-weight:700}.mom.down{color:var(--danger);font-weight:700}.mom.flat{color:var(--faint)}
 .colpick{position:relative}
 .colmenu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;background:var(--card);border:1px solid var(--border-strong);border-radius:12px;box-shadow:var(--shadow);padding:10px;min-width:220px;max-height:340px;overflow:auto}
@@ -368,9 +373,35 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .hc-ep.ph .d::before{background:var(--accent)}
 .hc-ep b{color:var(--strong);font-variant-numeric:tabular-nums;white-space:nowrap}
 .hc-none{text-align:center;font-size:12px;color:var(--muted);padding:10px 0}
+/* ── Print / PDF for the project panel ──
+   The static dashboard cloned the panel into a hidden overlay to print it.
+   Here it is pure CSS: hide the app, promote the modal to normal flow, and
+   un-clip the scrolling regions so the WHOLE history table prints, not just
+   the ~320px visible slice. */
+@media print {
+  body * { visibility: hidden !important; }
+  #pp-printable, #pp-printable * { visibility: visible !important; }
+  .pp-noprint { display: none !important; }
+  .bnl-ov { position: static !important; background: none !important; padding: 0 !important;
+            display: block !important; overflow: visible !important; }
+  #pp-printable { position: static !important; max-width: 100% !important; width: 100% !important;
+                  max-height: none !important; overflow: visible !important;
+                  box-shadow: none !important; border: 0 !important; }
+  /* scroll containers must not clip when printing */
+  .pp-hist, .dr-ids, .scroll { max-height: none !important; overflow: visible !important; }
+  .pp-hist thead th { position: static !important; }
+  .hc-sub { break-after: avoid; }
+  .peer-row, .hc-t, tr { break-inside: avoid; }
+  @page { margin: 14mm; }
+}
+
 /* ── Project detail panel (Project Performance → click a project name) ── */
-.pp-link{cursor:pointer;border-bottom:1px dotted var(--secondary)}
+.pp-actions{float:right;display:flex;align-items:center;gap:8px}
+.pp-actions .bnl-x{float:none}
+.pp-link{cursor:pointer;font-weight:700}
+.pp-link::after{content:"🔍";font-size:.78em;margin-left:5px;opacity:.5}
 .pp-link:hover{color:var(--secondary)}
+.pp-link:hover::after{opacity:1}
 .pp-modal{max-width:860px}
 .pp-losbar{display:flex;height:26px;border-radius:7px;overflow:hidden;background:var(--track)}
 .pp-losbar span{display:flex;align-items:center;justify-content:center;font-size:10.5px;

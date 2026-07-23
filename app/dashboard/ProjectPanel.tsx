@@ -120,8 +120,15 @@ export default function ProjectPanel({
 
   return (
     <div className="bnl-ov" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="bnl-modal pp-modal">
-        <button className="bnl-x" onClick={onClose}>✕</button>
+      <div className="bnl-modal pp-modal" id="pp-printable">
+        <div className="pp-actions">
+          {/* Print-to-PDF is a stylesheet, not a DOM clone: @media print hides the
+              rest of the page and un-clips the scroll areas so the full history
+              table prints. "Save as PDF" in the browser's print dialog. */}
+          <button className="btn pp-noprint" onClick={() => window.print()}
+            title="Opens the print dialog — choose “Save as PDF”">🖨 PDF</button>
+          <button className="bnl-x pp-noprint" onClick={onClose}>✕</button>
+        </div>
 
         {err && <div className="bnl-dq">{err}</div>}
         {!proj && !err && <div className="hc-none">Loading project…</div>}
