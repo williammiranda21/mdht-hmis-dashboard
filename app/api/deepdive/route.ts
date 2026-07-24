@@ -30,7 +30,7 @@ export const dynamic = 'force-dynamic';
 const ATTR_COLS =
   'pid, name, age, status, detail, ptype, entry, last_contact, days_since_contact, ' +
   'days_homeless, days_at_project, sys_days3, episodes3, chronic, veteran, family, assessed, ' +
-  'dq, dq_n, long_stay, open_suspect';
+  'dq, dq_n, long_stay, open_suspect, open_suspect_projects';
 
 const PAGE = 1000;   // Supabase caps a response at 1000 rows
 const LIMIT = 100;   // per worklist — these are lists to action, not exports
@@ -209,6 +209,28 @@ export async function GET(req: Request) {
     .sort((x, y) => (y.dq.length - x.dq.length) || ((y.days_at_project ?? 0) - (x.days_at_project ?? 0)))
     .slice(0, LIMIT);
 
+  // ── open_suspect: scope to the project that OWNS the left-open enrollment ──
+  // The flag lives on the client's BNL row but describes one specific open
+  // enrollment; open_suspect_projects carries THAT enrollment's project(s). Show
+  // a client under project P only when P owns the suspect enrollment — so an ES
+  // project's missed exit is never attributed to an unrelated SO project that
+  // merely served the same client. Unlike the period-scoped lists this is a
+  // live-snapshot cleanup list, so it is not gated by `served in this period`
+  // and does not feed the matched/unmatched summary.
+  const idset = new Set(ids);
+  const openSuspectList = flagged.open_suspect
+    .map((r) => {
+      const owner = ((r.open_suspect_projects as number[]) ?? []).find((p) => idset.has(p));
+      return owner == null ? null : { r, owner };
+    })
+    .filter((x): x is { r: any; owner: number } => x !== null)
+    .map(({ r, owner }) => {
+      const info = projInfo.get(owner);
+      return { ...r, project_id: owner, project: info?.name ?? null, ptype: info?.type ?? r.ptype };
+    })
+    .sort(desc('days_since_contact'))
+    .slice(0, LIMIT);
+
   return NextResponse.json({
     served,
     matched: matchedPids.size,
@@ -219,7 +241,7 @@ export async function GET(req: Request) {
       // oldest match first — these are the longest-stalled lease-ups
       awaiting_movein: take(flagged.awaiting_movein,
         (a, b) => String(a.entry ?? '').localeCompare(String(b.entry ?? ''))),
-      open_suspect: take(flagged.open_suspect, desc('days_since_contact')),
+      open_suspect: openSuspectList,
       data_quality: dataQuality,
       // longest-homeless first — this one IS about the 3.917 episode
       chronic: take(flagged.chronic, desc('days_homeless')),

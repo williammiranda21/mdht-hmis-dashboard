@@ -189,6 +189,7 @@ create table if not exists bnl_clients (
   assessed       date,                           -- last CE assessment
   in_school      boolean default false,
   dq             jsonb,                          -- text[] of DQ flags
+  open_suspect_projects int[] default '{}',      -- projects owning an open enrollment that trips open_suspect (deep-dive scoping)
   timeline       jsonb,                          -- last 8 enrollments
   hist3          jsonb,                          -- 3-year history card (see bnl_core.py hist3)
   fm             text,                           -- first-contact month  '2026-05'

@@ -444,6 +444,7 @@ def build_bnl_clients(bnl: dict | None) -> list[dict]:
             "parenting": r["parenting"], "unaccompanied": r["unaccompanied"],
             "assessed": r["assessed"], "in_school": r["in_school"],
             "dq": r["dq"], "dq_n": r.get("dq_n", len(r["dq"])),
+            "open_suspect_projects": r.get("open_suspect_projects", []),
             "timeline": r["timeline"], "hist3": r.get("hist3"),
             "fm": r["fm"], "hm": r["hm"], "im": r["im"],
         })
