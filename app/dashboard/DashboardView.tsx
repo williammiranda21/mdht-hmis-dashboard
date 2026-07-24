@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { Granularity, ProjectMetric } from '../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../lib/types';
 import { periodLabel, rateBand, bandColorVar, fmtInt } from '../../lib/format';
+import { clientsHref } from '../../lib/drill';
 import ProjectPanel from './ProjectPanel';
 
 type Props = {
@@ -55,40 +56,18 @@ export default function DashboardView({
   const [colMenuOpen, setColMenuOpen] = useState(false);
 
   // ── Client drill-down ──────────────────────────────────────────────────────
-  // Opens the hashed PersonalIDs behind one cell. RLS (`scoped read drill`)
-  // decides what comes back, so an agency user hitting another agency's project
-  // just gets an empty list.
-  const [drill, setDrill] = useState<
-    { project: string; projectId: number; column: string; label: string; expected: number } | null
-  >(null);
-  const [drillIds, setDrillIds] = useState<string[] | null>(null);
-  const [drillErr, setDrillErr] = useState<string | null>(null);
+  // A count links to the server-rendered /dashboard/clients page (see lib/drill).
+  // It used to be an in-browser fetch into a modal, but County Web Isolation
+  // breaks that XHR — a normal link/page load survives isolation, so the drill is
+  // now a hard navigation. `back` returns to this exact view.
+  const canDrill = granularity === 'monthly' && household === 'All' && subpopulation === 'All';
+  const back = `/dashboard?g=${granularity}&p=${encodeURIComponent(period)}`
+    + `&hh=${encodeURIComponent(household)}&sub=${encodeURIComponent(subpopulation)}`;
+  const drillHref = (r: ProjectMetric, column: string) =>
+    clientsHref({ metric: column, project: r.project_id, period, back });
 
   /** Project detail panel — the equivalent of openProjPanel() on the static page. */
   const [panelProject, setPanelProject] = useState<number | null>(null);
-
-  // drill_clients holds only monthly periods, at the aggregate household/subpop.
-  // On any other view the stored row does not exist, so show plain numbers rather
-  // than a drill link that opens to an empty list.
-  const canDrill = granularity === 'monthly' && household === 'All' && subpopulation === 'All';
-
-  async function openDrill(r: ProjectMetric, column: string, label: string, expected: number) {
-    setDrill({ project: r.project_name ?? String(r.project_id), projectId: r.project_id, column, label, expected });
-    setDrillIds(null);
-    setDrillErr(null);
-    try {
-      const qs = new URLSearchParams({
-        period, project_id: String(r.project_id), metric: column,
-      });
-      const res = await fetch(`/api/drill?${qs}`, { credentials: 'same-origin' });
-      const j = await res.json();
-      if (!res.ok) { setDrillErr(j.error ?? 'Could not load clients.'); setDrillIds([]); }
-      else setDrillIds(j.ids as string[]);
-    } catch {
-      setDrillErr('Could not load clients.');
-      setDrillIds([]);
-    }
-  }
 
   const typeOptions = useMemo(() => {
     const s = new Set<string>();
@@ -319,32 +298,26 @@ export default function DashboardView({
                     <td><span className="ty">{r.type_name}</span></td>
                     <td className="num">
                       {canDrill && r.clients_served ? (
-                        <span className="drill" role="button" tabIndex={0}
-                          title="Show the clients behind this number"
-                          onClick={() => openDrill(r, 'clients_served', 'Clients served', r.clients_served!)}
-                          onKeyDown={(e) => e.key === 'Enter' && openDrill(r, 'clients_served', 'Clients served', r.clients_served!)}>
+                        <a className="drill" href={drillHref(r, 'clients_served')}
+                          title="Show the clients behind this number">
                           {fmtInt(r.clients_served)}
-                        </span>
+                        </a>
                       ) : fmtInt(r.clients_served)}
                     </td>
                     <td className="num">
                       {canDrill && r.leavers ? (
-                        <span className="drill" role="button" tabIndex={0}
-                          title="Show the clients behind this number"
-                          onClick={() => openDrill(r, 'leavers', 'Leavers (exited)', r.leavers!)}
-                          onKeyDown={(e) => e.key === 'Enter' && openDrill(r, 'leavers', 'Leavers (exited)', r.leavers!)}>
+                        <a className="drill" href={drillHref(r, 'leavers')}
+                          title="Show the clients behind this number">
                           {fmtInt(r.leavers)}
-                        </span>
+                        </a>
                       ) : fmtInt(r.leavers)}
                     </td>
                     <td className="num">
                       {canDrill && r.exits_ph ? (
-                        <span className="drill" role="button" tabIndex={0}
-                          title="Show the clients behind this number"
-                          onClick={() => openDrill(r, 'exits_ph', 'Exits to permanent housing', r.exits_ph!)}
-                          onKeyDown={(e) => e.key === 'Enter' && openDrill(r, 'exits_ph', 'Exits to permanent housing', r.exits_ph!)}>
+                        <a className="drill" href={drillHref(r, 'exits_ph')}
+                          title="Show the clients behind this number">
                           {fmtInt(r.exits_ph)}
-                        </span>
+                        </a>
                       ) : fmtInt(r.exits_ph)}
                     </td>
                     <td className="num">
@@ -411,60 +384,6 @@ export default function DashboardView({
           subpopulation={subpopulation}
           onClose={() => setPanelProject(null)}
         />
-      )}
-
-      {drill && (
-        <div className="bnl-ov" onClick={(e) => e.target === e.currentTarget && setDrill(null)}>
-          <div className="bnl-modal">
-            <button className="bnl-x" onClick={() => setDrill(null)}>✕</button>
-            <h3>{drill.label}</h3>
-            <div className="bnl-sub" style={{ marginTop: 2 }}>
-              {drill.project} · {periodLabel(period)}
-            </div>
-
-            {drillIds === null && <div className="hc-none">Loading clients…</div>}
-            {drillErr && <div className="bnl-dq" style={{ marginTop: 12 }}>{drillErr}</div>}
-
-            {drillIds && !drillErr && (
-              <>
-                <div className="dr-head">
-                  <span>
-                    <b>{drillIds.length.toLocaleString()}</b> client{drillIds.length === 1 ? '' : 's'}
-                    {drillIds.length !== drill.expected && (
-                      // Mismatch is expected when RLS filtered the row (no grant on
-                      // this project) — say so rather than showing a silent 0.
-                      <span className="bnl-sub"> · table shows {drill.expected.toLocaleString()}</span>
-                    )}
-                  </span>
-                  {drillIds.length > 0 && (
-                    <button className="btn" onClick={(e) => {
-                      navigator.clipboard?.writeText(drillIds.join('\n'));
-                      const el = e.currentTarget; el.textContent = 'Copied ✓';
-                      setTimeout(() => { el.textContent = '⧉ Copy IDs'; }, 1200);
-                    }}>⧉ Copy IDs</button>
-                  )}
-                </div>
-
-                {drillIds.length === 0 ? (
-                  <div className="hc-none">
-                    No clients returned. Either this metric was zero for the period, or
-                    your account does not have access to this project.
-                  </div>
-                ) : (
-                  <>
-                    <div className="dr-ids">
-                      {drillIds.map((id) => <code key={id}>{id}</code>)}
-                    </div>
-                    <p className="bnl-sub" style={{ marginTop: 10 }}>
-                      These are hashed PersonalIDs — HMIS access is required to identify
-                      individuals. Paste one into HMIS client search to look it up.
-                    </p>
-                  </>
-                )}
-              </>
-            )}
-          </div>
-        </div>
       )}
     </>
   );

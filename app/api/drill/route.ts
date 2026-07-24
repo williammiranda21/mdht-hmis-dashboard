@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
+import { DRILL_METRICS as METRICS } from '../../../lib/drill';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,26 +20,9 @@ export const dynamic = 'force-dynamic';
  * An agency user querying someone else's project simply gets no row back.
  */
 
-/** Table column → the metric key stored in drill_clients (see build_drill_clients). */
-const METRICS: Record<string, string> = {
-  clients_served: 'c',
-  leavers: 'l',
-  exits_ph: 'p',
-  exits_unsub: 'u',
-  LOS_0_30: 'los0',
-  LOS_31_90: 'los31',
-  LOS_91_180: 'los91',
-  LOS_181_365: 'los181',
-  LOS_365plus: 'los365',
-  // Returns (SPM M2) — the clients who exited to PH and later returned, by band.
-  // These are keyed on the returns period (24-month lookback) and only exist at
-  // the aggregate household/subpop, same as every other drill metric.
-  returns_exits: 'ret:exits',
-  returns_lt6: 'ret:lt6',
-  returns_6to12: 'ret:6to12',
-  returns_13to24: 'ret:13to24',
-  returns_2yr: 'ret:ret2yr',
-};
+// Column → drill_clients metric map lives in lib/drill (shared with the
+// server-rendered /dashboard/clients page). This JSON API is kept for
+// completeness; the UI now links to that page (works through Web Isolation).
 
 export async function GET(req: Request) {
   const viewer = await getViewer();

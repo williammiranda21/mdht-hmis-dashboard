@@ -173,7 +173,16 @@ thead th.sorted .car{opacity:1;color:var(--primary)}
 /* Clickable = bold + a magnifier, NOT a dotted underline (user preference).
    The glyph is a ::after so no call site has to render it. */
 .drill{color:var(--secondary);font-weight:700;cursor:pointer;white-space:nowrap}
+/* the drill is now an <a> (a hard navigation survives Web Isolation); kill the
+   default link underline and the whole element — number AND magnifier — is the
+   click target */
+a.drill{text-decoration:none}
+a.drill:hover{color:var(--primary)}
 .drill::after{content:"🔍";font-size:.78em;margin-left:5px;opacity:.5}
+.drill:hover::after{opacity:1}
+/* back link on the server-rendered drill page */
+.drill-back{display:inline-block;color:var(--secondary);font-weight:600;font-size:13px;text-decoration:none}
+.drill-back:hover{color:var(--primary)}
 .drill:hover{color:var(--primary)}
 .drill:hover::after{opacity:1}
 .mom.up{color:var(--accent);font-weight:700}.mom.down{color:var(--danger);font-weight:700}.mom.flat{color:var(--faint)}

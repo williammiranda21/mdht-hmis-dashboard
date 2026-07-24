@@ -13,7 +13,7 @@ import type { Granularity } from '../../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../../lib/types';
 import { periodLabel, lookbackLabel, fmtInt, DEST_LABELS } from '../../../lib/format';
 import ProjectPanel from '../ProjectPanel';
-import { useClientDrill, DrillModal } from '../../../components/ClientDrill';
+import { clientsHref } from '../../../lib/drill';
 
 type Row = {
   project_id: number; name: string; type_name: string; project_type: number | null;
@@ -38,19 +38,21 @@ export default function ReturnsView({ periods, granularity, period, household, s
   const [sortKey, setSortKey] = useState<SortKey>('exits');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
 
-  // Client drill-down — the clients behind each returns count. drill_clients is
-  // monthly-only (and not household/subpop dimensioned), so the affordance shows
-  // on the monthly view at the aggregate; other views render plain numbers.
-  const drill = useClientDrill(period);
+  // Client drill-down — each returns count links to the server-rendered
+  // /dashboard/clients page (works through Web Isolation, unlike an in-browser
+  // fetch). drill_clients is monthly-only and not household/subpop dimensioned,
+  // so the link shows on the monthly aggregate view; other views render plain
+  // numbers. `_label` is unused now (the page derives the heading) but kept in
+  // the signature so the call sites stay readable.
   const canDrill = granularity === 'monthly' && household === 'All' && subpopulation === 'All';
-  const drillCell = (r: Row, metric: string, label: string, count: number) =>
+  const back = `/dashboard/returns?g=${granularity}&p=${encodeURIComponent(period)}`
+    + `&hh=${encodeURIComponent(household)}&sub=${encodeURIComponent(subpopulation)}`;
+  const drillCell = (r: Row, metric: string, _label: string, count: number) =>
     canDrill && count > 0 ? (
-      <span className="drill" role="button" tabIndex={0}
-        title="Show the clients behind this number"
-        onClick={() => drill.open({ project: r.name, projectId: r.project_id, metric, label: `${label} — ${r.name}`, expected: count })}
-        onKeyDown={(e) => e.key === 'Enter' && drill.open({ project: r.name, projectId: r.project_id, metric, label: `${label} — ${r.name}`, expected: count })}>
+      <a className="drill" href={clientsHref({ metric, project: r.project_id, period, back })}
+        title="Show the clients behind this number">
         {fmtInt(count)}
-      </span>
+      </a>
     ) : fmtInt(count);
 
   const typeOptions = useMemo(() => {
@@ -295,9 +297,6 @@ export default function ReturnsView({ periods, granularity, period, household, s
           onClose={() => setPanelProject(null)}
         />
       )}
-
-      <DrillModal drill={drill.drill} ids={drill.ids} err={drill.err}
-        period={period} onClose={drill.close} />
     </>
   );
 }
