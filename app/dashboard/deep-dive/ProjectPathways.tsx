@@ -9,7 +9,7 @@ import { fmtInt } from '../../../lib/format';
  * SVG layout.
  *
  * The diagram is a ONE-STEP transition Sankey, drawn bipartite on purpose: the
- * same programme appears once on the left (as a source) and again on the right
+ * same project type appears once on the left (as a source) and again on the right
  * (as a destination). A conventional Sankey tangles here because clients cycle —
  * SO→ES and ES→SO both happen constantly — and a layout that tries to place each
  * state once ends up with loops that hide the volume. Bipartite keeps every flow
@@ -87,7 +87,7 @@ export default function ProjectPathways({
         <div>
           <h3>Client pathways</h3>
           <div className="meta">
-            For the clients this project served, the enrolment immediately before and after their
+            For the clients this project served, the enrollment immediately before and after their
             stay here — one project at a time, one row per client.
           </div>
         </div>
@@ -139,12 +139,12 @@ export default function ProjectPathways({
               <TopPaths paths={data.data.top_paths[pathKind]} nodes={data.data.nodes} kind={pathKind} />
 
               {/* Bottleneck */}
-              <div className="hc-sub dd-pad">Where clients stall — by programme stage</div>
+              <div className="hc-sub dd-pad">Where clients stall — by project type</div>
               <Bottlenecks bn={data.data.bottleneck} />
 
               <p className="bnl-method">
                 Built from the same By-Name List pathway logic used elsewhere — each client's most
-                recent completed episode, deduplicated so a repeated stay in one programme counts
+                recent completed episode, deduplicated so a repeated stay at the same stage counts
                 once. <b>Left system</b> means an exit to a non-permanent destination; it is not the
                 same as a bad outcome, but a high rate at a stage worth a closer look. Nothing here
                 is recalculated in the browser.
@@ -307,7 +307,7 @@ function Bottlenecks({ bn }: { bn: Record<string, Bottleneck> }) {
         <div className="pp-bn" key={b.label}>
           <div className="pp-bn-h">
             <span className="pp-node" style={{ background: soft(b.color), color: b.color }}>{b.label}</span>
-            <span className="bnl-sub">{fmtInt(b.n)} enrolments</span>
+            <span className="bnl-sub">{fmtInt(b.n)} enrollments</span>
           </div>
           {/* housed / churned / active split */}
           <div className="pp-bn-bar" title={`Housed ${b.ph_rate}% · Left ${b.churn_rate}% · Still enrolled ${b.active_rate}%`}>

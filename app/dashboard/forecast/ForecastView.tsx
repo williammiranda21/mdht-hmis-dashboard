@@ -100,7 +100,7 @@ function InflowPanel({ inflow }: { inflow: Inflow }) {
           </div>
         </div>
         <select className="fselect" value={stateKey} onChange={(e) => setStateKey(e.target.value)}>
-          <option value="__all">All programme types</option>
+          <option value="__all">All project types</option>
           {STATES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
@@ -238,7 +238,7 @@ function CapacityPanel({ capacity }: { capacity: CapState[] }) {
         <div>
           <h3>Capacity outlook</h3>
           <div className="meta">
-            Current occupancy and a 30/60/90-day projection per programme type, from recent
+            Current occupancy and a 30/60/90-day projection per project type, from recent
             entry and exit rates. Net flow is entries minus exits per month — a positive figure
             means the type is filling.
           </div>
@@ -249,7 +249,7 @@ function CapacityPanel({ capacity }: { capacity: CapState[] }) {
         <table className="bnl-table">
           <thead>
             <tr>
-              <th>Programme type</th>
+              <th>Project type</th>
               <th className="num">Capacity</th>
               <th className="num">Occupied now</th>
               <th className="num">30d</th>

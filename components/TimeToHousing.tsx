@@ -61,11 +61,11 @@ export const EVENT_NOUN: Record<SurvivalRow['event'], string> = {
 export const EVENT_BLURB: Record<SurvivalRow['event'], string> = {
   movein:
     'This is a housing program, so the event is the recorded move-in date — how long ' +
-    'from enrolment until the client is actually in a unit. Programs that create the ' +
-    'enrolment on move-in day will show a median of “same day”; that reflects how the ' +
-    'enrolment is entered, not a delay of zero.',
+    'from enrollment until the client is actually in a unit. Programs that create the ' +
+    'enrollment on move-in day will show a median of “same day”; that reflects how the ' +
+    'enrollment is entered, not a delay of zero.',
   ph_exit:
-    'There is no move-in date in a shelter or outreach programme, so the event is an ' +
+    'There is no move-in date in a shelter or outreach program, so the event is an ' +
     'exit to a permanent destination — how long from entry until the client leaves for ' +
     'permanent housing.',
 };
@@ -169,7 +169,7 @@ export function TimeToHousing({ self, peer }: { self: SurvivalRow | null; peer: 
     return (
       <div className="hc-none">
         {peer
-          ? `Fewer than 20 enrolments at this project in the two years to ${peer.window_end ?? 'the cohort end'} — too few for a reliable time-to-housing curve.`
+          ? `Fewer than 20 enrollments at this project in the two years to ${peer.window_end ?? 'the cohort end'} — too few for a reliable time-to-housing curve.`
           : 'Time to housing is not measured for this project type.'}
       </div>
     );
@@ -235,7 +235,7 @@ export function TimeToHousing({ self, peer }: { self: SurvivalRow | null; peer: 
         plain average over finished cases only would leave out exactly the people
         who are taking longest.{' '}
         {EVENT_BLURB[self.event]}{' '}
-        Cohort: the {self.n.toLocaleString()} enrolments starting between{' '}
+        Cohort: the {self.n.toLocaleString()} enrollments starting between{' '}
         {self.window_start ?? '—'} and {self.window_end ?? '—'}.
         {self.median_days == null && (
           <> <b>“Not reached”</b> means fewer than half this cohort were housed within
