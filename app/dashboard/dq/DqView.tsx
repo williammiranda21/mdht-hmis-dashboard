@@ -13,6 +13,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Granularity } from '../../../lib/types';
 import { periodLabel, fmtInt } from '../../../lib/format';
+import DqFixList from './DqFixList';
 
 type DqRecord = Record<string, number | null>;
 type Row = { project_id: number; name: string; type_name: string; project_type: number | null; d: DqRecord };
@@ -53,6 +54,9 @@ export default function DqView({ periods, granularity, period, rows }: Props) {
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('DQ_Score');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
+  // Fix-list drills into client IDs, which drill_clients only holds monthly.
+  const canFix = granularity === 'monthly';
+  const [fixRow, setFixRow] = useState<Row | null>(null);
 
   const typeOptions = useMemo(() => {
     const s = new Set<string>();
@@ -172,7 +176,12 @@ export default function DqView({ periods, granularity, period, rows }: Props) {
 
       <div className="panel">
         <div className="panel-h">
-          <div><h3>Data Quality · APR Q6</h3><div className="meta">{fmtInt(sorted.length)} projects · {periodLabel(period)} · click a column to sort</div></div>
+          <div><h3>Data Quality · APR Q6</h3><div className="meta">
+            {fmtInt(sorted.length)} projects · {periodLabel(period)} · click a column to sort
+            {canFix
+              ? ' · click a project name for its fix-list'
+              : ' · switch to the monthly view for the per-record fix-list'}
+          </div></div>
         </div>
         <div className="scroll">
           <table>
@@ -198,7 +207,14 @@ export default function DqView({ periods, granularity, period, rows }: Props) {
                 const hasChronic = (d.DQ_ChronicUniverse || 0) > 0;
                 return (
                   <tr key={r.project_id}>
-                    <td><span className="nm">{r.name}</span></td>
+                    <td>
+                      {canFix
+                        ? <span className="nm pp-link" role="button" tabIndex={0}
+                            title="Open this project’s data-quality fix-list"
+                            onClick={() => setFixRow(r)}
+                            onKeyDown={(e) => e.key === 'Enter' && setFixRow(r)}>{r.name}</span>
+                        : <span className="nm">{r.name}</span>}
+                    </td>
                     <td><span className="ty">{r.type_name}</span></td>
                     <td className="num"><Gauge score={d.DQ_Score} /></td>
                     <td className="num"><ScorePill v={d.DQ_PII_Score} /></td>
@@ -219,6 +235,16 @@ export default function DqView({ periods, granularity, period, rows }: Props) {
           </table>
         </div>
       </div>
+
+      {fixRow && (
+        <DqFixList
+          projectId={fixRow.project_id}
+          projectName={fixRow.name}
+          period={period}
+          data={fixRow.d}
+          onClose={() => setFixRow(null)}
+        />
+      )}
     </>
   );
 }

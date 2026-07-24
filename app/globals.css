@@ -594,3 +594,14 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .pp-bn-stat b{color:var(--strong);font-variant-numeric:tabular-nums}
 .pp-bn-next{margin-top:7px;font-size:11px;color:var(--faint)}
 @media print{.pp-bn-grid{grid-template-columns:repeat(3,1fr)}}
+
+/* ── DQ fix-list (per-project, per-record) ── */
+.dqfx-cat{border:1px solid var(--hair);border-radius:10px;padding:12px 13px;margin-top:12px;background:var(--card)}
+.dqfx-cat-h{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.dqfx-cat-h b{color:var(--strong);font-size:13.5px}
+.dqfx-count{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 7px;margin-right:8px;
+  border-radius:999px;background:var(--danger-light);color:var(--danger);font-size:12px;font-weight:800;vertical-align:middle}
+.dqfx-fix{font-size:12.5px;color:var(--muted);margin:6px 0 9px}
+.dqfx-spark{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-variant-numeric:tabular-nums}
+.dqfx-spark svg{display:block}
+.dqfx-copy{margin-top:9px;font-size:12px}
