@@ -36,7 +36,7 @@ export default async function DeepDivePage() {
   const sb = supabaseServer();
 
   // Admins pick from everything; a non-admin sees only their granted projects.
-  const [{ data: projects }, { data: grants }, { data: periodsRow }] = await Promise.all([
+  const [{ data: projects }, { data: grants }, { data: periodsRow }, { data: partialRow }] = await Promise.all([
     sb.from('projects').select('project_id, name, type_name').order('name'),
     viewer.isAdmin
       ? Promise.resolve({ data: null })
@@ -44,12 +44,21 @@ export default async function DeepDivePage() {
     // Membership comes from drill_clients, which is monthly — so the picker
     // offers the project-side monthly list (it includes the partial month).
     sb.from('meta').select('value').eq('key', 'periods').maybeSingle(),
+    // The in-progress month has no DQ / SPM data, so we default the picker to the
+    // last COMPLETE month (below) even though the partial month stays selectable.
+    sb.from('meta').select('value').eq('key', 'partial_period').maybeSingle(),
   ]);
 
   const periods = ((periodsRow?.value as string[] | undefined) ?? [])
     .filter((p) => /^\d{4}-\d{2}$/.test(p))
     .slice(-24)          // two years is plenty for a worklist view
     .reverse();          // newest first
+
+  // Data Quality (and other computed metrics) are not generated for the in-progress
+  // month, so defaulting the picker to the newest period would show an empty
+  // "Data quality to fix" list. Default to the newest COMPLETE month instead.
+  const partialPeriod = (partialRow?.value as string | undefined) ?? null;
+  const defaultPeriod = periods.find((p) => p !== partialPeriod) ?? periods[0] ?? '';
 
   const granted = grants?.map((g: { project_id: number }) => Number(g.project_id)) ?? null;
   const options = (projects ?? [])
@@ -64,6 +73,8 @@ export default async function DeepDivePage() {
       preselect={granted ?? []}
       isAdmin={viewer.isAdmin}
       periods={periods}
+      defaultPeriod={defaultPeriod}
+      partialPeriod={partialPeriod}
     />
   );
 }

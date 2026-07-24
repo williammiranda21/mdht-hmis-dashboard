@@ -82,10 +82,10 @@ interface DeepDiveData {
 }
 
 export default function DeepDiveView({
-  options, preselect, isAdmin, periods,
-}: { options: Opt[]; preselect: number[]; isAdmin: boolean; periods: string[] }) {
+  options, preselect, isAdmin, periods, defaultPeriod, partialPeriod,
+}: { options: Opt[]; preselect: number[]; isAdmin: boolean; periods: string[]; defaultPeriod?: string; partialPeriod?: string | null }) {
   const [sel, setSel] = useState<number[]>(preselect.length ? preselect : []);
-  const [period, setPeriod] = useState(periods[0] ?? '');
+  const [period, setPeriod] = useState(defaultPeriod || periods[0] || '');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<ListKey | null>('long_stay');
   const [data, setData] = useState<DeepDiveData | null>(null);
@@ -226,7 +226,11 @@ export default function DeepDiveView({
 
                 {isOpen && (
                   rows.length === 0
-                    ? <div className="hc-none">{l.empty}</div>
+                    ? <div className="hc-none">{
+                        l.key === 'data_quality' && partialPeriod && period === partialPeriod
+                          ? `Data quality isn’t computed for the in-progress month (${periodLabel(period)}) yet — pick a completed month to see APR Q6 errors to fix.`
+                          : l.empty
+                      }</div>
                     : (
                       <div className="scroll">
                         <table className="bnl-table">
