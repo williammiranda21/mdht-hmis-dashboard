@@ -169,6 +169,12 @@ export async function GET(req: Request) {
     'dq:movein': 'Missing move-in date',
     'dq:income': 'Income missing or unknown at entry',
     'dq:annual': 'Overdue annual assessment',
+    // PII (Q6a) — client-level, fix once per client
+    'dq:name': 'Name missing or incomplete',
+    'dq:ssn': 'SSN missing, partial, or unknown',
+    'dq:dob': 'Date of birth missing or unknown',
+    'dq:race': 'Race/ethnicity not collected',
+    'dq:sex': 'Sex missing or unknown',
   };
   const dqByPid = new Map<string, { project_id: number; issues: string[] }>();
   const { data: dqRows } = await sb

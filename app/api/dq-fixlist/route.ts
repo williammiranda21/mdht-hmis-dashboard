@@ -22,6 +22,14 @@ const ELEMENTS: { key: string; metric: string; pctKey: string }[] = [
   { key: 'movein', metric: 'dq:movein', pctKey: 'DQ_MoveIn_pct' },
   { key: 'income', metric: 'dq:income', pctKey: 'DQ_IncMiss_pct' },
   { key: 'annual', metric: 'dq:annual', pctKey: 'DQ_Annual_pct' },
+  // PII (Q6a) — client-level, fix once per client. Deduped to unique clients in
+  // the ETL, so the count here is people-to-fix, while the trend % stays the
+  // APR's per-enrollment rate (same count-vs-% split as income).
+  { key: 'name', metric: 'dq:name', pctKey: 'DQ_Name_pct' },
+  { key: 'ssn', metric: 'dq:ssn', pctKey: 'DQ_SSN_pct' },
+  { key: 'dob', metric: 'dq:dob', pctKey: 'DQ_DOB_pct' },
+  { key: 'race', metric: 'dq:race', pctKey: 'DQ_Race_pct' },
+  { key: 'sex', metric: 'dq:sex', pctKey: 'DQ_Sex_pct' },
 ];
 const TREND_MONTHS = 12;
 

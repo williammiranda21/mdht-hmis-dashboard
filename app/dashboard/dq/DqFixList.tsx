@@ -28,6 +28,22 @@ const ELEMENTS = [
   { key: 'annual', label: 'Overdue annual assessment',
     fix: 'Complete the annual assessment within ±30 days of the enrollment anniversary.',
     denomKey: 'DQ_AnnualDue' },
+  // PII (Q6a) — fixed once on the client record, not per enrollment.
+  { key: 'name', label: 'Name missing or incomplete',
+    fix: 'Enter the client’s full legal name, or set the correct name data-quality value.',
+    denomKey: 'DQ_ActiveTotal' },
+  { key: 'ssn', label: 'SSN missing, partial, or unknown',
+    fix: 'Enter the full 9-digit SSN, or record “client doesn’t know / refused” accurately.',
+    denomKey: 'DQ_ActiveTotal' },
+  { key: 'dob', label: 'Date of birth missing or unknown',
+    fix: 'Enter the client’s date of birth and set the DOB data-quality value.',
+    denomKey: 'DQ_ActiveTotal' },
+  { key: 'race', label: 'Race/ethnicity not collected',
+    fix: 'Record the client’s race and ethnicity, or “client doesn’t know / refused”.',
+    denomKey: 'DQ_ActiveTotal' },
+  { key: 'sex', label: 'Sex missing or unknown',
+    fix: 'Record the client’s sex, or “client doesn’t know / refused”.',
+    denomKey: 'DQ_ActiveTotal' },
 ] as const;
 
 interface Category { key: string; ids: string[]; trend: { period: string; pct: number | null }[] }
