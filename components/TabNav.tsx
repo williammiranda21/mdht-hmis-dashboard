@@ -3,20 +3,22 @@
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 
+// `adminOnly` tabs are hidden from providers/approved non-admins entirely (the
+// pages themselves also re-check — hiding the tab is not the security boundary).
+// Rankings sits below the By-Name List and is admin-only: it lines every agency's
+// numbers up against each other, which the user doesn't want providers to see.
 const TABS = [
   { href: '/dashboard', label: 'Project Performance', icon: 'grid' },
-  { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy' },
   { href: '/dashboard/returns', label: 'Returns', icon: 'return' },
   { href: '/dashboard/system', label: 'System Performance', icon: 'globe' },
   { href: '/dashboard/forecast', label: 'Forecast', icon: 'trend' },
   { href: '/dashboard/dq', label: 'Data Quality', icon: 'search' },
   { href: '/dashboard/utilization', label: 'Unit Utilization', icon: 'bed' },
   { href: '/dashboard/bnl', label: 'By-Name List', icon: 'lock' },
+  { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy', adminOnly: true },
   { href: '/dashboard/deep-dive', label: 'Deep Dive', icon: 'search' },
+  { href: '/dashboard/admin', label: 'Users', icon: 'users', adminOnly: true },
 ] as const;
-
-/** Shown only to admins. */
-const ADMIN_TAB = { href: '/dashboard/admin', label: 'Users', icon: 'users' } as const;
 
 const ICONS: Record<string, JSX.Element> = {
   grid: (
@@ -65,26 +67,41 @@ const ICONS: Record<string, JSX.Element> = {
   ),
 };
 
+type Tab = (typeof TABS)[number];
+const isAdminTab = (t: Tab): boolean => 'adminOnly' in t && t.adminOnly === true;
+
 export default function TabNav({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname();
   const search = useSearchParams();
   const qs = search.toString();
   const suffix = qs ? `?${qs}` : '';
-  const tabs = isAdmin ? [...TABS, ADMIN_TAB] : TABS;
+
+  const renderTab = (t: Tab) => {
+    const active = pathname === t.href;
+    return (
+      <Link key={t.href} href={`${t.href}${suffix}`} className={`tab${active ? ' on' : ''}`}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          {ICONS[t.icon]}
+        </svg>
+        {t.label}
+      </Link>
+    );
+  };
+
+  const regular = TABS.filter((t) => !isAdminTab(t));
+  const admin = TABS.filter(isAdminTab);
 
   return (
     <nav className="tabnav">
-      {tabs.map((t) => {
-        const active = pathname === t.href;
-        return (
-          <Link key={t.href} href={`${t.href}${suffix}`} className={`tab${active ? ' on' : ''}`}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-              {ICONS[t.icon]}
-            </svg>
-            {t.label}
-          </Link>
-        );
-      })}
+      {regular.map(renderTab)}
+      {/* Admin section — the leaderboard-style Rankings and the user console live
+          here, apart from the tools every provider uses. Non-admins never see it. */}
+      {isAdmin && admin.length > 0 && (
+        <>
+          <div className="nav-label nav-sep">Admin</div>
+          {admin.map(renderTab)}
+        </>
+      )}
     </nav>
   );
 }
