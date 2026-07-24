@@ -129,7 +129,7 @@ export default function ProjectPathways({
               <Sankey flow={data.data.flow} />
 
               {/* Top pathways */}
-              <div className="hc-sub" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="hc-sub dd-pad" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 Most common journeys
                 <span className="pp-toggle">
                   <button className={pathKind === 'housed' ? 'on' : ''} onClick={() => setPathKind('housed')}>to housing</button>
@@ -139,7 +139,7 @@ export default function ProjectPathways({
               <TopPaths paths={data.data.top_paths[pathKind]} nodes={data.data.nodes} kind={pathKind} />
 
               {/* Bottleneck */}
-              <div className="hc-sub">Where clients stall — by programme stage</div>
+              <div className="hc-sub dd-pad">Where clients stall — by programme stage</div>
               <Bottlenecks bn={data.data.bottleneck} />
 
               <p className="bnl-method">

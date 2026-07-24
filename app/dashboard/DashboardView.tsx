@@ -247,6 +247,9 @@ export default function DashboardView({
               {fmtInt(sorted.length)} projects · {periodLabel(period)}
               {rows.some((r) => r.is_partial) && <span className="pill warn" style={{ marginLeft: 8 }}>partial period</span>}
               {' · click a column to sort'}
+              {canDrill
+                ? ' · click an underlined count (🔍) to list its clients'
+                : ' · switch to the monthly, all-households view to list clients behind a count'}
             </div>
           </div>
           <div className="tools">
@@ -324,7 +327,16 @@ export default function DashboardView({
                         </span>
                       ) : fmtInt(r.clients_served)}
                     </td>
-                    <td className="num">{fmtInt(r.leavers)}</td>
+                    <td className="num">
+                      {canDrill && r.leavers ? (
+                        <span className="drill" role="button" tabIndex={0}
+                          title="Show the clients behind this number"
+                          onClick={() => openDrill(r, 'leavers', 'Leavers (exited)', r.leavers!)}
+                          onKeyDown={(e) => e.key === 'Enter' && openDrill(r, 'leavers', 'Leavers (exited)', r.leavers!)}>
+                          {fmtInt(r.leavers)}
+                        </span>
+                      ) : fmtInt(r.leavers)}
+                    </td>
                     <td className="num">
                       {canDrill && r.exits_ph ? (
                         <span className="drill" role="button" tabIndex={0}

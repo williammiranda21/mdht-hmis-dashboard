@@ -105,7 +105,7 @@ function InflowPanel({ inflow }: { inflow: Inflow }) {
         </select>
       </div>
 
-      <div className="hc-tiles" style={{ marginTop: 4 }}>
+      <div className="hc-tiles dd-pad" style={{ marginTop: 4 }}>
         <div className="hc-t">
           <div className="k">Recent monthly inflow</div>
           <div className="v">{recentAvg != null ? fmtInt(recentAvg) : '—'}</div>
@@ -129,12 +129,14 @@ function InflowPanel({ inflow }: { inflow: Inflow }) {
         )}
       </div>
 
-      <InflowChart
-        hist={hist}
-        futureMonths={showForecast ? inflow.future_months : []}
-        wt={showForecast ? inflow.wt_forecasts : []}
-        trend={showForecast ? inflow.trend_forecasts : []}
-      />
+      <div className="dd-pad">
+        <InflowChart
+          hist={hist}
+          futureMonths={showForecast ? inflow.future_months : []}
+          wt={showForecast ? inflow.wt_forecasts : []}
+          trend={showForecast ? inflow.trend_forecasts : []}
+        />
+      </div>
     </div>
   );
 }
