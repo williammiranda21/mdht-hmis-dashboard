@@ -97,6 +97,7 @@ create table if not exists drill_clients (
   project_id    bigint not null,
   metric        text not null,                   -- 'c' | 'l' | 'p' | 'u' | 'los0' ...
   personal_ids  text[] not null,
+  detail        jsonb,                            -- dq: metrics only: [{pid, entry}] per offending enrollment (fix-list)
   primary key (period, project_id, metric)
 );
 

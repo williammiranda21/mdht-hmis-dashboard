@@ -46,7 +46,15 @@ const ELEMENTS = [
     denomKey: 'DQ_ActiveTotal' },
 ] as const;
 
-interface Category { key: string; ids: string[]; trend: { period: string; pct: number | null }[] }
+interface DetailRow { pid: string; entry: string | null }
+interface Category {
+  key: string;
+  ids: string[];
+  // enrollment-precise rows (dest/movein/income/annual) — one per offending stay;
+  // null for the client-level PII elements.
+  detail: DetailRow[] | null;
+  trend: { period: string; pct: number | null }[];
+}
 
 /** Missing-% over time. Lower is better, so a falling line is good — colored green
  *  when the latest point is at/under the previous, amber/red when rising. */
@@ -98,11 +106,16 @@ export default function DqFixList({
     .map((e) => ({ e, cat: byKey.get(e.key) }))
     .filter(({ e, cat }) => (data[e.denomKey] ?? 0) > 0 && (cat?.ids.length ?? 0) > 0);
 
-  const totalToFix = shown.reduce((s, { cat }) => s + (cat?.ids.length ?? 0), 0);
+  // count of rows to fix: enrollments when we have per-stay detail, else clients
+  const rowCount = (cat?: Category) => cat?.detail?.length ?? cat?.ids.length ?? 0;
+  const totalToFix = shown.reduce((s, { cat }) => s + rowCount(cat), 0);
 
   const exportCsv = () => {
-    const lines = ['error,client_id'];
-    shown.forEach(({ e, cat }) => cat!.ids.forEach((id) => lines.push(`${e.key},${id}`)));
+    const lines = ['error,client_id,entry_date'];
+    shown.forEach(({ e, cat }) => {
+      const rows = cat!.detail ?? cat!.ids.map((id) => ({ pid: id, entry: null }));
+      rows.forEach((d) => lines.push(`${e.key},${d.pid},${d.entry ?? ''}`));
+    });
     const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
     const a = document.createElement('a');
     a.href = url; a.download = `dq_fixlist_${projectId}_${period}.csv`; a.click();
@@ -135,17 +148,21 @@ export default function DqFixList({
                 <div className="dqfx-cat" key={e.key}>
                   <div className="dqfx-cat-h">
                     <div>
-                      <span className="dqfx-count">{cat!.ids.length}</span>
+                      <span className="dqfx-count">{rowCount(cat)}</span>
                       <b>{e.label}</b>
                     </div>
                     <TrendSpark trend={cat!.trend} />
                   </div>
                   <div className="dqfx-fix">→ {e.fix}</div>
                   <div className="dr-ids">
-                    {cat!.ids.map((id) => <code key={id}>{id}</code>)}
+                    {(cat!.detail ?? cat!.ids.map((id) => ({ pid: id, entry: null }))).map((d, i) => (
+                      <code key={`${d.pid}-${i}`} title={d.entry ? `Entry date ${d.entry}` : undefined}>
+                        {d.pid}{d.entry ? <span style={{ color: 'var(--muted)' }}> · {d.entry}</span> : null}
+                      </code>
+                    ))}
                   </div>
                   <button className="btn dqfx-copy" onClick={(ev) => {
-                    navigator.clipboard?.writeText(cat!.ids.join('\n'));
+                    navigator.clipboard?.writeText((cat!.detail?.map((d) => d.pid) ?? cat!.ids).join('\n'));
                     const el = ev.currentTarget; el.textContent = 'Copied ✓';
                     setTimeout(() => { el.textContent = '⧉ Copy these IDs'; }, 1200);
                   }}>⧉ Copy these IDs</button>

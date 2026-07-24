@@ -270,6 +270,7 @@ def build_drill_clients(drill: dict) -> list[dict]:
     use project_id 0 as a sentinel.
     """
     ids = drill["ids"]
+    dq_detail = drill.get("dq_detail", {})
     out = []
 
     def resolve(indices):
@@ -277,14 +278,19 @@ def build_drill_clients(drill: dict) -> list[dict]:
 
     for key, vals in drill.get("snap", {}).items():
         period, projid, metric = key.split("|")
-        out.append(
-            {
-                "period": period,
-                "project_id": int(projid),
-                "metric": metric,
-                "personal_ids": resolve(vals),
-            }
-        )
+        row = {
+            "period": period,
+            "project_id": int(projid),
+            "metric": metric,
+            "personal_ids": resolve(vals),
+        }
+        # Enrollment-precise fix-list detail (dq: metrics only) — [{pid, entry}]
+        # per offending enrollment, so re-enrollments don't collapse and each row
+        # shows which stay to fix. Null for every non-dq drill.
+        det = dq_detail.get(key)
+        if det is not None:
+            row["detail"] = [{"pid": ids[i], "entry": entry} for i, entry in det]
+        out.append(row)
     for key, vals in drill.get("sys", {}).items():
         period, metric = key.split("|")
         out.append(

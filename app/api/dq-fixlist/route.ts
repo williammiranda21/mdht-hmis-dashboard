@@ -48,7 +48,7 @@ export async function GET(req: Request) {
 
   const [drillRes, histRes] = await Promise.all([
     sb.from('drill_clients')
-      .select('metric, personal_ids')
+      .select('metric, personal_ids, detail')
       .eq('period', period)
       .eq('project_id', projectId)
       .in('metric', ELEMENTS.map((e) => e.metric)),
@@ -62,18 +62,25 @@ export async function GET(req: Request) {
 
   if (drillRes.error) return NextResponse.json({ error: drillRes.error.message }, { status: 500 });
 
-  const byMetric = new Map<string, string[]>(
-    (drillRes.data ?? []).map((r: { metric: string; personal_ids: string[] }) => [r.metric, r.personal_ids ?? []]),
+  type DetailRow = { pid: string; entry: string | null };
+  const rowsByMetric = new Map<string, { ids: string[]; detail: DetailRow[] | null }>(
+    (drillRes.data ?? []).map((r: { metric: string; personal_ids: string[]; detail: DetailRow[] | null }) =>
+      [r.metric, { ids: r.personal_ids ?? [], detail: r.detail ?? null }]),
   );
 
   const hist = (histRes.data ?? []) as { period: string; data: Record<string, number | null> }[];
   const recent = hist.slice(-TREND_MONTHS);
 
-  const categories = ELEMENTS.map((e) => ({
-    key: e.key,
-    ids: byMetric.get(e.metric) ?? [],
-    trend: recent.map((h) => ({ period: h.period, pct: (h.data?.[e.pctKey] as number | null) ?? null })),
-  }));
+  const categories = ELEMENTS.map((e) => {
+    const row = rowsByMetric.get(e.metric);
+    return {
+      key: e.key,
+      ids: row?.ids ?? [],
+      // enrollment-precise rows (dest/movein/income/annual); null for PII (client-level)
+      detail: row?.detail ?? null,
+      trend: recent.map((h) => ({ period: h.period, pct: (h.data?.[e.pctKey] as number | null) ?? null })),
+    };
+  });
 
   return NextResponse.json({ project_id: projectId, period, categories });
 }
