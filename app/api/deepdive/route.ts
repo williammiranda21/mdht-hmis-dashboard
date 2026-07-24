@@ -114,21 +114,26 @@ export async function GET(req: Request) {
   }
 
   // ── attributes: fetch each bounded flagged set, then intersect ────────────
-  let flagged: { long_stay: any[]; awaiting_movein: any[]; open_suspect: any[]; data_quality: any[]; chronic: any[] };
+  // data_quality is NOT here — it used to fetch clients by `dq_n>0`, but those
+  // BNL flags are CLIENT-level (they describe the person's SO / outreach record,
+  // e.g. "open SO enrollment superseded" or "no contact in Nd") and got shown
+  // under whatever project served the client — so an ES project was blamed for a
+  // client's Street Outreach issues. data_quality now uses the project-scoped
+  // dq:* records instead (built below), the same source as the DQ-tab fix-list.
+  let flagged: { long_stay: any[]; awaiting_movein: any[]; open_suspect: any[]; chronic: any[] };
   try {
-    const [longStay, awaiting, openSuspect, dq, chronic] = await Promise.all([
+    const [longStay, awaiting, openSuspect, chronic] = await Promise.all([
       fetchFlagged(sb, (q) => q.eq('long_stay', true)),
       // `detail` is written by bnl_core's status cascade — this prefix is stable.
       fetchFlagged(sb, (q) => q.like('detail', 'Matched to%')),
       fetchFlagged(sb, (q) => q.eq('open_suspect', true)),
-      fetchFlagged(sb, (q) => q.gt('dq_n', 0)),
       // HUD chronic-homelessness flag. Kept as its own list because the old
       // long_stay definition used to surface these people by accident, and the
       // signal is genuinely useful for prioritisation — just not the same
       // question as 'is this person stuck in my program'.
       fetchFlagged(sb, (q) => q.eq('chronic', true)),
     ]);
-    flagged = { long_stay: longStay, awaiting_movein: awaiting, open_suspect: openSuspect, data_quality: dq, chronic };
+    flagged = { long_stay: longStay, awaiting_movein: awaiting, open_suspect: openSuspect, chronic };
   } catch (e) {
     // A user without BNL access trips RLS here — return counts, no names.
     return NextResponse.json({
@@ -154,6 +159,56 @@ export async function GET(req: Request) {
 
   const desc = (k: string) => (a: any, b: any) => (b[k] ?? 0) - (a[k] ?? 0);
 
+  // ── data_quality: project-scoped APR Q6 errors (dq:* records) ─────────────
+  // Only errors on enrollments AT the selected projects — this project's own
+  // exits missing a destination, its enrollments missing a move-in / income /
+  // annual. It can never surface another project's SO enrollment. Same source
+  // as the DQ-tab fix-list, so the two can't disagree.
+  const DQ_LABELS: Record<string, string> = {
+    'dq:dest': 'Missing exit destination',
+    'dq:movein': 'Missing move-in date',
+    'dq:income': 'Income missing or unknown at entry',
+    'dq:annual': 'Overdue annual assessment',
+  };
+  const dqByPid = new Map<string, { project_id: number; issues: string[] }>();
+  const { data: dqRows } = await sb
+    .from('drill_clients')
+    .select('project_id, metric, personal_ids')
+    .eq('period', period)
+    .in('project_id', ids)
+    .like('metric', 'dq:%');
+  for (const row of dqRows ?? []) {
+    const label = DQ_LABELS[row.metric as string];
+    if (!label) continue;
+    for (const pid of (row.personal_ids as string[]) ?? []) {
+      const e = dqByPid.get(pid) ?? { project_id: Number(row.project_id), issues: [] };
+      e.issues.push(label);
+      dqByPid.set(pid, e);
+    }
+  }
+  // Names/attributes for the flagged clients (those in the BNL cohort). A client
+  // with a DQ error but outside the cohort still shows — by hashed ID — because
+  // the error is real and project-scoped; it just carries no name.
+  const dqPids = [...dqByPid.keys()];
+  const dqAttrs = new Map<string, any>();
+  for (let i = 0; i < dqPids.length; i += 200) {
+    const { data } = await sb.from('bnl_clients').select(ATTR_COLS).in('pid', dqPids.slice(i, i + 200));
+    for (const r of (data ?? []) as any[]) dqAttrs.set(r.pid, r);
+  }
+  const dataQuality = [...dqByPid.entries()]
+    .map(([pid, { project_id, issues }]) => {
+      const a = dqAttrs.get(pid);
+      const info = projInfo.get(project_id);
+      return {
+        ...(a ?? {}), pid, project_id,
+        project: info?.name ?? null, ptype: info?.type ?? a?.ptype ?? null,
+        dq: issues, dq_n: issues.length,
+      };
+    })
+    // most errors first, then longest at the project
+    .sort((x, y) => (y.dq.length - x.dq.length) || ((y.days_at_project ?? 0) - (x.days_at_project ?? 0)))
+    .slice(0, LIMIT);
+
   return NextResponse.json({
     served,
     matched: matchedPids.size,
@@ -165,7 +220,7 @@ export async function GET(req: Request) {
       awaiting_movein: take(flagged.awaiting_movein,
         (a, b) => String(a.entry ?? '').localeCompare(String(b.entry ?? ''))),
       open_suspect: take(flagged.open_suspect, desc('days_since_contact')),
-      data_quality: take(flagged.data_quality, desc('dq_n')),
+      data_quality: dataQuality,
       // longest-homeless first — this one IS about the 3.917 episode
       chronic: take(flagged.chronic, desc('days_homeless')),
     },

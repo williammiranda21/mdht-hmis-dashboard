@@ -48,8 +48,8 @@ const LISTS: { key: ListKey; title: string; why: string; empty: string }[] = [
   {
     key: 'data_quality',
     title: 'Data quality to fix',
-    why: 'Records carrying HUD data-quality flags. These affect your APR and system reporting.',
-    empty: 'No data-quality flags.',
+    why: 'APR Q6 errors on enrolments AT this project — a missing exit destination, missing move-in date, income missing or unknown at entry, or an overdue annual assessment. These affect your APR. Client-level issues from other projects (e.g. an open Street Outreach enrolment) are not shown here — they belong to that project. Same records as the fix-list on the Data Quality tab.',
+    empty: 'No APR Q6 data-quality errors on this project’s enrolments. 🎉',
   },
 ];
 
