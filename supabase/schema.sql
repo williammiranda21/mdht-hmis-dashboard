@@ -101,6 +101,15 @@ create table if not exists drill_clients (
   primary key (period, project_id, metric)
 );
 
+-- ── Destination profile — ALL exits by destination code, per project + month ──
+-- (returns_by_dest covers PH exits only). Loaded by pipeline/recompute_dest.py.
+create table if not exists dest_profile (
+  period      text not null,
+  project_id  bigint not null,
+  data        jsonb not null,                    -- {destCode: count} + "_n" total exits
+  primary key (period, project_id)
+);
+
 -- ── Meta (generated_at, period range, etc.) ──────────────────────────────────
 create table if not exists meta (
   key   text primary key,

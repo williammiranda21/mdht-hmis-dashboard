@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { fmtInt, periodLabel } from '../../../lib/format';
 import PerformanceGrid from './PerformanceGrid';
 import ProjectPathways from './ProjectPathways';
+import DigestSection from './DigestSection';
 
 interface Opt { id: number; name: string; type: string }
 
@@ -164,6 +165,10 @@ export default function DeepDiveView({
             : 'Select at least one project to begin.'}
         </div>
       </div>
+
+      {/* What changed since last month — before the "what needs attention" grid.
+          Compares the last two COMPLETE months (independent of the period picker). */}
+      {sel.length > 0 && <DigestSection projectIds={sel} />}
 
       {/* Which PROJECTS need attention, before the worklists say which CLIENTS.
           Driven by the selection only — the period picker scopes worklist

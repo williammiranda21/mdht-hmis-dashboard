@@ -123,6 +123,17 @@ export async function GET(req: Request) {
     survival = { project: selfRes.data ?? null, type: typeRes.data ?? null };
   }
 
+  // ── Destination profile (Pillar 3) — snapshot mode, monthly periods only ─────
+  // ALL exits by destination code for this project+month (returns_by_dest covers
+  // PH exits only). Loaded by pipeline/recompute_dest.py; an absent row means no
+  // exits that month (or a period outside the loader's trailing window).
+  let destProfile: Record<string, number> | null = null;
+  if (mode === 'snapshot' && /^\d{4}-\d{2}$/.test(period)) {
+    const { data: dp } = await sb.from('dest_profile').select('data')
+      .eq('period', period).eq('project_id', projectId).maybeSingle();
+    destProfile = (dp?.data as Record<string, number>) ?? null;
+  }
+
   // ── Performance diagnosis (Pillar 2) ─────────────────────────────────────────
   // Cross-metric, plain-language read vs same-type peers (lib/diagnosis.ts — an
   // auditable rule library over stored numbers; deliberately NOT a restatement of
@@ -154,5 +165,5 @@ export async function GET(req: Request) {
     });
   }
 
-  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers, dest, survival, diagnosis });
+  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers, dest, survival, diagnosis, destProfile });
 }
