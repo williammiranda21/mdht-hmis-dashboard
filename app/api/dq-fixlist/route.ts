@@ -100,5 +100,27 @@ export async function GET(req: Request) {
     detail: r.detail ?? null,
   }));
 
+  // ── CSV export (?format=csv) — a real server download, NOT a browser blob.
+  // Blob downloads break under the county's Web Isolation (its scanning proxy
+  // 500s them); a plain GET with Content-Disposition survives it.
+  if (sp.get('format') === 'csv') {
+    const lines = ['error,client_id,entry_date'];
+    for (const c of categories) {
+      const rows = c.detail ?? c.ids.map((id) => ({ pid: id, entry: null }));
+      for (const d of rows) lines.push(`${c.key},${d.pid},${d.entry ?? ''}`);
+    }
+    for (const f of eva) {
+      const rows = f.detail ?? f.ids.map((id) => ({ pid: id, entry: null }));
+      for (const d of rows) lines.push(`eva_${f.id},${d.pid},${d.entry ?? ''}`);
+    }
+    return new NextResponse(lines.join('\r\n'), {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="dq_fixlist_${projectId}_${period}.csv"`,
+        'Cache-Control': 'no-store',
+      },
+    });
+  }
+
   return NextResponse.json({ project_id: projectId, period, categories, eva, evaPeriod });
 }
