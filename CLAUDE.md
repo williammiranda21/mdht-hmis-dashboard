@@ -148,6 +148,12 @@ Leadership reports against these numbers.
   shown on the project row and the unit hero card. PH (types 9/10) keeps static UnitInventory.
   An RRH project with zero moved-in households drops out of the table (cap<=0 skip), same as
   a zero-HIC project did before.
+  **Hotel/motel programs get the same treatment (2026-07-30):** rooms are leased per household
+  as needed, so their HIC is aspirational (City of Miami showed 650 beds / 30% util; reality
+  194 clients). Detected by NAME (`hotel|motel`, residential types 0/1/2/8, DV excluded);
+  capacity = PIT clients, pegged 100%, `dyn:true` on the row. Implemented by REPLACING the
+  hotel rows' BedInventory in `ai` with PIT (fam/ind split preserved) so every aggregate
+  (type, household, empty-beds) inherits it with no special-casing.
 - **Returns (M2) need a full 24-month lookback**, so only ~21 monthly periods exist.
 - **In-progress quarter/FY periods cap at `REPORT_END`** (last day of the most recent complete
   month) — otherwise inventory over-counts. See `recompute_util.py::period_range`.

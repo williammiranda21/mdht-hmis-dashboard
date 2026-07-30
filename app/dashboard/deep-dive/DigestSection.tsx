@@ -41,6 +41,7 @@ function Delta({ p, unit, dir, dp = 1 }: { p: Pair; unit: string; dir: 'up' | 'd
 export default function DigestSection({ projectIds }: { projectIds: number[] }) {
   const [data, setData] = useState<DigestData | null>(null);
   const [err, setErr] = useState(false);
+  const [open, setOpen] = useState(true);
 
   useEffect(() => {
     if (!projectIds.length) { setData(null); return; }
@@ -67,16 +68,19 @@ export default function DigestSection({ projectIds }: { projectIds: number[] }) 
 
   return (
     <div className="panel">
-      <div className="panel-h" style={{ paddingBottom: 8 }}>
+      <div className="panel-h dd-head" role="button" tabIndex={0}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => e.key === 'Enter' && setOpen((o) => !o)}>
         <div>
-          <h3>What changed — {periodLabel(data.cur)} vs {periodLabel(data.prev)}</h3>
+          <h3>What changed <span className="bnl-sub">{periodLabel(data.cur)} vs {periodLabel(data.prev)}</span></h3>
           <div className="meta">
             Last two complete months. New/cleared counts are unique clients on the
             data-quality fix-list; the worklists below follow their own period picker.
           </div>
         </div>
+        <span className="dd-caret">{open ? '▾' : '▸'}</span>
       </div>
-      <div className="scroll">
+      {open && <div className="scroll">
         <table className="bnl-table">
           <thead>
             <tr>
@@ -122,7 +126,7 @@ export default function DigestSection({ projectIds }: { projectIds: number[] }) 
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
     </div>
   );
 }

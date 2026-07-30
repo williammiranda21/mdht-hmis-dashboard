@@ -5,6 +5,7 @@ import { fmtInt, periodLabel } from '../../../lib/format';
 import PerformanceGrid from './PerformanceGrid';
 import ProjectPathways from './ProjectPathways';
 import DigestSection from './DigestSection';
+import LeaseUpFunnel from './LeaseUpFunnel';
 
 interface Opt { id: number; name: string; type: string }
 
@@ -166,24 +167,31 @@ export default function DeepDiveView({
         </div>
       </div>
 
-      {/* What changed since last month — before the "what needs attention" grid.
-          Compares the last two COMPLETE months (independent of the period picker). */}
-      {sel.length > 0 && <DigestSection projectIds={sel} />}
+      {/* The page reads top-down as: what changed → how the projects perform →
+          which clients need attention. grouplabel dividers (same convention as
+          the Utilization tab) keep the zones visually distinct. */}
+      {sel.length > 0 && (
+        <>
+          <div className="grouplabel">Since last month</div>
+          {/* Compares the last two COMPLETE months (independent of the period picker). */}
+          <DigestSection projectIds={sel} />
 
-      {/* Which PROJECTS need attention, before the worklists say which CLIENTS.
-          Driven by the selection only — the period picker scopes worklist
-          membership, while the grid always shows the trailing 24 months. */}
-      {sel.length > 0 && <PerformanceGrid projectIds={sel} options={options} />}
-
-      {/* Pathways — one project at a time (picker inside), so it sits below the
-          multi-project grid. Only projects meeting the cohort minimum return data. */}
-      {sel.length > 0 && <ProjectPathways projectIds={sel} options={options} />}
+          <div className="grouplabel">Project performance &amp; lease-up</div>
+          {/* Lease-up funnel renders only when the selection includes PH-type projects. */}
+          <LeaseUpFunnel projectIds={sel} />
+          {/* Which PROJECTS need attention, before the worklists say which CLIENTS. */}
+          <PerformanceGrid projectIds={sel} options={options} />
+          {/* Pathways — one project at a time (picker inside). */}
+          <ProjectPathways projectIds={sel} options={options} />
+        </>
+      )}
 
       {err && <div className="panel"><div className="bnl-dq">{err}</div></div>}
       {loading && <div className="panel"><div className="hc-none">Loading worklists…</div></div>}
 
       {data && !loading && (
         <>
+          <div className="grouplabel">Worklists — clients needing attention</div>
           <div className="bnl-kpis" style={{ marginTop: 16 }}>
             {LISTS.map((l) => {
               const n = data.lists[l.key]?.length ?? 0;

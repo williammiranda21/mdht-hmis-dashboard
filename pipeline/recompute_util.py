@@ -90,10 +90,17 @@ def load_frames(exclude_dv: bool):
         inv = inv[~inv["ProjectID"].isin(dv_ids)].copy()
         eu = eu[~eu["ProjectID"].isin(dv_ids)].copy()
 
-    return inv, eu, len(dv_ids)
+    # Hotel/motel programs (name-matched, residential types): rooms are leased
+    # per household as needed, so the HIC bed count is aspirational, not real
+    # capacity. Same convention as RRH — capacity = people actually sheltered.
+    hotel_ids = set(proj.loc[
+        proj["ProjectName"].str.contains("hotel|motel", case=False, na=False)
+        & proj["ProjectType"].isin([0, 1, 2, 8]), "ProjectID"]) - dv_ids
+
+    return inv, eu, len(dv_ids), hotel_ids
 
 
-def make_util_per(_inv, _eu):
+def make_util_per(_inv, _eu, _hotel_ids=frozenset()):
     """Returns a _util_per(ps, pe) closure identical in logic to apr_monthly_report.py."""
     def _util_per(ps, pe):
         nextm = pe + pd.Timedelta(days=1)
@@ -104,6 +111,27 @@ def make_util_per(_inv, _eu):
         e = _eu[(_eu["EntryDate"] <= pe) & (_eu["ExitDate"].isna() | (_eu["ExitDate"] >= ps))].copy()
         e["nights"] = ((e["ExitDate"].fillna(nextm).clip(upper=nextm)) - (e["EntryDate"].clip(lower=ps))).dt.days.clip(lower=0)
         e["pit"] = ((e["EntryDate"] <= pe) & (e["ExitDate"].isna() | (e["ExitDate"] > pe))).astype(int)
+        # Hotel/motel programs: replace their HIC bed rows with the people actually
+        # sheltered (PIT), preserving the family/individual inventory split. Doing
+        # it on `ai` means every downstream aggregate (type, household, empty-beds)
+        # inherits the dynamic capacity with no further special-casing.
+        if _hotel_ids:
+            ai = ai.copy()
+            for hpid in _hotel_ids & set(ai["ProjectID"]):
+                he = e[e["ProjectID"] == hpid]
+                pit_fam = int(he.loc[he["fam"], "pit"].sum())
+                pit_ind = int(he.loc[~he["fam"], "pit"].sum())
+                m = ai["ProjectID"] == hpid
+                ai.loc[m, "BedInventory"] = 0
+                fam_rows = ai.index[m & ai["fi"]]
+                ind_rows = ai.index[m & ~ai["fi"]]
+                if len(fam_rows) and len(ind_rows):
+                    ai.loc[fam_rows[0], "BedInventory"] = pit_fam
+                    ai.loc[ind_rows[0], "BedInventory"] = pit_ind
+                elif len(fam_rows):
+                    ai.loc[fam_rows[0], "BedInventory"] = pit_fam + pit_ind
+                elif len(ind_rows):
+                    ai.loc[ind_rows[0], "BedInventory"] = pit_fam + pit_ind
         projs = []
         for pid, grp in ai.groupby("ProjectID"):
             t = grp["T"].iloc[0]
@@ -131,13 +159,17 @@ def make_util_per(_inv, _eu):
                 occ = ch["nights"].sum() / days; pit = int(ch["pit"].sum()); kind = "units"
             if cap <= 0:
                 continue
-            # RRH: inventory equals occupancy by definition (HUD), so utilization is
-            # pegged at 100% under both methods — month-boundary churn otherwise
-            # wobbles the avg-daily figure around 100% and trips the over/under flags.
-            util = 100.0 if t == "RRH" else round(float(occ) / cap * 100, 1)
-            putil = 100.0 if t == "RRH" else round(pit / cap * 100, 1)
+            # RRH + hotel/motel: inventory equals occupancy by definition (dynamic
+            # capacity), so utilization is pegged at 100% under both methods —
+            # month-boundary churn otherwise wobbles the avg-daily figure around
+            # 100% and trips the over/under flags.
+            dyn = t == "RRH" or pid in _hotel_ids
+            util = 100.0 if dyn else round(float(occ) / cap * 100, 1)
+            putil = 100.0 if dyn else round(pit / cap * 100, 1)
             row = {"n": nm, "t": t, "k": kind, "cap": cap, "occ": round(float(occ), 1),
                    "util": util, "pit": pit, "putil": putil}
+            if dyn:
+                row["dyn"] = True
             if aw is not None:
                 row["aw"] = aw
             projs.append(row)
@@ -250,9 +282,9 @@ def main():
 
     exclude_dv = not args.keep_dv
     print(f"Loading HMIS CSVs … (DV exclusion: {'ON' if exclude_dv else 'OFF'})", flush=True)
-    _inv, _eu, n_dv = load_frames(exclude_dv)
+    _inv, _eu, n_dv, _hotel = load_frames(exclude_dv)
     print(f"  {n_dv} DV (TargetPopulation==1) projects {'excluded' if exclude_dv else 'kept'}", flush=True)
-    util_per = make_util_per(_inv, _eu)
+    util_per = make_util_per(_inv, _eu, _hotel)
 
     client = make_client()
     meta = client.table("meta").select("value").eq("key", "util_periods").maybe_single().execute()

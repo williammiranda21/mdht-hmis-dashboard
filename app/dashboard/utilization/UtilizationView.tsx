@@ -285,7 +285,10 @@ export default function UtilizationView({ periods, granularity, period, util }: 
                         </span>
                       )}
                     </td>
-                    <td className="num" title={p.t === 'RRH' ? 'RRH inventory is dynamic per HUD: households with an active move-in, not the static HIC' : undefined}>
+                    <td className="num" title={
+                      p.t === 'RRH' ? 'RRH inventory is dynamic per HUD: households with an active move-in, not the static HIC'
+                      : p.dyn ? 'Hotel/motel program: rooms are leased as needed, so inventory equals the people actually sheltered, not the static HIC'
+                      : undefined}>
                       {p.cap.toLocaleString()} {p.k}</td>
                     <td className="num">{projOcc(p).toLocaleString()}</td>
                     <td className="num">

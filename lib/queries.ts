@@ -286,6 +286,9 @@ export interface UtilProject {
   /** RRH only: enrolled households still awaiting move-in. RRH capacity is
    *  dynamic (moved-in households, per HUD) so util pegs ~100% — this is the signal. */
   aw?: number;
+  /** Dynamic-capacity project (RRH or hotel/motel): inventory = people actually
+   *  housed/sheltered, so utilization is pegged at 100% by definition. */
+  dyn?: boolean;
 }
 export interface UtilRecord {
   hh: Record<string, UtilHH>;
