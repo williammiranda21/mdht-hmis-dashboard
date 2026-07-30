@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
+import { buildDiagnosis, type Diagnosis } from '../../../lib/diagnosis';
 
 export const dynamic = 'force-dynamic';
 
@@ -122,5 +123,36 @@ export async function GET(req: Request) {
     survival = { project: selfRes.data ?? null, type: typeRes.data ?? null };
   }
 
-  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers, dest, survival });
+  // ── Performance diagnosis (Pillar 2) ─────────────────────────────────────────
+  // Cross-metric, plain-language read vs same-type peers (lib/diagnosis.ts — an
+  // auditable rule library over stored numbers; deliberately NOT a restatement of
+  // the per-metric peer chart). Snapshot mode joins outcomes with the project's
+  // DQ record; returns mode reads the rows already fetched for the panel.
+  let diagnosis: Diagnosis | null = null;
+  if (period) {
+    const histRows = (historyRes.data ?? []) as unknown as Array<Record<string, unknown>>;
+    const latest = histRows.find((h) => h['period'] === period) ?? null;
+
+    let dqData: Record<string, unknown> | null = null;
+    if (mode === 'snapshot') {
+      const { data } = await sb.from('dq_metrics').select('data')
+        .eq('project_id', projectId).eq('granularity', granularity).eq('period', period).maybeSingle();
+      dqData = (data?.data ?? null) as Record<string, unknown> | null;
+    }
+
+    diagnosis = buildDiagnosis({
+      mode,
+      typeName: proj.type_name ?? 'similar',
+      projectType: proj.project_type ?? null,
+      selfProjectId: projectId,
+      latest,
+      peers: (peers as Array<Record<string, unknown>>),
+      survivalProject: (survival?.project as { median_days?: number | null; n?: number | null } | null) ?? null,
+      survivalType: (survival?.type as { median_days?: number | null } | null) ?? null,
+      dq: dqData,
+      dest: (dest as Record<string, { exits?: number | null; returns?: number | null }> | null) ?? null,
+    });
+  }
+
+  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers, dest, survival, diagnosis });
 }

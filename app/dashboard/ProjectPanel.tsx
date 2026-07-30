@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { periodLabel, fmtInt } from '../../lib/format';
 import { TimeToHousing, type SurvivalRow } from '../../components/TimeToHousing';
+import PerformanceDiagnosis from './PerformanceDiagnosis';
+import type { Diagnosis } from '../../lib/diagnosis';
 
 /* ── shapes returned by /api/project ─────────────────────────────────────── */
 interface ProjRec {
@@ -134,12 +136,13 @@ export default function ProjectPanel({
   const [peers, setPeers] = useState<PeerRow[]>([]);
   const [dest, setDest] = useState<Record<string, { exits: number; returns: number }> | null>(null);
   const [surv, setSurv] = useState<{ project: SurvivalRow | null; type: SurvivalRow | null } | null>(null);
+  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const isRet = mode === 'returns';
 
   useEffect(() => {
     let live = true;
-    setProj(null); setHistory(null); setErr(null); setDest(null); setSurv(null);
+    setProj(null); setHistory(null); setErr(null); setDest(null); setSurv(null); setDiagnosis(null);
     const qs = new URLSearchParams({
       project_id: String(projectId), granularity, period, household, subpopulation, mode,
     });
@@ -148,7 +151,7 @@ export default function ProjectPanel({
       .then((j) => {
         if (!live) return;
         setProj(j.project); setHistory(j.history); setPeers(j.peers ?? []); setDest(j.dest ?? null);
-        setSurv(j.survival ?? null);
+        setSurv(j.survival ?? null); setDiagnosis(j.diagnosis ?? null);
       })
       .catch(() => { if (live) { setErr('Could not load this project.'); setHistory([]); } });
     return () => { live = false; };
@@ -244,6 +247,10 @@ export default function ProjectPanel({
                 </>
               )}
             </div>
+
+            {/* Performance diagnosis (Pillar 2) — snapshot reads outcomes,
+                returns mode reads "do exits stick" on the Returns panel */}
+            <PerformanceDiagnosis diagnosis={diagnosis} />
 
             {/* Destination breakdown — returns mode only */}
             {isRet && dest && Object.keys(dest).length > 0 && (
