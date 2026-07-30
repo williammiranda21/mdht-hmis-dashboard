@@ -50,6 +50,10 @@ def load_frames(exclude_dv: bool):
     for c in ("InventoryStartDate", "InventoryEndDate"):
         inv[c] = pd.to_datetime(inv[c], errors="coerce")
     enr["EntryDate"] = pd.to_datetime(enr["EntryDate"], errors="coerce")
+    # MoveInDate drives RRH capacity (HUD: tenant-based inventory = households in
+    # units). HoH move-in only — units are counted by HoH rows, so no member
+    # propagation is needed here.
+    enr["MoveInDate"] = pd.to_datetime(enr.get("MoveInDate", pd.NaT), errors="coerce")
     ex["ExitDate"] = pd.to_datetime(ex["ExitDate"], errors="coerce")
     cli["DOB"] = pd.to_datetime(cli["DOB"], errors="coerce")
 
@@ -104,16 +108,39 @@ def make_util_per(_inv, _eu):
         for pid, grp in ai.groupby("ProjectID"):
             t = grp["T"].iloc[0]
             nm = str(grp["ProjectName"].iloc[0] or f"Project {pid}")[:46]
+            aw = None
             if t in _FIXED:
                 cap = int(grp["BedInventory"].sum()); ce = e[e["ProjectID"] == pid]
                 occ = ce["nights"].sum() / days; pit = int(ce["pit"].sum()); kind = "beds"
+            elif t == "RRH":
+                # HUD guidance: RRH is tenant-based — there is no fixed inventory.
+                # The HIC number equals the households actually in units, so capacity
+                # is the households with an ACTIVE MOVE-IN, not Inventory.csv (which
+                # is not maintained per move-in/out). Utilization pegs at ~100% by
+                # construction; the real RRH signal is `aw` (enrolled households
+                # still awaiting move-in).
+                ch = e[(e["ProjectID"] == pid) & (e["RelationshipToHoH"] == 1)]
+                mi = ch[ch["MoveInDate"].notna() & (ch["MoveInDate"] <= pe)]
+                mi_nights = ((mi["ExitDate"].fillna(nextm).clip(upper=nextm))
+                             - (mi["MoveInDate"].clip(lower=ps))).dt.days.clip(lower=0)
+                pit = int(((mi["MoveInDate"] <= pe) & (mi["ExitDate"].isna() | (mi["ExitDate"] > pe))).sum())
+                cap = pit; occ = mi_nights.sum() / days; kind = "units"
+                aw = max(0, int(ch["pit"].sum()) - pit)
             else:
                 cap = int(grp["UnitInventory"].sum()); ch = e[(e["ProjectID"] == pid) & (e["RelationshipToHoH"] == 1)]
                 occ = ch["nights"].sum() / days; pit = int(ch["pit"].sum()); kind = "units"
             if cap <= 0:
                 continue
-            projs.append({"n": nm, "t": t, "k": kind, "cap": cap, "occ": round(float(occ), 1),
-                          "util": round(float(occ) / cap * 100, 1), "pit": pit, "putil": round(pit / cap * 100, 1)})
+            # RRH: inventory equals occupancy by definition (HUD), so utilization is
+            # pegged at 100% under both methods — month-boundary churn otherwise
+            # wobbles the avg-daily figure around 100% and trips the over/under flags.
+            util = 100.0 if t == "RRH" else round(float(occ) / cap * 100, 1)
+            putil = 100.0 if t == "RRH" else round(pit / cap * 100, 1)
+            row = {"n": nm, "t": t, "k": kind, "cap": cap, "occ": round(float(occ), 1),
+                   "util": util, "pit": pit, "putil": putil}
+            if aw is not None:
+                row["aw"] = aw
+            projs.append(row)
 
         def _hh(capmask, occmask, types, useBeds=True):
             col = "BedInventory" if useBeds else "UnitInventory"
@@ -133,18 +160,28 @@ def make_util_per(_inv, _eu):
         allhh = _hh(_T, _Te, _FIXED); allhh["bt"] = byType
         ind = _hh(~ai["fi"], ~e["fam"], _FIXED)
         fam = _hh(ai["fi"], e["fam"], _FIXED)
+        # RRH aggregate — dynamic capacity (moved-in households), matching the
+        # per-project rows above. PH keeps its static UnitInventory.
+        rrh_hoh = e[(e["T"] == "RRH") & (e["RelationshipToHoH"] == 1)]
+        rrh_mi = rrh_hoh[rrh_hoh["MoveInDate"].notna() & (rrh_hoh["MoveInDate"] <= pe)]
+        rrh_nights = ((rrh_mi["ExitDate"].fillna(nextm).clip(upper=nextm))
+                      - (rrh_mi["MoveInDate"].clip(lower=ps))).dt.days.clip(lower=0)
+        rrh_cap = int(((rrh_mi["MoveInDate"] <= pe) & (rrh_mi["ExitDate"].isna() | (rrh_mi["ExitDate"] > pe))).sum())
+        rrh_occ = rrh_nights.sum() / days
+        rrh_aw = max(0, int(rrh_hoh["pit"].sum()) - rrh_cap)
         unitT = []
-        for t in ["RRH", "PH"]:
-            cap = int(ai[ai["T"] == t]["UnitInventory"].sum())
-            if cap <= 0:
-                continue
-            ch = e[(e["T"] == t) & (e["RelationshipToHoH"] == 1)]
-            unitT.append([t, cap, round(float(ch["nights"].sum()) / days / cap * 100, 1), round(float(ch["pit"].sum()) / cap * 100, 1)])
-        ucap = int(ai[ai["T"].isin(_UNITB)]["UnitInventory"].sum())
-        usel = e[e["T"].isin(_UNITB) & (e["RelationshipToHoH"] == 1)]
-        uocc = usel["nights"].sum() / days; upit = int(usel["pit"].sum())
+        if rrh_cap > 0:
+            unitT.append(["RRH", rrh_cap, 100.0, 100.0])
+        ph_cap = int(ai[ai["T"] == "PH"]["UnitInventory"].sum())
+        if ph_cap > 0:
+            ch = e[(e["T"] == "PH") & (e["RelationshipToHoH"] == 1)]
+            unitT.append(["PH", ph_cap, round(float(ch["nights"].sum()) / days / ph_cap * 100, 1), round(float(ch["pit"].sum()) / ph_cap * 100, 1)])
+        ph_sel = e[(e["T"] == "PH") & (e["RelationshipToHoH"] == 1)]
+        ucap = ph_cap + rrh_cap
+        uocc = ph_sel["nights"].sum() / days + rrh_occ
+        upit = int(ph_sel["pit"].sum()) + rrh_cap
         unit = {"c": ucap, "o": round(float(uocc)), "u": round(float(uocc) / ucap * 100, 1) if ucap else None,
-                "p": upit, "pu": round(upit / ucap * 100, 1) if ucap else None, "bt": unitT}
+                "p": upit, "pu": round(upit / ucap * 100, 1) if ucap else None, "bt": unitT, "aw": rrh_aw}
         empty = max(0, round(allhh["c"] - allhh["o"]))
         over = len([p for p in projs if p["util"] > 110]); under = len([p for p in projs if p["util"] < 65])
         return {"hh": {"All": allhh, "Individuals": ind, "Families": fam}, "unit": unit,

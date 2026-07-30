@@ -138,6 +138,16 @@ Leadership reports against these numbers.
   `apr_monthly_report.py::_util_per` and `pipeline/recompute_util.py`.
   **`util_metrics` is deliberately NOT in the default upsert order** — load it via
   `recompute_util.py`, or you'll reintroduce DV beds from the stale `data.json`.
+- **RRH capacity is DYNAMIC (2026-07-30, per HUD + user directive).** RRH is tenant-based —
+  the HIC inventory equals the households actually in units, and the county cannot maintain
+  Inventory.csv per move-in/out. So in both `_util_per` copies: RRH capacity = HoH enrollments
+  with an ACTIVE MOVE-IN (point-in-time), `Inventory.csv UnitInventory` is ignored for RRH,
+  and utilization is PEGGED at 100% under both methods (inventory ≡ occupancy by definition;
+  an un-pegged avg-daily figure wobbles with month-boundary churn and trips the over/under
+  flags). The real RRH signal is the `aw` field — enrolled households awaiting move-in —
+  shown on the project row and the unit hero card. PH (types 9/10) keeps static UnitInventory.
+  An RRH project with zero moved-in households drops out of the table (cap<=0 skip), same as
+  a zero-HIC project did before.
 - **Returns (M2) need a full 24-month lookback**, so only ~21 monthly periods exist.
 - **In-progress quarter/FY periods cap at `REPORT_END`** (last day of the most recent complete
   month) — otherwise inventory over-counts. See `recompute_util.py::period_range`.

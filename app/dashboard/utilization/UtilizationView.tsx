@@ -146,7 +146,8 @@ export default function UtilizationView({ periods, granularity, period, util }: 
           foot: `<b>${bO.toLocaleString()}</b> of ${HD.c.toLocaleString()} beds · ${hh === 'All' ? `${bedProjCount} projects` : hh}` } as CardData,
         unitCard: { util: uU, occ: uO, cap: util.unit.c, byType: util.unit.bt ?? null,
           vlabel: 'Tenant-based · scattered-site',
-          foot: `<b>${uO.toLocaleString()}</b> of ${util.unit.c.toLocaleString()} units · ${unitProjCount} projects` } as CardData,
+          foot: `<b>${uO.toLocaleString()}</b> of ${util.unit.c.toLocaleString()} units · ${unitProjCount} projects`
+            + ((util.unit.aw ?? 0) > 0 ? ` · <b>${util.unit.aw!.toLocaleString()}</b> RRH households awaiting move-in` : '') } as CardData,
         emptyVal: util.empty, overVal: util.over, underVal: util.under,
       };
     }
@@ -275,8 +276,17 @@ export default function UtilizationView({ periods, granularity, period, util }: 
                 const u = projUtil(p);
                 return (
                   <tr key={`${p.n}-${i}`}>
-                    <td><span className="nm">{p.n}</span><span className="ty">{p.t}</span></td>
-                    <td className="num">{p.cap.toLocaleString()} {p.k}</td>
+                    <td>
+                      <span className="nm">{p.n}</span><span className="ty">{p.t}</span>
+                      {p.aw != null && p.aw > 0 && (
+                        <span style={{ color: 'var(--warn)', fontSize: 12, marginLeft: 8 }}
+                          title="Enrolled households without a move-in date yet. RRH capacity is the households IN units (per HUD), so lease-up backlog shows here, not in the utilization %.">
+                          {p.aw.toLocaleString()} awaiting move-in
+                        </span>
+                      )}
+                    </td>
+                    <td className="num" title={p.t === 'RRH' ? 'RRH inventory is dynamic per HUD: households with an active move-in, not the static HIC' : undefined}>
+                      {p.cap.toLocaleString()} {p.k}</td>
                     <td className="num">{projOcc(p).toLocaleString()}</td>
                     <td className="num">
                       <span className="ubar">

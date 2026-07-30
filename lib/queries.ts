@@ -276,8 +276,17 @@ export async function getUtilPeriods(granularity: Granularity): Promise<string[]
   return [...(lists[granularity] ?? [])].reverse();
 }
 
-export interface UtilHH { c: number; o: number; u: number; p: number; pu: number; bt?: [string, number, number, number][] }
-export interface UtilProject { n: string; t: string; k: string; cap: number; occ: number; util: number; pit: number; putil: number }
+export interface UtilHH {
+  c: number; o: number; u: number; p: number; pu: number; bt?: [string, number, number, number][];
+  /** unit block only: RRH households enrolled but awaiting move-in (see UtilProject.aw). */
+  aw?: number;
+}
+export interface UtilProject {
+  n: string; t: string; k: string; cap: number; occ: number; util: number; pit: number; putil: number;
+  /** RRH only: enrolled households still awaiting move-in. RRH capacity is
+   *  dynamic (moved-in households, per HUD) so util pegs ~100% — this is the signal. */
+  aw?: number;
+}
 export interface UtilRecord {
   hh: Record<string, UtilHH>;
   unit: UtilHH;
