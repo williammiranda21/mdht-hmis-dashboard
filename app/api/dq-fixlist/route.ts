@@ -21,6 +21,7 @@ const ELEMENTS: { key: string; metric: string; pctKey: string }[] = [
   { key: 'dest', metric: 'dq:dest', pctKey: 'DQ_Dest_pct' },
   { key: 'movein', metric: 'dq:movein', pctKey: 'DQ_MoveIn_pct' },
   { key: 'income', metric: 'dq:income', pctKey: 'DQ_IncMiss_pct' },
+  { key: 'incexit', metric: 'dq:incexit', pctKey: 'DQ_IncExit_pct' },
   { key: 'annual', metric: 'dq:annual', pctKey: 'DQ_Annual_pct' },
   // PII (Q6a) — client-level, fix once per client. Deduped to unique clients in
   // the ETL, so the count here is people-to-fix, while the trend % stays the

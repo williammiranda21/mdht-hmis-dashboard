@@ -298,14 +298,20 @@ export default function BnlView({
                     </td>
                     <td className="num">{r.sys_days3.toLocaleString()} d <span className="bnl-sub">· {r.episodes3} ep</span></td>
                     <td>{r.risk_pts == null ? <span className="bnl-sub">—</span> : (
-                      <span className={`bnl-rp ${r.risk_pts >= 5 ? 'bnl-rp-hi' : r.risk_pts >= 3 ? 'bnl-rp-md' : 'bnl-rp-lo'}`}
-                        title={`partial score — out of ${r.risk_max} available points`}>{r.risk_pts} pts</span>
+                      // Youth prioritization bands per spec: Low 1–7, High 8+
+                      <span className={`bnl-rp ${(r.risk_band ?? (r.risk_pts >= 8 ? 'High' : 'Low')) === 'High' ? 'bnl-rp-hi' : r.risk_pts >= 5 ? 'bnl-rp-md' : 'bnl-rp-lo'}`}
+                        title={`${r.risk_band ?? ''} priority — ${r.risk_pts} of ${r.risk_max} points (HNA items pending)`}>
+                        {r.risk_pts} pts{r.risk_band === 'High' ? ' · High' : ''}</span>
                     )}</td>
                     <td>{r.ref_type ? (
                       <><div>{r.ref_type} · <b>{r.ref_status}</b></div><div className="bnl-sub">{r.ref_date}{r.ref_prov ? ` · ${r.ref_prov}` : ''}</div></>
                     ) : <span className="bnl-sub">—</span>}</td>
                     <td className="num">{r.last_contact}</td>
-                    <td className="num">{r.assessed ?? <span className="bnl-sub">no</span>}</td>
+                    <td className="num">{r.assessed
+                      ? <>{r.assessed}{r.spdat_tool && (
+                          <div className="bnl-sub">{r.spdat_tool}{r.spdat_score != null ? ` · ${r.spdat_score}` : ''}</div>
+                        )}</>
+                      : <span className="bnl-sub">no</span>}</td>
                   </tr>
                 );
               })}

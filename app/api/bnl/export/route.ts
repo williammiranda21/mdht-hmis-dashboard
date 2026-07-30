@@ -19,6 +19,7 @@ const COLS = [
   'ep_start', 'sys_days3', 'episodes3', 'times3_sr', 'months3_sr', 'dob', 'sex', 'race',
   'income', 'income_date', 'dv_fleeing', 'dv_survivor', 'foster', 'jj',
   'ref_type', 'ref_status', 'ref_date', 'ref_prov', 'risk_pts', 'risk_max',
+  'risk_band', 'spdat_score', 'spdat_tool', 'spdat_date',
   'last_contact', 'assessed', 'is_new', 'returned', 'chronic', 'veteran', 'family',
   'parenting', 'unaccompanied', 'in_school',
 ];

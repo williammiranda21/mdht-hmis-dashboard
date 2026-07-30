@@ -49,6 +49,10 @@ export interface BnlClient {
   sys_days3: number;
   episodes3: number;
   risk_pts: number | null;
+  risk_band: string | null;
+  spdat_score: number | null;
+  spdat_tool: string | null;
+  spdat_date: string | null;
   risk_max: number | null;
   ref_type: string | null;
   ref_status: string | null;

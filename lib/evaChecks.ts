@@ -16,7 +16,7 @@ export interface EvaCheck {
   id: string;            // Eva check id, e.g. '2' → metric 'eva:2'
   label: string;
   severity: EvaSeverity;
-  category: 'Household' | 'Dates' | 'Duplicates' | 'Income';
+  category: 'Household' | 'Dates' | 'Duplicates';
   meaning: string;       // what this actually says about the record
   fix: string;           // concrete ServicePoint steps
   breaks: string;        // which published numbers this corrupts (blast radius)
@@ -103,37 +103,6 @@ export const EVA_CHECKS: EvaCheck[] = [
     meaning: 'The same client has two or more enrollments at the same project with the same entry date — one stay entered twice.',
     fix: 'Open the client’s enrollments, confirm which record carries the real assessments, and delete the duplicate (or ask the HMIS Lead to merge).',
     breaks: 'Double-counts the client in served, utilization, and every per-enrollment measure.',
-  },
-  // ── Income consistency ─────────────────────────────────────────────────────
-  {
-    id: '88', label: 'No income, but sources recorded (entry)', severity: 'error', category: 'Income',
-    meaning: 'Income from Any Source says "No" (or unknown) at entry, yet at least one income source is checked Yes.',
-    fix: 'Open the entry assessment: if the client has income, set Income from Any Source = Yes; if not, uncheck the source rows.',
-    breaks: 'Income-at-entry measures, APR Q12, income-growth outcomes (SPM 4).',
-  },
-  {
-    id: '90', label: 'Income = Yes, but no source recorded (entry)', severity: 'error', category: 'Income',
-    meaning: 'Income from Any Source says "Yes" at entry, but no individual source is checked.',
-    fix: 'Open the entry assessment and check the actual source(s) (earned, SSI, SSDI, TANF…) with amounts.',
-    breaks: 'Income detail in APR Q12; earned-vs-other income splits (SPM 4).',
-  },
-  {
-    id: '94', label: 'No income, but sources recorded (exit)', severity: 'error', category: 'Income',
-    meaning: 'Same contradiction as at entry, but on the exit assessment.',
-    fix: 'Open the exit assessment and reconcile the yes/no answer with the source rows.',
-    breaks: 'Income-at-exit outcomes — the APR’s headline income change measure.',
-  },
-  {
-    id: '95', label: 'Income = Yes, but no source recorded (exit)', severity: 'error', category: 'Income',
-    meaning: 'Exit assessment says the client has income but names no source.',
-    fix: 'Open the exit assessment and check the actual source(s) with amounts.',
-    breaks: 'Income-at-exit outcomes, SPM 4.',
-  },
-  {
-    id: '89', label: 'Income missing at exit', severity: 'error', category: 'Income',
-    meaning: 'An adult or head of household left the project with no income question answered at exit.',
-    fix: 'Complete the exit assessment’s income section — an amount, "no income", or an accurate "don’t know / refused".',
-    breaks: 'Income-at-exit outcomes; large gaps here void the income-change story for the project.',
   },
 ];
 

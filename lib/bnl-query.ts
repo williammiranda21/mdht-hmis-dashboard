@@ -18,7 +18,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  *  client, which is what keeps this payload small. */
 export const ROSTER_COLS =
   'pid, name, age, status, detail, enrolled, project, ptype, last_contact, ' +
-  'days_homeless, sys_days3, episodes3, risk_pts, risk_max, ' +
+  'days_homeless, sys_days3, episodes3, risk_pts, risk_max, risk_band, ' +
+  'spdat_score, spdat_tool, spdat_date, ' +
   'ref_type, ref_status, ref_date, ref_prov, assessed, dq_n, ' +
   'chronic, is_new, returned, veteran, family, parenting, unaccompanied, in_school';
 

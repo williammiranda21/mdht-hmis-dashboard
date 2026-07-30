@@ -186,8 +186,12 @@ create table if not exists bnl_clients (
   ref_status     text,                            -- accepted | client rejected | provider rejected | pending
   ref_date       date,
   ref_prov       text,                            -- referred-to provider when recorded
-  risk_pts       int,                             -- youth prioritization score (partial)
+  risk_pts       int,                             -- youth prioritization score (base + TAY-SPDAT)
   risk_max       int,
+  risk_band      text,                            -- youth: 'Low' (1-7) | 'High' (8+)
+  spdat_score    int,                             -- most recent SPDAT GRAND TOTAL (side-cars)
+  spdat_tool     text,                            -- 'VI-SPDAT' | 'F-SPDAT' | 'TAY-SPDAT'
+  spdat_date     date,                            -- date the SPDAT was completed (= assessed)
   chronic        boolean default false,           -- HUD CH logic (approx.): disabling + 12mo/4x-12mo
   is_new         boolean default false,          -- newly identified (30d)
   returned       boolean default false,

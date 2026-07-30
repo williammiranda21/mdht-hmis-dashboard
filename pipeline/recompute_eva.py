@@ -15,8 +15,6 @@ v1 scope (user-approved 2026-07-30; specs in outputs/eva_check_inventory.md):
                        84 entered-before-born · 143 age>100 · 40 move-in-outside-stay ·
                        69 homeless-start-after-entry
   Duplicates           1 same client+project+entry-date (High Priority)
-  Income consistency   88 no-income-but-sources · 90 income-yes-no-sources ·
-                       94/95 same at exit · 89 income missing at exit (adult/HoH leavers)
 
 Universe: enrollments active within the trailing 12 months of the export end
 (older closed stays aren't actionable). APR Q6 dq:* records are untouched.
@@ -39,10 +37,6 @@ WEB = HERE.parent
 DATA_DIR = WEB.parent / "hud_data"
 LOOKBACK_DAYS = 365
 PH_TYPES = {3, 9, 10, 13}
-INCOME_SOURCES = ["Earned", "Unemployment", "SSI", "SSDI", "VADisabilityService",
-                  "VADisabilityNonService", "PrivateDisability", "WorkersComp", "TANF",
-                  "GA", "SocSecRetirement", "Pension", "ChildSupport", "Alimony",
-                  "OtherIncomeSource"]
 
 
 def load_env():
@@ -77,9 +71,6 @@ def main():
                                "DateToStreetESSH", "DateCreated"])
     ex = pd.read_csv(DATA_DIR / "Exit.csv", low_memory=False,
                      usecols=["EnrollmentID", "ExitDate"])
-    inc = pd.read_csv(DATA_DIR / "IncomeBenefits.csv", low_memory=False,
-                      usecols=["EnrollmentID", "DataCollectionStage",
-                               "IncomeFromAnySource"] + INCOME_SOURCES)
 
     for c in ("EntryDate", "MoveInDate", "DateToStreetESSH", "DateCreated"):
         enr[c] = pd.to_datetime(enr[c], errors="coerce")
@@ -130,28 +121,6 @@ def main():
     # ── Duplicate enrollments (High Priority) ────────────────────────────────
     dup = e.duplicated(subset=["PersonalID", "ProjectID", "EntryDate"], keep=False)
     flag("1", dup)
-
-    # ── Income consistency (stage 1 = entry, 3 = exit) ───────────────────────
-    inc["any_src"] = (inc[INCOME_SOURCES] == 1).any(axis=1)
-    s1 = inc[inc["DataCollectionStage"] == 1].drop_duplicates("EnrollmentID", keep="last")
-    s3 = inc[inc["DataCollectionStage"] == 3].drop_duplicates("EnrollmentID", keep="last")
-    e1 = e.merge(s1[["EnrollmentID", "IncomeFromAnySource", "any_src"]],
-                 on="EnrollmentID", how="left")
-    e3 = e.merge(s3[["EnrollmentID", "IncomeFromAnySource", "any_src"]],
-                 on="EnrollmentID", how="left")
-    adult_hoh = (e["age_entry"] >= 18) | (e["RelationshipToHoH"] == 1)
-    # 88: says NO income (or unknown) at entry, but a source is checked
-    flag("88", (e1["IncomeFromAnySource"].isin([0, 8, 9, 99]) & e1["any_src"].fillna(False).astype(bool)).values)
-    # 90: says YES income at entry, but no source checked
-    flag("90", ((e1["IncomeFromAnySource"] == 1) & ~e1["any_src"].fillna(False).astype(bool)).values)
-    # 94/95: same contradictions at exit (leavers only)
-    left = e["ExitDate"].notna()
-    flag("94", (left.values & e3["IncomeFromAnySource"].isin([0, 8, 9, 99]).values
-                & e3["any_src"].fillna(False).astype(bool).values))
-    flag("95", (left.values & (e3["IncomeFromAnySource"] == 1).values
-                & (~e3["any_src"].fillna(False).astype(bool)).values))
-    # 89: adult/HoH leaver with no answered income at exit
-    flag("89", (left & adult_hoh).values & e3["IncomeFromAnySource"].isna().values)
 
     # ── Report ───────────────────────────────────────────────────────────────
     period = (as_of.replace(day=1) - pd.Timedelta(days=1)).strftime("%Y-%m")  # latest complete month

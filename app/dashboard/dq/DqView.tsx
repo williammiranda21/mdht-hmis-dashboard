@@ -271,7 +271,7 @@ export default function DqView({ periods, granularity, period, rows, evaCounts }
                 {vis('pii') && <th className={th('DQ_PII_Score', true)} onClick={() => toggleSort('DQ_PII_Score')}>Q6a PII {car('DQ_PII_Score')}</th>}
                 {vis('univ') && <th className={th('DQ_Univ_Score', true)} onClick={() => toggleSort('DQ_Univ_Score')}>Q6b Universal {car('DQ_Univ_Score')}</th>}
                 {vis('inc') && <th className={th('DQ_Inc_Score', true)} onClick={() => toggleSort('DQ_Inc_Score')}
-                  title="APR Q6c score, with income-consistency check counts beneath (chips = clients flagged, by severity)">Q6c Income {car('DQ_Inc_Score')}</th>}
+                  title="Full APR Q6c: income at entry AND exit — missing, don't-know/refused, or a yes/no answer that contradicts the source rows">Q6c Income {car('DQ_Inc_Score')}</th>}
                 {vis('chronic') && <th className={th('DQ_Chronic_Score', true)} onClick={() => toggleSort('DQ_Chronic_Score')}>Q6d Chronic {car('DQ_Chronic_Score')}</th>}
                 {vis('movein') && <th className={th('DQ_MoveIn_pct', true)} onClick={() => toggleSort('DQ_MoveIn_pct')}>Move-In Missing % {car('DQ_MoveIn_pct')}</th>}
                 {vis('annual') && <th className={th('DQ_Annual_pct', true)} onClick={() => toggleSort('DQ_Annual_pct')}>Annual Overdue % {car('DQ_Annual_pct')}</th>}
@@ -301,15 +301,7 @@ export default function DqView({ periods, granularity, period, rows, evaCounts }
                     <td className="num"><Gauge score={d.DQ_Score} /></td>
                     {vis('pii') && <td className="num"><ScorePill v={d.DQ_PII_Score} /></td>}
                     {vis('univ') && <td className="num"><ScorePill v={d.DQ_Univ_Score} /></td>}
-                    {vis('inc') && (
-                      <td className="num">
-                        <ScorePill v={d.DQ_Inc_Score} />
-                        {/* income-consistency checks live IN the income column */}
-                        <div style={{ marginTop: 3 }}>
-                          <ChecksCell c={evaCounts?.[r.project_id]?.['Income']} bare />
-                        </div>
-                      </td>
-                    )}
+                    {vis('inc') && <td className="num"><ScorePill v={d.DQ_Inc_Score} /></td>}
                     {vis('chronic') && <td className="num">{hasChronic ? <ScorePill v={d.DQ_Chronic_Score} /> : <span style={{ color: 'var(--muted)' }}>N/A</span>}</td>}
                     {vis('movein') && (isPH
                       ? <PctCell pct={d.DQ_MoveIn_pct} thr={10} sub={d.DQ_PHEnrolls ? `${d.DQ_MoveInBad || 0} of ${d.DQ_PHEnrolls} enrolled` : null} />
