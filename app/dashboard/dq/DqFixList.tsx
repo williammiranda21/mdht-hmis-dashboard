@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { periodLabel, fmtInt } from '../../../lib/format';
+import { EVA_BY_ID, EVA_SEVERITY_META, type EvaCheck } from '../../../lib/evaChecks';
 
 /**
  * Data-quality fix-list for one project — turns the APR Q6 percentages into the
@@ -47,6 +48,7 @@ const ELEMENTS = [
 ] as const;
 
 interface DetailRow { pid: string; entry: string | null }
+interface EvaFinding { id: string; ids: string[]; detail: DetailRow[] | null }
 interface Category {
   key: string;
   ids: string[];
@@ -85,14 +87,21 @@ export default function DqFixList({
   projectId: number; projectName: string; period: string; data: RowData; onClose: () => void;
 }) {
   const [cats, setCats] = useState<Category[] | null>(null);
+  const [eva, setEva] = useState<EvaFinding[]>([]);
+  const [evaPeriod, setEvaPeriod] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
-    setCats(null); setErr(null);
+    setCats(null); setErr(null); setEva([]);
     fetch(`/api/dq-fixlist?project=${projectId}&period=${encodeURIComponent(period)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((j) => { if (live) setCats(j.categories as Category[]); })
+      .then((j) => {
+        if (!live) return;
+        setCats(j.categories as Category[]);
+        setEva((j.eva ?? []) as EvaFinding[]);
+        setEvaPeriod(j.evaPeriod ?? null);
+      })
       .catch(() => { if (live) setErr('Could not load the fix-list.'); });
     return () => { live = false; };
   }, [projectId, period]);
@@ -110,11 +119,26 @@ export default function DqFixList({
   const rowCount = (cat?: Category) => cat?.detail?.length ?? cat?.ids.length ?? 0;
   const totalToFix = shown.reduce((s, { cat }) => s + rowCount(cat), 0);
 
+  // Eva findings joined to the guided registry, worst severity first then size.
+  const evaRecords = eva.reduce((s, f) => s + (f.detail?.length ?? f.ids.length), 0);
+  const evaSorted = useMemo(() =>
+    eva
+      .map((f) => ({ f, check: EVA_BY_ID.get(f.id) }))
+      .filter((x): x is { f: EvaFinding; check: EvaCheck } => !!x.check && x.f.ids.length > 0)
+      .sort((a, b) =>
+        (EVA_SEVERITY_META[a.check.severity].rank - EVA_SEVERITY_META[b.check.severity].rank)
+        || (b.f.ids.length - a.f.ids.length)),
+    [eva]);
+
   const exportCsv = () => {
     const lines = ['error,client_id,entry_date'];
     shown.forEach(({ e, cat }) => {
       const rows = cat!.detail ?? cat!.ids.map((id) => ({ pid: id, entry: null }));
       rows.forEach((d) => lines.push(`${e.key},${d.pid},${d.entry ?? ''}`));
+    });
+    evaSorted.forEach(({ f }) => {
+      const rows = f.detail ?? f.ids.map((id) => ({ pid: id, entry: null }));
+      rows.forEach((d) => lines.push(`eva_${f.id},${d.pid},${d.entry ?? ''}`));
     });
     const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
     const a = document.createElement('a');
@@ -133,14 +157,14 @@ export default function DqFixList({
         {err && <div className="bnl-dq" style={{ marginTop: 12 }}>{err}</div>}
 
         {cats && !err && (
-          shown.length === 0 ? (
+          shown.length === 0 && evaSorted.length === 0 ? (
             <div className="hc-none" style={{ padding: '24px 0' }}>
               🎉 No fixable data-quality issues on record for this project this period.
             </div>
           ) : (
             <>
               <div className="dr-head" style={{ marginTop: 12 }}>
-                <span><b>{fmtInt(totalToFix)}</b> record{totalToFix === 1 ? '' : 's'} to fix across {shown.length} categor{shown.length === 1 ? 'y' : 'ies'}</span>
+                <span><b>{fmtInt(totalToFix + evaRecords)}</b> record{totalToFix + evaRecords === 1 ? '' : 's'} to fix across {shown.length + evaSorted.length} categor{shown.length + evaSorted.length === 1 ? 'y' : 'ies'}</span>
                 <button className="btn" onClick={exportCsv}>⬇ Export CSV</button>
               </div>
 
@@ -169,9 +193,56 @@ export default function DqFixList({
                 </div>
               ))}
 
+              {/* ── HUD Eva checks — guided, severity-ranked (snapshot) ── */}
+              {evaSorted.length > 0 && (
+                <>
+                  <div className="dr-head" style={{ marginTop: 18 }}>
+                    <span>
+                      <b>Data quality checks</b>
+                      <span className="bnl-sub"> · record hygiene as of {evaPeriod ? periodLabel(evaPeriod) : 'latest month'}</span>
+                    </span>
+                  </div>
+                  {evaSorted.map(({ f, check }) => {
+                    const sev = EVA_SEVERITY_META[check.severity];
+                    const sevColor = check.severity === 'hp' ? 'var(--danger)'
+                      : check.severity === 'error' ? 'var(--warn)' : 'var(--muted)';
+                    return (
+                      <div className="dqfx-cat" key={`eva-${f.id}`}>
+                        <div className="dqfx-cat-h">
+                          <div>
+                            <span className="dqfx-count">{f.ids.length}</span>
+                            <b>{check.label}</b>
+                            <span style={{
+                              marginLeft: 8, fontSize: 11, fontWeight: 700, color: sevColor,
+                              border: `1px solid ${sevColor}`, borderRadius: 999, padding: '1px 8px',
+                            }}>{sev.label}</span>
+                          </div>
+                        </div>
+                        <div className="bnl-sub" style={{ marginTop: 4 }}>{check.meaning}</div>
+                        <div className="dqfx-fix">→ {check.fix}</div>
+                        <div className="bnl-sub" style={{ marginTop: 2 }}>Affects: {check.breaks}</div>
+                        <div className="dr-ids">
+                          {(f.detail ?? f.ids.map((id) => ({ pid: id, entry: null }))).map((d, i) => (
+                            <code key={`${d.pid}-${i}`} title={d.entry ? `Entry date ${d.entry}` : undefined}>
+                              {d.pid}{d.entry ? <span style={{ color: 'var(--muted)' }}> · {d.entry}</span> : null}
+                            </code>
+                          ))}
+                        </div>
+                        <button className="btn dqfx-copy" onClick={(ev) => {
+                          navigator.clipboard?.writeText(f.ids.join('\n'));
+                          const el = ev.currentTarget; el.textContent = 'Copied ✓';
+                          setTimeout(() => { el.textContent = '⧉ Copy these IDs'; }, 1200);
+                        }}>⧉ Copy these IDs</button>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+
               <p className="bnl-sub" style={{ marginTop: 12 }}>
                 Hashed PersonalIDs — paste one into HMIS client search to open the record and fix the
                 field. The trend shows this project’s missing-% over recent months (falling = improving).
+                The data-quality checks follow HUD’s Eva methodology (snapshot of the latest complete month).
               </p>
             </>
           )

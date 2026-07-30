@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
+import { evaForMetric, EVA_SEVERITY_META } from '../../../lib/evaChecks';
 
 export const dynamic = 'force-dynamic';
 
@@ -159,36 +160,33 @@ export async function GET(req: Request) {
 
   const desc = (k: string) => (a: any, b: any) => (b[k] ?? 0) - (a[k] ?? 0);
 
-  // ── data_quality: project-scoped APR Q6 errors (dq:* records) ─────────────
-  // Only errors on enrollments AT the selected projects — this project's own
-  // exits missing a destination, its enrollments missing a move-in / income /
-  // annual. It can never surface another project's SO enrollment. Same source
-  // as the DQ-tab fix-list, so the two can't disagree.
-  const DQ_LABELS: Record<string, string> = {
-    'dq:dest': 'Missing exit destination',
-    'dq:movein': 'Missing move-in date',
-    'dq:income': 'Income missing or unknown at entry',
-    'dq:annual': 'Overdue annual assessment',
-    // PII (Q6a) — client-level, fix once per client
-    'dq:name': 'Name missing or incomplete',
-    'dq:ssn': 'SSN missing, partial, or unknown',
-    'dq:dob': 'Date of birth missing or unknown',
-    'dq:race': 'Race/ethnicity not collected',
-    'dq:sex': 'Sex missing or unknown',
-  };
-  const dqByPid = new Map<string, { project_id: number; issues: string[] }>();
+  // ── data_quality: Eva-based checks (eva:* records) ────────────────────────
+  // The "clients needing attention" DQ worklist now runs on HUD Eva's check
+  // library (lib/evaChecks.ts; findings from pipeline/recompute_eva.py), scoped
+  // to the enrollment's own project. Eva findings are a SNAPSHOT keyed to the
+  // latest COMPLETE month — deliberately independent of the worklist period
+  // picker, which scopes membership, not data hygiene. Clients sort worst-first
+  // by severity (high-priority ▸ error ▸ warning), then by issue count.
+  const { data: dqpMeta } = await sb.from('meta').select('value').eq('key', 'dq_periods').maybeSingle();
+  const evaMonthly: string[] = ((dqpMeta?.value as { monthly?: string[] } | null)?.monthly ?? []);
+  const evaPeriod = evaMonthly[evaMonthly.length - 1] ?? period;
+
+  const dqByPid = new Map<string, { project_id: number; issues: string[]; rank: number }>();
   const { data: dqRows } = await sb
     .from('drill_clients')
     .select('project_id, metric, personal_ids')
-    .eq('period', period)
+    .eq('period', evaPeriod)
     .in('project_id', ids)
-    .like('metric', 'dq:%');
+    .like('metric', 'eva:%');
   for (const row of dqRows ?? []) {
-    const label = DQ_LABELS[row.metric as string];
-    if (!label) continue;
+    const check = evaForMetric(row.metric as string);
+    if (!check) continue;
+    const rank = EVA_SEVERITY_META[check.severity].rank;
+    const label = (check.severity === 'hp' ? '⚠ ' : '') + check.label;
     for (const pid of (row.personal_ids as string[]) ?? []) {
-      const e = dqByPid.get(pid) ?? { project_id: Number(row.project_id), issues: [] };
+      const e = dqByPid.get(pid) ?? { project_id: Number(row.project_id), issues: [], rank: 9 };
       e.issues.push(label);
+      e.rank = Math.min(e.rank, rank);
       dqByPid.set(pid, e);
     }
   }
@@ -202,17 +200,17 @@ export async function GET(req: Request) {
     for (const r of (data ?? []) as any[]) dqAttrs.set(r.pid, r);
   }
   const dataQuality = [...dqByPid.entries()]
-    .map(([pid, { project_id, issues }]) => {
+    .map(([pid, { project_id, issues, rank }]) => {
       const a = dqAttrs.get(pid);
       const info = projInfo.get(project_id);
       return {
         ...(a ?? {}), pid, project_id,
         project: info?.name ?? null, ptype: info?.type ?? a?.ptype ?? null,
-        dq: issues, dq_n: issues.length,
+        dq: issues, dq_n: issues.length, _rank: rank,
       };
     })
-    // most errors first, then longest at the project
-    .sort((x, y) => (y.dq.length - x.dq.length) || ((y.days_at_project ?? 0) - (x.days_at_project ?? 0)))
+    // worst severity first, then most issues, then longest at the project
+    .sort((x, y) => (x._rank - y._rank) || (y.dq.length - x.dq.length) || ((y.days_at_project ?? 0) - (x.days_at_project ?? 0)))
     .slice(0, LIMIT);
 
   // ── open_suspect: scope to the project that OWNS the left-open enrollment ──

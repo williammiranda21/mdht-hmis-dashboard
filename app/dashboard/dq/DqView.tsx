@@ -9,7 +9,7 @@
  *   KPI percents are client-weighted (Σ pct/100 * weight ÷ Σ weight).
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Granularity } from '../../../lib/types';
 import { periodLabel, fmtInt } from '../../../lib/format';
@@ -18,7 +18,51 @@ import DqFixList from './DqFixList';
 type DqRecord = Record<string, number | null>;
 type Row = { project_id: number; name: string; type_name: string; project_type: number | null; d: DqRecord };
 
-type Props = { periods: string[]; granularity: Granularity; period: string; rows: Row[] };
+type EvaCount = { hp: number; error: number; warning: number };
+/** Per-project data-quality-check counts, keyed by check category
+ *  ('Household' | 'Dates' | 'Duplicates' | 'Income'). Snapshot of the latest
+ *  complete month — independent of the selected period. */
+type EvaCatCounts = Record<string, EvaCount>;
+type Props = {
+  periods: string[]; granularity: Granularity; period: string; rows: Row[];
+  evaCounts?: Record<number, EvaCatCounts>;
+};
+
+/** Compact severity chips (high-priority / error / warning) for one category. */
+function ChecksCell({ c, bare }: { c?: EvaCount; bare?: boolean }) {
+  if (!c || (c.hp === 0 && c.error === 0 && c.warning === 0)) {
+    return bare ? null : <span style={{ color: 'var(--muted)' }}>—</span>;
+  }
+  const chip = (n: number, color: string, title: string) => n > 0 && (
+    <span key={title} title={`${n} client${n === 1 ? '' : 's'} · ${title}`} style={{
+      color, border: `1px solid ${color}`, borderRadius: 999, padding: '0 7px',
+      fontSize: 11, fontWeight: 700, marginRight: 4, whiteSpace: 'nowrap',
+    }}>{n}</span>
+  );
+  return (
+    <span style={{ whiteSpace: 'nowrap' }}>
+      {chip(c.hp, 'var(--danger)', 'high priority')}
+      {chip(c.error, 'var(--warn)', 'error')}
+      {chip(c.warning, 'var(--muted)', 'warning')}
+    </span>
+  );
+}
+
+/** Toggleable columns (Project / Type / Overall are always shown). */
+const TOGGLE_COLS: { k: string; label: string }[] = [
+  { k: 'pii', label: 'Q6a PII' },
+  { k: 'univ', label: 'Q6b Universal' },
+  { k: 'inc', label: 'Q6c Income' },
+  { k: 'chronic', label: 'Q6d Chronic' },
+  { k: 'movein', label: 'Move-In Missing' },
+  { k: 'annual', label: 'Annual Overdue' },
+  { k: 'household', label: 'Household checks' },
+  { k: 'dates', label: 'Date checks' },
+  { k: 'dupes', label: 'Duplicates' },
+  { k: 'active', label: 'Active' },
+  { k: 'exits', label: 'Exits' },
+];
+const COLS_LS_KEY = 'dq_visible_cols_v1';
 
 const scoreClass = (v: number | null) => (v == null ? '' : v >= 80 ? 'dq-green' : v >= 60 ? 'dq-amber' : 'dq-red');
 const scoreColor = (v: number) => (v >= 80 ? 'var(--accent)' : v >= 60 ? 'var(--warn)' : 'var(--danger)');
@@ -48,8 +92,24 @@ function PctCell({ pct, thr, sub }: { pct: number | null; thr: number; sub?: str
 
 type SortKey = 'name' | 'type_name' | string;
 
-export default function DqView({ periods, granularity, period, rows }: Props) {
+export default function DqView({ periods, granularity, period, rows, evaCounts }: Props) {
   const router = useRouter();
+  // Column visibility — default all on; persisted per browser.
+  const [visible, setVisible] = useState<Set<string>>(() => new Set(TOGGLE_COLS.map((c) => c.k)));
+  const [colsOpen, setColsOpen] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(COLS_LS_KEY);
+      if (saved) setVisible(new Set(JSON.parse(saved) as string[]));
+    } catch { /* first visit / bad JSON — keep defaults */ }
+  }, []);
+  const vis = (k: string) => visible.has(k);
+  const toggleCol = (k: string) => setVisible((s) => {
+    const n = new Set(s);
+    if (n.has(k)) n.delete(k); else n.add(k);
+    try { localStorage.setItem(COLS_LS_KEY, JSON.stringify([...n])); } catch { /* private mode */ }
+    return n;
+  });
   const [typeFilter, setTypeFilter] = useState('All');
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('DQ_Score');
@@ -182,6 +242,24 @@ export default function DqView({ periods, granularity, period, rows }: Props) {
               ? ' · click a project name for its fix-list'
               : ' · switch to the monthly view for the per-record fix-list'}
           </div></div>
+          <div style={{ position: 'relative' }}>
+            <button className="btn" onClick={() => setColsOpen((o) => !o)}>Columns {colsOpen ? '▴' : '▾'}</button>
+            {colsOpen && (
+              <div style={{
+                position: 'absolute', right: 0, top: '110%', zIndex: 30,
+                background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8,
+                padding: '10px 14px', display: 'grid', gap: 6, minWidth: 180,
+                boxShadow: '0 8px 24px rgba(0,0,0,.35)',
+              }}>
+                {TOGGLE_COLS.map((c) => (
+                  <label key={c.k} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    <input type="checkbox" checked={vis(c.k)} onChange={() => toggleCol(c.k)} />
+                    {c.label}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <div className="scroll">
           <table>
@@ -190,14 +268,18 @@ export default function DqView({ periods, granularity, period, rows }: Props) {
                 <th className={th('name')} onClick={() => toggleSort('name')}>Project {car('name')}</th>
                 <th className={th('type_name')} onClick={() => toggleSort('type_name')}>Type {car('type_name')}</th>
                 <th className={th('DQ_Score', true)} onClick={() => toggleSort('DQ_Score')}>Overall {car('DQ_Score')}</th>
-                <th className={th('DQ_PII_Score', true)} onClick={() => toggleSort('DQ_PII_Score')}>Q6a PII {car('DQ_PII_Score')}</th>
-                <th className={th('DQ_Univ_Score', true)} onClick={() => toggleSort('DQ_Univ_Score')}>Q6b Universal {car('DQ_Univ_Score')}</th>
-                <th className={th('DQ_Inc_Score', true)} onClick={() => toggleSort('DQ_Inc_Score')}>Q6c Income {car('DQ_Inc_Score')}</th>
-                <th className={th('DQ_Chronic_Score', true)} onClick={() => toggleSort('DQ_Chronic_Score')}>Q6d Chronic {car('DQ_Chronic_Score')}</th>
-                <th className={th('DQ_MoveIn_pct', true)} onClick={() => toggleSort('DQ_MoveIn_pct')}>Move-In Missing % {car('DQ_MoveIn_pct')}</th>
-                <th className={th('DQ_Annual_pct', true)} onClick={() => toggleSort('DQ_Annual_pct')}>Annual Overdue % {car('DQ_Annual_pct')}</th>
-                <th className={th('DQ_ActiveTotal', true)} onClick={() => toggleSort('DQ_ActiveTotal')}>Active {car('DQ_ActiveTotal')}</th>
-                <th className={th('DQ_ExitsTotal', true)} onClick={() => toggleSort('DQ_ExitsTotal')}>Exits {car('DQ_ExitsTotal')}</th>
+                {vis('pii') && <th className={th('DQ_PII_Score', true)} onClick={() => toggleSort('DQ_PII_Score')}>Q6a PII {car('DQ_PII_Score')}</th>}
+                {vis('univ') && <th className={th('DQ_Univ_Score', true)} onClick={() => toggleSort('DQ_Univ_Score')}>Q6b Universal {car('DQ_Univ_Score')}</th>}
+                {vis('inc') && <th className={th('DQ_Inc_Score', true)} onClick={() => toggleSort('DQ_Inc_Score')}
+                  title="APR Q6c score, with income-consistency check counts beneath (chips = clients flagged, by severity)">Q6c Income {car('DQ_Inc_Score')}</th>}
+                {vis('chronic') && <th className={th('DQ_Chronic_Score', true)} onClick={() => toggleSort('DQ_Chronic_Score')}>Q6d Chronic {car('DQ_Chronic_Score')}</th>}
+                {vis('movein') && <th className={th('DQ_MoveIn_pct', true)} onClick={() => toggleSort('DQ_MoveIn_pct')}>Move-In Missing % {car('DQ_MoveIn_pct')}</th>}
+                {vis('annual') && <th className={th('DQ_Annual_pct', true)} onClick={() => toggleSort('DQ_Annual_pct')}>Annual Overdue % {car('DQ_Annual_pct')}</th>}
+                {vis('household') && <th title="Household checks — no/multiple head of household, missing relationship, children-only (clients flagged, by severity)">Household</th>}
+                {vis('dates') && <th title="Date checks — future exits, exit before entry, future entries, DOB conflicts, move-in outside the stay (clients flagged, by severity)">Dates</th>}
+                {vis('dupes') && <th title="Duplicate enrollments — same client, project, and entry date (clients flagged)">Duplicates</th>}
+                {vis('active') && <th className={th('DQ_ActiveTotal', true)} onClick={() => toggleSort('DQ_ActiveTotal')}>Active {car('DQ_ActiveTotal')}</th>}
+                {vis('exits') && <th className={th('DQ_ExitsTotal', true)} onClick={() => toggleSort('DQ_ExitsTotal')}>Exits {car('DQ_ExitsTotal')}</th>}
               </tr>
             </thead>
             <tbody>
@@ -217,20 +299,31 @@ export default function DqView({ periods, granularity, period, rows }: Props) {
                     </td>
                     <td><span className="ty">{r.type_name}</span></td>
                     <td className="num"><Gauge score={d.DQ_Score} /></td>
-                    <td className="num"><ScorePill v={d.DQ_PII_Score} /></td>
-                    <td className="num"><ScorePill v={d.DQ_Univ_Score} /></td>
-                    <td className="num"><ScorePill v={d.DQ_Inc_Score} /></td>
-                    <td className="num">{hasChronic ? <ScorePill v={d.DQ_Chronic_Score} /> : <span style={{ color: 'var(--muted)' }}>N/A</span>}</td>
-                    {isPH
+                    {vis('pii') && <td className="num"><ScorePill v={d.DQ_PII_Score} /></td>}
+                    {vis('univ') && <td className="num"><ScorePill v={d.DQ_Univ_Score} /></td>}
+                    {vis('inc') && (
+                      <td className="num">
+                        <ScorePill v={d.DQ_Inc_Score} />
+                        {/* income-consistency checks live IN the income column */}
+                        <div style={{ marginTop: 3 }}>
+                          <ChecksCell c={evaCounts?.[r.project_id]?.['Income']} bare />
+                        </div>
+                      </td>
+                    )}
+                    {vis('chronic') && <td className="num">{hasChronic ? <ScorePill v={d.DQ_Chronic_Score} /> : <span style={{ color: 'var(--muted)' }}>N/A</span>}</td>}
+                    {vis('movein') && (isPH
                       ? <PctCell pct={d.DQ_MoveIn_pct} thr={10} sub={d.DQ_PHEnrolls ? `${d.DQ_MoveInBad || 0} of ${d.DQ_PHEnrolls} enrolled` : null} />
-                      : <td className="num" style={{ color: 'var(--muted)' }}>N/A</td>}
-                    <PctCell pct={d.DQ_Annual_pct} thr={20} sub={d.DQ_AnnualDue ? `${d.DQ_AnnualBad || 0} of ${d.DQ_AnnualDue} due` : null} />
-                    <td className="num">{fmtInt(d.DQ_ActiveTotal)}</td>
-                    <td className="num">{fmtInt(d.DQ_ExitsTotal)}</td>
+                      : <td className="num" style={{ color: 'var(--muted)' }}>N/A</td>)}
+                    {vis('annual') && <PctCell pct={d.DQ_Annual_pct} thr={20} sub={d.DQ_AnnualDue ? `${d.DQ_AnnualBad || 0} of ${d.DQ_AnnualDue} due` : null} />}
+                    {vis('household') && <td><ChecksCell c={evaCounts?.[r.project_id]?.['Household']} /></td>}
+                    {vis('dates') && <td><ChecksCell c={evaCounts?.[r.project_id]?.['Dates']} /></td>}
+                    {vis('dupes') && <td><ChecksCell c={evaCounts?.[r.project_id]?.['Duplicates']} /></td>}
+                    {vis('active') && <td className="num">{fmtInt(d.DQ_ActiveTotal)}</td>}
+                    {vis('exits') && <td className="num">{fmtInt(d.DQ_ExitsTotal)}</td>}
                   </tr>
                 );
               })}
-              {sorted.length === 0 && <tr><td colSpan={11} className="empty">No data quality records for this period.</td></tr>}
+              {sorted.length === 0 && <tr><td colSpan={3 + visible.size} className="empty">No data quality records for this period.</td></tr>}
             </tbody>
           </table>
         </div>

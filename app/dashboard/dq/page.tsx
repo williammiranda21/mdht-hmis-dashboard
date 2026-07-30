@@ -1,5 +1,7 @@
 import { getDqPeriods, getDqMetrics, getProjectsMap } from '../../../lib/queries';
 import type { Granularity } from '../../../lib/types';
+import { supabaseServer } from '../../../lib/supabase-server';
+import { evaForMetric } from '../../../lib/evaChecks';
 import DqView from './DqView';
 
 export const dynamic = 'force-dynamic';
@@ -23,6 +25,34 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     getProjectsMap(),
   ]);
 
+  // Eva check counts per project — snapshot keyed to the latest COMPLETE month
+  // (independent of the selected period/granularity). Unique clients per
+  // severity; rendered as the "Eva issues" column in DqView.
+  const monthly = await getDqPeriods('monthly');
+  const evaPeriod = monthly[0] ?? period;   // getDqPeriods returns newest first
+  const sb = supabaseServer();
+  const { data: evaRows } = await sb.from('drill_clients')
+    .select('project_id, metric, personal_ids')
+    .eq('period', evaPeriod)
+    .like('metric', 'eva:%');
+  // Keyed project → check CATEGORY → severity → unique clients, so the view can
+  // place income checks inside the Q6c column and give Household/Dates/Duplicates
+  // their own compact columns.
+  const sets: Record<number, Record<string, { hp: Set<string>; error: Set<string>; warning: Set<string> }>> = {};
+  for (const r of (evaRows ?? []) as Array<{ project_id: number; metric: string; personal_ids: string[] }>) {
+    const check = evaForMetric(r.metric);
+    if (!check) continue;
+    const pid = Number(r.project_id);
+    sets[pid] ??= {};
+    sets[pid][check.category] ??= { hp: new Set(), error: new Set(), warning: new Set() };
+    for (const c of r.personal_ids ?? []) sets[pid][check.category][check.severity].add(c);
+  }
+  const evaCounts: Record<number, Record<string, { hp: number; error: number; warning: number }>> = {};
+  for (const [pid, cats] of Object.entries(sets)) {
+    evaCounts[Number(pid)] = Object.fromEntries(Object.entries(cats).map(([cat, s]) =>
+      [cat, { hp: s.hp.size, error: s.error.size, warning: s.warning.size }]));
+  }
+
   const merged = rows.map((r) => ({
     project_id: r.project_id,
     name: projects[r.project_id]?.name ?? `Project ${r.project_id}`,
@@ -31,5 +61,5 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     d: r.data,
   }));
 
-  return <DqView periods={periods} granularity={granularity} period={period} rows={merged} />;
+  return <DqView periods={periods} granularity={granularity} period={period} rows={merged} evaCounts={evaCounts} />;
 }

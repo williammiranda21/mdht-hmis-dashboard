@@ -82,5 +82,22 @@ export async function GET(req: Request) {
     };
   });
 
-  return NextResponse.json({ project_id: projectId, period, categories });
+  // ── Eva checks (snapshot, latest complete month — independent of `period`) ──
+  // Findings from pipeline/recompute_eva.py; labels/severity/fix copy live in
+  // lib/evaChecks.ts on the client. Empty array when the project is clean.
+  const { data: dqpMeta } = await sb.from('meta').select('value').eq('key', 'dq_periods').maybeSingle();
+  const evaMonthly: string[] = ((dqpMeta?.value as { monthly?: string[] } | null)?.monthly ?? []);
+  const evaPeriod = evaMonthly[evaMonthly.length - 1] ?? period;
+  const { data: evaRows } = await sb.from('drill_clients')
+    .select('metric, personal_ids, detail')
+    .eq('period', evaPeriod)
+    .eq('project_id', projectId)
+    .like('metric', 'eva:%');
+  const eva = (evaRows ?? []).map((r: { metric: string; personal_ids: string[]; detail: DetailRow[] | null }) => ({
+    id: r.metric.slice(4),
+    ids: r.personal_ids ?? [],
+    detail: r.detail ?? null,
+  }));
+
+  return NextResponse.json({ project_id: projectId, period, categories, eva, evaPeriod });
 }
