@@ -274,6 +274,12 @@ export default function UtilizationView({ periods, granularity, period, util }: 
             <tbody>
               {rows.map((p, i) => {
                 const u = projUtil(p);
+                // Dynamic-capacity projects (RRH, hotel/motel): inventory IS the
+                // people housed, so the shown bed/unit count must follow the
+                // occupancy method — avg daily in avg mode, PIT in PIT mode —
+                // or "194 beds, 185.6 occupied, 100%" reads as a contradiction.
+                const shownCap = p.dyn || p.t === 'RRH'
+                  ? (method === 'avg' ? Math.round(p.occ) : p.pit) : p.cap;
                 return (
                   <tr key={`${p.n}-${i}`}>
                     <td>
@@ -289,7 +295,7 @@ export default function UtilizationView({ periods, granularity, period, util }: 
                       p.t === 'RRH' ? 'RRH inventory is dynamic per HUD: households with an active move-in, not the static HIC'
                       : p.dyn ? 'Hotel/motel program: rooms are leased as needed, so inventory equals the people actually sheltered, not the static HIC'
                       : undefined}>
-                      {p.cap.toLocaleString()} {p.k}</td>
+                      {shownCap.toLocaleString()} {p.k}</td>
                     <td className="num">{projOcc(p).toLocaleString()}</td>
                     <td className="num">
                       <span className="ubar">
