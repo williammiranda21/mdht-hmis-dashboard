@@ -113,7 +113,7 @@ export interface CeMilestonesAgg {
   order: string[];         // milestone keys in journey order (ETL registry)
   window_months: number;
   housed: Record<string, { n: number; median: number | null; mean: number | null }>;
-  waiting: Record<string, { n: number; median: number | null }>;
+  waiting: Record<string, { n: number; median: number | null; mean?: number | null }>;
 }
 
 /**

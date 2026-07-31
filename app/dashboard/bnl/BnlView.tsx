@@ -45,35 +45,8 @@ function Flags({ r }: { r: BnlClient }) {
   );
 }
 
-/** Inflow / outflow, straight from the precomputed aggregate for this population. */
-function FlowChart({ flow }: { flow: BnlAgg['pops'][PopKey]['flow'] }) {
-  const W = 1000, H = 190, P = 26;
-  const max = Math.max(...flow.flatMap((m) => [m.new_n, m.housed_n, m.inactive_n]), 1);
-  const bw = (W - P * 2) / Math.max(flow.length, 1), g = 5, b = (bw - g * 4) / 3;
-  const series: Array<['new_n' | 'housed_n' | 'inactive_n', string]> = [
-    ['new_n', 'var(--warn)'],
-    ['housed_n', 'var(--accent)'],
-    ['inactive_n', 'var(--faint)'],
-  ];
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="bnl-flow" preserveAspectRatio="none">
-      {flow.map((m, i) => (
-        <g key={m.month}>
-          {series.map(([k, color], j) => {
-            const v = m[k];
-            const h = Math.round(((H - 44) * v) / max);
-            return (
-              <rect key={k} x={P + i * bw + g + j * (b + g)} y={H - 26 - h}
-                width={b} height={h} rx={2} fill={color} />
-            );
-          })}
-          <text x={P + i * bw + bw / 2} y={H - 9} textAnchor="middle"
-            fontSize={10} fill="var(--muted)">{m.month.slice(2)}</text>
-        </g>
-      ))}
-    </svg>
-  );
-}
+// Inflow/Outflow chart removed 2026-07-31 (user: duplicated elsewhere — the
+// flow data still lives in agg.pops[pop].flow if it's ever wanted back).
 
 export default function BnlView({
   initialRows, initialTotal, agg, ceMilestones = null,
@@ -228,9 +201,6 @@ export default function BnlView({
         const meds = legs.map(([a, b]) => ceMilestones.housed[`${a}_${b}`]?.median ?? null);
         const worst = Math.max(...meds.map((m) => m ?? -1));
         const total = ceMilestones.housed[`${ord[0]}_${ord[ord.length - 1]}`];
-        const waiting = ord.slice(0, -1)
-          .map((k) => ({ k, ...ceMilestones.waiting[k] }))
-          .filter((w) => (w.n ?? 0) > 0);
         return (
           <div className="panel" style={{ marginTop: 16, padding: '12px 18px' }}>
             <div className="hc-sub" style={{ margin: '0 0 10px' }}>
@@ -239,53 +209,75 @@ export default function BnlView({
                 clients housed in the last {ceMilestones.window_months} months · all populations
               </span>
             </div>
-            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'baseline', fontSize: 12 }}>
-              {legs.map(([a, b], i) => {
-                const s = ceMilestones.housed[`${a}_${b}`];
+            {/* Journey bar — bold milestone labels as nodes; each connector's
+                WIDTH is proportional to its median days (min width keeps 0d
+                legs visible). The bar is on the labels' vertical center; the
+                day count floats above its segment. Longest leg in warn. */}
+            <div style={{ display: 'flex', alignItems: 'center', overflowX: 'auto', padding: '24px 4px 28px' }}>
+              {ord.map((k, i) => {
+                const isLast = i === ord.length - 1;
+                const b = ord[i + 1];
+                const s = isLast ? null : ceMilestones.housed[`${k}_${b}`];
                 const isWorst = s?.median != null && s.median === worst && worst >= 0;
                 return (
-                  <span key={`${a}_${b}`} style={{ display: 'inline-flex', gap: 6, alignItems: 'baseline' }}>
-                    <span style={{ color: 'var(--muted)' }}>{labels[a] ?? a} → {labels[b] ?? b}</span>
-                    <b style={{ fontVariantNumeric: 'tabular-nums', color: isWorst ? 'var(--warn)' : 'var(--strong)' }}
-                      title={s?.n ? `${s.n} clients · mean ${s.mean}d${isWorst ? ' · longest leg' : ''}` : 'no completed pairs'}>
-                      {s?.median != null ? `${s.median}d` : '—'}
-                    </b>
-                    {isWorst && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--warn)' }}>⏳ longest</span>}
+                  <span key={k} style={{ display: 'contents' }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--strong)', whiteSpace: 'nowrap', letterSpacing: '.01em' }}>
+                      {labels[k] ?? k}
+                    </span>
+                    {!isLast && (() => {
+                      // Live cohort stuck on THIS leg: their furthest milestone
+                      // is k, so days-since-k is the leg's in-progress wait —
+                      // e.g. accepted-but-not-moved-in = today − housing entry.
+                      const w = ceMilestones.waiting[k];
+                      // The live wait carries the visual weight when it dwarfs
+                      // the completed experience (≥2× it, 7d floor) — i.e. the
+                      // completed median is a workflow artifact (Accepted →
+                      // Move-in's 0d) and the backlog is the real story.
+                      const liveIsStory = (w?.median ?? 0) >= 2 * Math.max(s?.median ?? 0, 7);
+                      return (
+                        <span
+                          title={`${labels[k] ?? k} → ${labels[b] ?? b}${s?.n ? ` — completed: median ${s.median}d · avg ${s.mean}d · ${s.n} clients${isWorst ? ' · longest leg' : ''}` : ' — no completed pairs'}${w?.n ? ` · waiting now: ${w.n} clients, median ${w.median}d${w.mean != null ? ` · avg ${w.mean}d` : ''} and counting` : ''}`}
+                          style={{ position: 'relative', display: 'flex', alignItems: 'center',
+                            flexGrow: Math.max(s?.median ?? 0, 4), flexBasis: 84, minWidth: 84, padding: '0 10px' }}>
+                          <span style={{ position: 'absolute', top: -19, left: 0, right: 0, textAlign: 'center',
+                            fontSize: 11.5, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
+                            color: isWorst ? 'var(--warn)' : 'var(--muted)' }}>
+                            <b>{s?.median != null ? `${s.median}d` : '—'}</b>
+                            {s?.mean != null && <span style={{ fontSize: 10, opacity: .85 }}> · avg {Math.round(s.mean)}d</span>}
+                            {isWorst ? ' ⏳' : ''}
+                          </span>
+                          <span style={{ display: 'block', width: '100%', height: 6, borderRadius: 3,
+                            background: isWorst ? 'var(--warn)' : 'var(--primary)',
+                            opacity: s?.median != null ? 0.9 : 0.25 }} />
+                          {(w?.n ?? 0) > 0 && (
+                            <span style={{ position: 'absolute', top: 'calc(50% + 8px)', left: 0, right: 0, textAlign: 'center',
+                              whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
+                              fontSize: liveIsStory ? 11 : 10.5,
+                              fontWeight: liveIsStory ? 700 : 400,
+                              color: liveIsStory ? 'var(--warn)' : 'var(--muted)' }}>
+                              {(w!.n).toLocaleString()} waiting · <b>{w!.median}d</b>
+                              {w!.mean != null && <span style={{ fontSize: 10, opacity: .85 }}> · avg {Math.round(w!.mean!)}d</span>}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })()}
                   </span>
                 );
               })}
-              {total?.median != null && (
-                <span className="bnl-sub">
-                  end to end {labels[ord[0]] ?? ord[0]} → {labels[ord[ord.length - 1]] ?? ord[ord.length - 1]}:{' '}
-                  <b style={{ color: 'var(--strong)' }}>{total.median}d</b> (n={total.n})
-                </span>
-              )}
             </div>
-            {waiting.length > 0 && (
-              <div className="bnl-sub" style={{ marginTop: 8 }}>
-                Currently waiting:{' '}
-                {waiting.map((w, i) => (
-                  <span key={w.k}>
-                    {i > 0 && ' · '}
-                    <b style={{ color: 'var(--text)' }}>{(w.n ?? 0).toLocaleString()}</b> at {labels[w.k] ?? w.k}
-                    {w.median != null && <> (median {w.median}d)</>}
-                  </span>
-                ))}
+            {total?.median != null && (
+              <div className="bnl-sub" style={{ marginTop: 6 }}>
+                End to end {labels[ord[0]] ?? ord[0]} → {labels[ord[ord.length - 1]] ?? ord[ord.length - 1]}:{' '}
+                <b style={{ color: 'var(--strong)' }}>{total.median}d</b> median (n={total.n})
+                {' '}· above each segment: completed journeys · below: clients on that leg right now, days so far
+                {' '}· bold = median (typical client), avg = mean (pulled up by long-tail outliers)
               </div>
             )}
           </div>
         );
       })()}
 
-      <div className="panel" style={{ marginTop: 16 }}>
-        <div className="panel-h"><h3>Inflow / Outflow — last 12 months · {POP_DEFS[pop].label}</h3></div>
-        <FlowChart flow={pa.flow} />
-        <div className="bnl-legend">
-          <span className="bnl-lg-new">Newly identified</span>
-          <span className="bnl-lg-housed">Housed</span>
-          <span className="bnl-lg-inact">Became inactive</span>
-        </div>
-      </div>
 
       <div className="panel" style={{ marginTop: 16 }}>
         <div className="fbar" style={{ marginBottom: 8 }}>
@@ -458,26 +450,68 @@ export default function BnlView({
                 </span>
               </div>
             )}
-            {/* CE journey — milestone dates with day gaps between consecutive
-                known milestones. Renders whatever the MILESTONES registry
-                defines, in order; unknown stages show a faint dash. */}
+            {/* CE journey — same proportional bar as the system card: bold
+                milestone nodes with their dates beneath, segment width ∝ the
+                day gap between adjacent known milestones. A segment fades (no
+                number) when either of its dates is missing. */}
             {detail?.milestones && (
               <div className="bnl-ms">
                 <span className="bnl-ms-t">CE journey</span>
-                {MILESTONES.map(([k, label], i) => {
-                  const d = detail.milestones?.[k] ?? null;
-                  const prev = MILESTONES.slice(0, i)
-                    .map(([pk]) => detail.milestones?.[pk]).filter(Boolean).pop() as string | undefined;
-                  const gap = d && prev
-                    ? Math.round((+new Date(d) - +new Date(prev)) / 86400000) : null;
-                  return (
-                    <span key={k} className="bnl-ms-st">
-                      {gap != null && gap >= 0 && <span className="bnl-ms-gap" title={`${gap} days since the previous milestone`}>+{gap}d</span>}
-                      <span className={`bnl-ms-lab${d ? '' : ' off'}`}>{label}</span>
-                      <span className="bnl-ms-d">{d ?? '—'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 360, overflowX: 'auto', padding: '16px 2px 2px' }}>
+                  {MILESTONES.map(([k, label], i) => {
+                    const d = detail.milestones?.[k] ?? null;
+                    const next = i < MILESTONES.length - 1
+                      ? (detail.milestones?.[MILESTONES[i + 1][0]] ?? null) : null;
+                    const gap = d && next
+                      ? Math.round((+new Date(next) - +new Date(d)) / 86400000) : null;
+                    const known = gap != null && gap >= 0;
+                    return (
+                      <span key={k} style={{ display: 'contents' }}>
+                        <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: d ? 'var(--strong)' : 'var(--faint)' }}>{label}</span>
+                          <span style={{ fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{d ?? '—'}</span>
+                        </span>
+                        {i < MILESTONES.length - 1 && (
+                          <span
+                            title={known ? `${label} → ${MILESTONES[i + 1][1]}: ${gap} days` : 'not measurable — a milestone date is missing'}
+                            style={{ position: 'relative', display: 'flex', alignItems: 'center',
+                              flexGrow: known ? Math.max(gap, 4) : 3, flexBasis: 40, minWidth: 40, padding: '0 8px' }}>
+                            {known && (
+                              <span style={{ position: 'absolute', top: -15, left: 0, right: 0, textAlign: 'center',
+                                fontSize: 10.5, fontWeight: 700, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                                +{gap}d
+                              </span>
+                            )}
+                            <span style={{ display: 'block', width: '100%', height: 5, borderRadius: 3,
+                              background: 'var(--primary)', opacity: known ? 0.9 : 0.18 }} />
+                          </span>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+                {/* Total journey: first known milestone → move-in (housed) or
+                    the data date (still waiting — count keeps growing). */}
+                {(() => {
+                  const ms = detail.milestones!;
+                  const first = MILESTONES.find(([k]) => ms[k]);
+                  if (!first) return null;
+                  const mi = ms['movein'] ?? null;
+                  const end = mi ?? agg.as_of;
+                  const t = Math.round((+new Date(end) - +new Date(ms[first[0]] as string)) / 86400000);
+                  if (t < 0) return null;
+                  return mi ? (
+                    <span title={`${first[1]} ${ms[first[0]]} → moved in ${mi}`}
+                      style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
+                      housed in {t.toLocaleString()}d
+                    </span>
+                  ) : (
+                    <span title={`${first[1]} ${ms[first[0]]} → not yet housed as of ${agg.as_of}`}
+                      style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 700, color: 'var(--warn)', whiteSpace: 'nowrap' }}>
+                      {t.toLocaleString()}d and counting
                     </span>
                   );
-                })}
+                })()}
               </div>
             )}
             {!!detail?.dq?.length && <div className="bnl-dq">⚠ {detail.dq.join(' — ')}</div>}
