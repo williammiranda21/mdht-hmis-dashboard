@@ -17,7 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  *  jj/times3_sr/…) are deliberately absent — the drawer fetches those per
  *  client, which is what keeps this payload small. */
 export const ROSTER_COLS =
-  'pid, name, age, status, detail, enrolled, project, ptype, last_contact, ' +
+  'pid, name, age, status, detail, enrolled, project, ptype, ' +
   'days_homeless, sys_days3, episodes3, risk_pts, risk_max, risk_band, ' +
   'spdat_score, spdat_tool, spdat_date, ' +
   'ref_type, ref_status, ref_date, ref_prov, assessed, dq_n, ' +
@@ -42,7 +42,7 @@ export interface RosterQuery {
 /** Sortable columns. Whitelisted — never interpolate a user string into order(). */
 const SORTABLE = new Set([
   'name', 'age', 'status', 'project', 'days_homeless', 'sys_days3',
-  'risk_pts', 'ref_status', 'last_contact', 'assessed',
+  'risk_pts', 'ref_status', 'assessed',
 ]);
 
 const FLAG_COLS = new Set([

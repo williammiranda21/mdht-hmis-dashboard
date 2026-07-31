@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  POP_DEFS,
+  POP_DEFS, MILESTONES,
   type BnlAgg, type BnlClient, type BnlDetail, type BnlHist3,
-  type BnlTimelineEvent, type PopKey,
+  type BnlTimelineEvent, type CeMilestonesAgg, type PopKey,
 } from './types';
 import HistoryCard from './HistoryCard';
 import Notes from './Notes';
 
-type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'last_contact' | 'assessed';
+type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'assessed';
 
 const COLS: Array<[SortKey | 'flags', string]> = [
   ['name', 'Client'],
@@ -21,7 +21,6 @@ const COLS: Array<[SortKey | 'flags', string]> = [
   ['sys_days3', 'In HMIS (3y)'],
   ['risk_pts', 'Risk'],
   ['ref_status', 'Referral'],
-  ['last_contact', 'Last contact'],
   ['assessed', 'CE assessed'],
 ];
 
@@ -77,8 +76,8 @@ function FlowChart({ flow }: { flow: BnlAgg['pops'][PopKey]['flow'] }) {
 }
 
 export default function BnlView({
-  initialRows, initialTotal, agg,
-}: { initialRows: BnlClient[]; initialTotal: number; agg: BnlAgg }) {
+  initialRows, initialTotal, agg, ceMilestones = null,
+}: { initialRows: BnlClient[]; initialTotal: number; agg: BnlAgg; ceMilestones?: CeMilestonesAgg | null }) {
   const [pop, setPop] = useState<PopKey>('all');
   const [q, setQ] = useState('');
   const [fStatus, setFStatus] = useState('');
@@ -218,6 +217,66 @@ export default function BnlView({
         ))}
       </div>
 
+      {/* CE journey — SYSTEM view (all populations, unaffected by the selector):
+          median days per milestone leg for the housed cohort, the longest leg
+          highlighted, plus where not-yet-housed clients are waiting right now.
+          Renders from ceMilestones.order so future milestones appear untouched. */}
+      {ceMilestones && (() => {
+        const labels = Object.fromEntries(MILESTONES);
+        const ord = ceMilestones.order;
+        const legs = ord.slice(0, -1).map((a, i) => [a, ord[i + 1]] as const);
+        const meds = legs.map(([a, b]) => ceMilestones.housed[`${a}_${b}`]?.median ?? null);
+        const worst = Math.max(...meds.map((m) => m ?? -1));
+        const total = ceMilestones.housed[`${ord[0]}_${ord[ord.length - 1]}`];
+        const waiting = ord.slice(0, -1)
+          .map((k) => ({ k, ...ceMilestones.waiting[k] }))
+          .filter((w) => (w.n ?? 0) > 0);
+        return (
+          <div className="panel" style={{ marginTop: 16, padding: '12px 18px' }}>
+            <div className="hc-sub" style={{ margin: '0 0 10px' }}>
+              CE journey — median days between milestones
+              <span className="bnl-sub" style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                clients housed in the last {ceMilestones.window_months} months · all populations
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'baseline', fontSize: 12 }}>
+              {legs.map(([a, b], i) => {
+                const s = ceMilestones.housed[`${a}_${b}`];
+                const isWorst = s?.median != null && s.median === worst && worst >= 0;
+                return (
+                  <span key={`${a}_${b}`} style={{ display: 'inline-flex', gap: 6, alignItems: 'baseline' }}>
+                    <span style={{ color: 'var(--muted)' }}>{labels[a] ?? a} → {labels[b] ?? b}</span>
+                    <b style={{ fontVariantNumeric: 'tabular-nums', color: isWorst ? 'var(--warn)' : 'var(--strong)' }}
+                      title={s?.n ? `${s.n} clients · mean ${s.mean}d${isWorst ? ' · longest leg' : ''}` : 'no completed pairs'}>
+                      {s?.median != null ? `${s.median}d` : '—'}
+                    </b>
+                    {isWorst && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--warn)' }}>⏳ longest</span>}
+                  </span>
+                );
+              })}
+              {total?.median != null && (
+                <span className="bnl-sub">
+                  end to end {labels[ord[0]] ?? ord[0]} → {labels[ord[ord.length - 1]] ?? ord[ord.length - 1]}:{' '}
+                  <b style={{ color: 'var(--strong)' }}>{total.median}d</b> (n={total.n})
+                </span>
+              )}
+            </div>
+            {waiting.length > 0 && (
+              <div className="bnl-sub" style={{ marginTop: 8 }}>
+                Currently waiting:{' '}
+                {waiting.map((w, i) => (
+                  <span key={w.k}>
+                    {i > 0 && ' · '}
+                    <b style={{ color: 'var(--text)' }}>{(w.n ?? 0).toLocaleString()}</b> at {labels[w.k] ?? w.k}
+                    {w.median != null && <> (median {w.median}d)</>}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       <div className="panel" style={{ marginTop: 16 }}>
         <div className="panel-h"><h3>Inflow / Outflow — last 12 months · {POP_DEFS[pop].label}</h3></div>
         <FlowChart flow={pa.flow} />
@@ -307,7 +366,6 @@ export default function BnlView({
                     <td>{r.ref_type ? (
                       <><div>{r.ref_type} · <b>{r.ref_status}</b></div><div className="bnl-sub">{r.ref_date}{r.ref_prov ? ` · ${r.ref_prov}` : ''}</div></>
                     ) : <span className="bnl-sub">—</span>}</td>
-                    <td className="num">{r.last_contact}</td>
                     <td className="num">{r.assessed
                       ? <>{r.assessed}{r.spdat_tool && (
                           <div className="bnl-sub">{r.spdat_tool}{r.spdat_score != null ? ` · ${r.spdat_score}` : ''}</div>
@@ -376,7 +434,6 @@ export default function BnlView({
             <div className="bnl-mgrid">
               <div className="bnl-mg"><div className="k">Self-reported (3.917)</div><div className="v num">{drill.days_homeless.toLocaleString()} d</div><div className="bnl-sub">{detail ? <>since {detail.ep_start}{detail.times3_sr ? ` · ${detail.times3_sr} time${detail.times3_sr === '1' ? '' : 's'} in 3 yrs` : ''}{detail.months3_sr ? ` · ${detail.months3_sr === 13 ? '12+' : detail.months3_sr} mo` : ''}</> : '…'}</div></div>
               <div className="bnl-mg"><div className="k">Observed in HMIS (3y)</div><div className="v num">{drill.sys_days3.toLocaleString()} d</div><div className="bnl-sub">{drill.episodes3} occasion{drill.episodes3 === 1 ? '' : 's'} (7-night break)</div></div>
-              <div className="bnl-mg"><div className="k">Last contact</div><div className="v num">{drill.last_contact}</div></div>
               <div className="bnl-mg"><div className="k">CE assessed</div><div className="v num">{drill.assessed ?? 'No'}</div></div>
               <div className="bnl-mg"><div className="k">DOB · Sex · Race</div><div className="v" style={{ fontSize: '.8rem' }}>{detail ? <>{detail.dob ?? '—'} · {detail.sex ?? '—'}<div className="bnl-sub">{detail.race ?? 'race not recorded'}</div></> : '…'}</div></div>
               <div className="bnl-mg"><div className="k">Monthly income</div><div className="v num">{detail ? (detail.income != null ? `$${detail.income.toLocaleString()}` : '—') : '…'}</div><div className="bnl-sub">{detail?.income_date ? `as of ${detail.income_date}` : ''}</div></div>
@@ -399,6 +456,28 @@ export default function BnlView({
                       : 'no scored factors'}
                   <span title="Housing Needs Assessment items (ADA unit, RS offender) and the income parameter are not scored yet"> · HNA + income pending</span>
                 </span>
+              </div>
+            )}
+            {/* CE journey — milestone dates with day gaps between consecutive
+                known milestones. Renders whatever the MILESTONES registry
+                defines, in order; unknown stages show a faint dash. */}
+            {detail?.milestones && (
+              <div className="bnl-ms">
+                <span className="bnl-ms-t">CE journey</span>
+                {MILESTONES.map(([k, label], i) => {
+                  const d = detail.milestones?.[k] ?? null;
+                  const prev = MILESTONES.slice(0, i)
+                    .map(([pk]) => detail.milestones?.[pk]).filter(Boolean).pop() as string | undefined;
+                  const gap = d && prev
+                    ? Math.round((+new Date(d) - +new Date(prev)) / 86400000) : null;
+                  return (
+                    <span key={k} className="bnl-ms-st">
+                      {gap != null && gap >= 0 && <span className="bnl-ms-gap" title={`${gap} days since the previous milestone`}>+{gap}d</span>}
+                      <span className={`bnl-ms-lab${d ? '' : ' off'}`}>{label}</span>
+                      <span className="bnl-ms-d">{d ?? '—'}</span>
+                    </span>
+                  );
+                })}
               </div>
             )}
             {!!detail?.dq?.length && <div className="bnl-dq">⚠ {detail.dq.join(' — ')}</div>}

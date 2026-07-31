@@ -391,6 +391,11 @@ def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None) -> list[
     if bnl and bnl.get("agg"):
         rows.append({"key": "bnl_agg",
                      "value": {"as_of": bnl.get("as_of"), "pops": bnl["agg"]}})
+    # CE milestone leg aggregates (housed-cohort medians + live stall points),
+    # same guard as bnl_agg so `--only meta` can't blank a good value.
+    if bnl and bnl.get("milestones_agg"):
+        rows.append({"key": "ce_milestones",
+                     "value": {"as_of": bnl.get("as_of"), **bnl["milestones_agg"]}})
     return rows
 
 
@@ -446,6 +451,7 @@ def build_bnl_clients(bnl: dict | None) -> list[dict]:
             "ref_date": r["ref_date"], "ref_prov": r["ref_prov"],
             "risk_pts": r["risk_pts"], "risk_max": r["risk_max"],
             "risk_band": r.get("risk_band"), "risk_detail": r.get("risk_detail"),
+            "milestones": r.get("milestones"),
             "spdat_score": r.get("spdat_score"), "spdat_tool": r.get("spdat_tool"),
             "spdat_date": r.get("spdat_date"),
             "chronic": r["chronic"], "is_new": r["new"], "returned": r["returned"],

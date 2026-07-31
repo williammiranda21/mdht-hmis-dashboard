@@ -346,6 +346,14 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .bnl-risk-band{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--track);color:var(--muted)}
 .bnl-risk.hi{border-left-color:var(--danger)}
 .bnl-risk.hi .bnl-risk-band{background:var(--danger);color:#fff}
+/* CE journey strip (client drawer) — milestone dates + day-gap chips. Quieter
+   than .bnl-risk (no colored edge): it's a timeline, not an alert. */
+.bnl-ms{display:flex;align-items:baseline;gap:14px;row-gap:6px;flex-wrap:wrap;margin-top:8px;padding:8px 12px;border:1px solid var(--hair);border-radius:10px;background:var(--card);font-size:12px}
+.bnl-ms-t{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.bnl-ms-st{display:inline-flex;align-items:baseline;gap:6px}
+.bnl-ms-gap{font-size:10.5px;font-weight:700;color:var(--primary);background:var(--primary-soft);padding:1px 6px;border-radius:999px;font-variant-numeric:tabular-nums}
+.bnl-ms-lab{color:var(--muted)} .bnl-ms-lab.off{color:var(--faint)}
+.bnl-ms-d{font-variant-numeric:tabular-nums;color:var(--strong);font-weight:600}
 /* ── 3-year homeless history card (BNL client drawer) ──
    Mirrors the card in generate_bnl.py so the gated static page and the web app
    look the same. All values are precomputed in bnl_core.py (hist3). */

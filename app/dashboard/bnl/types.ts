@@ -44,7 +44,6 @@ export interface BnlClient {
   enrolled: boolean;          // false → project below is a FORMER stay
   project: string | null;
   ptype: string | null;
-  last_contact: string;
   days_homeless: number;
   sys_days3: number;
   episodes3: number;
@@ -90,6 +89,31 @@ export interface BnlDetail {
   dq: string[];
   /** [label, points] per scored youth-risk factor; null/[] when nothing scored. */
   risk_detail: [string, number][] | null;
+  /** CE journey dates keyed by milestone (see MILESTONES); null when none known. */
+  milestones: Record<string, string | null> | null;
+}
+
+/**
+ * Ordered CE milestone registry — key → label. MUST stay in sync with
+ * MS_ORDER in bnl_core.py. Adding a future milestone (unit inspection, unit
+ * acceptance, …) means one entry here + its key in the ETL registry; the
+ * drawer strip and the system card both render from this order.
+ */
+export const MILESTONES: [string, string][] = [
+  ['ident', 'Identified'],
+  ['assessed', 'Assessed'],
+  ['referred', 'Referred'],
+  ['accepted', 'Accepted'],
+  ['movein', 'Moved in'],
+];
+
+/** meta.ce_milestones — system-wide leg statistics (built in bnl_core.py). */
+export interface CeMilestonesAgg {
+  as_of?: string;
+  order: string[];         // milestone keys in journey order (ETL registry)
+  window_months: number;
+  housed: Record<string, { n: number; median: number | null; mean: number | null }>;
+  waiting: Record<string, { n: number; median: number | null }>;
 }
 
 /**

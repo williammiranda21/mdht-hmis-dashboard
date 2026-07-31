@@ -1,7 +1,7 @@
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
 import { parseRosterQuery, queryRoster, PAGE_SIZE } from '../../../lib/bnl-query';
 import BnlView from './BnlView';
-import type { BnlAgg, BnlClient } from './types';
+import type { BnlAgg, BnlClient, CeMilestonesAgg } from './types';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,14 +43,17 @@ export default async function BnlPage() {
   const supabase = supabaseServer();
   const params = parseRosterQuery(new URLSearchParams({ limit: String(PAGE_SIZE) }));
 
-  const [aggRes, pageRes] = await Promise.all([
+  const [aggRes, msRes, pageRes] = await Promise.all([
     supabase.from('meta').select('value').eq('key', 'bnl_agg').maybeSingle(),
+    supabase.from('meta').select('value').eq('key', 'ce_milestones').maybeSingle(),
     queryRoster(supabase, params),
   ]);
 
   if (pageRes.error) throw pageRes.error;
   const rows = (pageRes.data ?? []) as unknown as BnlClient[];
   const agg = (aggRes.data?.value ?? null) as BnlAgg | null;
+  // Absent until the milestones regen+load has run — the card simply hides.
+  const ceMilestones = (msRes.data?.value ?? null) as CeMilestonesAgg | null;
 
   if (!rows.length) {
     return (
@@ -83,5 +86,5 @@ export default async function BnlPage() {
     );
   }
 
-  return <BnlView initialRows={rows} initialTotal={pageRes.count ?? 0} agg={agg} />;
+  return <BnlView initialRows={rows} initialTotal={pageRes.count ?? 0} agg={agg} ceMilestones={ceMilestones} />;
 }

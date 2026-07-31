@@ -201,6 +201,7 @@ create table if not exists bnl_clients (
   risk_max       int,
   risk_band      text,                            -- youth: 'Low' (1-7) | 'High' (8+)
   risk_detail    jsonb,                           -- [[label, pts], …] — what scored (drawer breakdown)
+  milestones     jsonb,                           -- CE journey dates {ident, assessed, referred, accepted, movein}
   spdat_score    int,                             -- most recent SPDAT GRAND TOTAL (side-cars)
   spdat_tool     text,                            -- 'VI-SPDAT' | 'F-SPDAT' | 'TAY-SPDAT'
   spdat_date     date,                            -- date the SPDAT was completed (= assessed)
