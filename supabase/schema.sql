@@ -113,7 +113,8 @@ create table if not exists dest_profile (
 -- ── Per-project performance targets (admin-set; writes via /api/targets) ─────
 create table if not exists project_targets (
   project_id  bigint not null,
-  metric      text not null,                     -- 'ph_exit_rate' | 'dq_score' | 'returns_2yr'
+  metric      text not null,                     -- 'ph_exit_rate' | 'unsub_rate' | 'dq_score' |
+                                                 -- 'returns_6mo' | 'returns_2yr' | 'avg_los' | 'median_days'
   target      numeric not null,
   updated_by  text,
   updated_at  timestamptz default now(),

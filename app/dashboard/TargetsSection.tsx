@@ -1,24 +1,24 @@
 'use client';
 
 import { useState } from 'react';
+import { TARGET_METRICS, fmtTarget, type TargetMetric } from '../../lib/target-metrics';
 
 /**
- * Targets & progress (Pillar 3-4) — admin-set per-project targets with progress
- * bars against the SAME stored values shown elsewhere on the panel. Direction
- * matters: PH exit rate and DQ score are at-or-above targets; the 2-year return
- * rate is an at-or-below target. Admins edit inline (writes via /api/targets);
- * everyone else sees progress only. No target set → row shows "no target".
+ * Targets & progress (Pillar 3-4) — progress bars against the SAME stored
+ * values shown elsewhere on the panel. Metric definitions (units, direction,
+ * ranges, hints) live in lib/target-metrics.ts, shared with the admin page.
+ *
+ * A target resolves project override (project_targets) → type default
+ * (type_targets); inherited rows are labelled "type default". Inline edits here
+ * always write the PROJECT override — clearing one falls back to the type
+ * default. Type defaults are managed at /dashboard/admin/targets. Admins see
+ * every metric; non-admins see only metrics with an effective target.
  */
-
-const METRICS: { key: string; label: string; unit: string; higherBetter: boolean }[] = [
-  { key: 'ph_exit_rate', label: 'PH exit rate', unit: '%', higherBetter: true },
-  { key: 'dq_score', label: 'DQ score', unit: '', higherBetter: true },
-  { key: 'returns_2yr', label: '2-year return rate', unit: '%', higherBetter: false },
-];
 
 export interface TargetsData {
   editable: boolean;
-  rows: { metric: string; target: number }[];
+  rows: { metric: string; target: number }[];      // project overrides
+  typeRows: { metric: string; target: number }[];  // type defaults
   current: Record<string, number | null>;
 }
 
@@ -30,8 +30,15 @@ export default function TargetsSection({ projectId, data }: { projectId: number;
   const [err, setErr] = useState<string | null>(null);
 
   if (!data) return null;
-  const anyTarget = METRICS.some((m) => rows[m.key] != null);
+  const typeDefault: Record<string, number | undefined> =
+    Object.fromEntries((data.typeRows ?? []).map((r) => [r.metric, r.target]));
+  const effective = (key: string): number | null => rows[key] ?? typeDefault[key] ?? null;
+
+  const anyTarget = TARGET_METRICS.some((m) => effective(m.key) != null);
   if (!anyTarget && !data.editable) return null;   // nothing to show non-admins
+
+  // Non-admins see progress only — hide untargeted rows for them.
+  const visible = data.editable ? TARGET_METRICS : TARGET_METRICS.filter((m) => effective(m.key) != null);
 
   const save = (metric: string, value: number | null) => {
     setErr(null);
@@ -45,14 +52,27 @@ export default function TargetsSection({ projectId, data }: { projectId: number;
     setEditing(null);
   };
 
-  const fmt = (v: number | null, unit: string) => (v == null ? '—' : `${Number(v.toFixed(1))}${unit}`);
+  // Tolerate a typed "%" / "days" suffix; blank clears the override; out-of-range
+  // explains the expected format instead of silently doing nothing.
+  const trySave = (m: TargetMetric) => {
+    const raw = draft.trim().replace(/%$/, '').replace(/\s*days?$/i, '').trim();
+    const v = raw === '' ? null : Number(raw);
+    if (v != null && (!Number.isFinite(v) || v < 0 || v > m.max)) {
+      setErr(`${m.label}: enter a number between 0 and ${m.max}${m.unit === '%' ? ' (percent — no % sign needed)' : m.unit ? ' (days)' : ''}, or leave blank to clear.`);
+      return;
+    }
+    setErr(null);
+    save(m.key, v);
+  };
 
   return (
     <>
       <div className="hc-sub">Targets &amp; progress</div>
       <div style={{ display: 'grid', gap: 8 }}>
-        {METRICS.map((m) => {
-          const target = rows[m.key] ?? null;
+        {visible.map((m) => {
+          const override = rows[m.key] ?? null;
+          const target = effective(m.key);
+          const inherited = override == null && target != null;
           const cur = data.current[m.key] ?? null;
           const met = target != null && cur != null
             && (m.higherBetter ? cur >= target : cur <= target);
@@ -62,41 +82,45 @@ export default function TargetsSection({ projectId, data }: { projectId: number;
             : m.higherBetter
               ? Math.min(100, (cur / Math.max(target, 1e-9)) * 100)
               : Math.min(100, (Math.max(target, 1e-9) / Math.max(cur, 1e-9)) * 100);
+          const fallback = typeDefault[m.key];
+          const clearNote = fallback != null
+            ? ` Blank falls back to the type default (${fmtTarget(fallback, m.unit)}).`
+            : ' Blank clears the target.';
           return (
             <div key={m.key} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <span style={{ minWidth: 150 }}>{m.label}</span>
-              <span style={{ minWidth: 64, fontWeight: 600 }}>{fmt(cur, m.unit)}</span>
+              <span style={{ minWidth: 170 }}>{m.label}</span>
+              <span style={{ minWidth: 64, fontWeight: 600 }}>{fmtTarget(cur, m.unit)}</span>
               <span style={{ flex: 1, minWidth: 120, height: 8, borderRadius: 4, background: 'var(--border)', overflow: 'hidden' }}>
                 <span style={{ display: 'block', height: '100%', width: `${pct}%`,
                   background: target == null ? 'var(--border)' : met ? 'var(--accent)' : 'var(--warn)' }} />
               </span>
               {editing === m.key ? (
-                <span style={{ display: 'inline-flex', gap: 6 }}>
-                  <input className="finput" style={{ width: 80 }} autoFocus value={draft}
+                <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                  <input className="finput" style={{ width: 90 }} autoFocus value={draft}
+                    placeholder={m.placeholder} inputMode="decimal"
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        const v = draft.trim() === '' ? null : Number(draft);
-                        if (v == null || (Number.isFinite(v) && v >= 0 && v <= 100)) save(m.key, v);
-                      }
-                      if (e.key === 'Escape') setEditing(null);
+                      if (e.key === 'Enter') trySave(m);
+                      if (e.key === 'Escape') { setEditing(null); setErr(null); }
                     }} />
-                  <button className="btn" onClick={() => {
-                    const v = draft.trim() === '' ? null : Number(draft);
-                    if (v == null || (Number.isFinite(v) && v >= 0 && v <= 100)) save(m.key, v);
-                  }}>Save</button>
+                  {m.unit.trim() !== '' && <span className="bnl-sub">{m.unit.trim()}</span>}
+                  <button className="btn" onClick={() => trySave(m)}>Save</button>
                 </span>
               ) : (
                 <span className="bnl-sub" style={{ minWidth: 110 }}>
-                  {target == null ? 'no target' : `target ${m.higherBetter ? '≥' : '≤'} ${fmt(target, m.unit)}`}
+                  {target == null ? 'no target'
+                    : `target ${m.higherBetter ? '≥' : '≤'} ${fmtTarget(target, m.unit)}${inherited ? ' · type default' : ''}`}
                   {target != null && met && <span style={{ color: 'var(--accent)', fontWeight: 700 }}> ✓</span>}
                   {data.editable && (
                     <button className="btn" style={{ marginLeft: 8, padding: '0 8px', fontSize: 12 }}
-                      onClick={() => { setEditing(m.key); setDraft(target == null ? '' : String(target)); }}>
-                      {target == null ? 'set' : 'edit'}
+                      onClick={() => { setEditing(m.key); setDraft(override == null ? '' : String(override)); setErr(null); }}>
+                      {override == null ? 'set' : 'edit'}
                     </button>
                   )}
                 </span>
+              )}
+              {editing === m.key && (
+                <span className="bnl-sub" style={{ flexBasis: '100%', fontSize: 12 }}>{m.hint}{clearNote}</span>
               )}
             </div>
           );
