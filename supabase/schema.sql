@@ -110,6 +110,16 @@ create table if not exists dest_profile (
   primary key (period, project_id)
 );
 
+-- ── Per-project performance targets (admin-set; writes via /api/targets) ─────
+create table if not exists project_targets (
+  project_id  bigint not null,
+  metric      text not null,                     -- 'ph_exit_rate' | 'dq_score' | 'returns_2yr'
+  target      numeric not null,
+  updated_by  text,
+  updated_at  timestamptz default now(),
+  primary key (project_id, metric)
+);
+
 -- ── Meta (generated_at, period range, etc.) ──────────────────────────────────
 create table if not exists meta (
   key   text primary key,

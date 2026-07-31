@@ -165,5 +165,38 @@ export async function GET(req: Request) {
     });
   }
 
-  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers, dest, survival, diagnosis, destProfile });
+  // ── Targets & progress (Pillar 3-4) — snapshot mode ──────────────────────────
+  // Admin-set per-project targets (project_targets; writes via /api/targets).
+  // Current values come from the same stored rows the panel already shows, so a
+  // target bar can never disagree with the numbers beside it.
+  let targets: {
+    editable: boolean;
+    rows: { metric: string; target: number }[];
+    current: Record<string, number | null>;
+  } | null = null;
+  if (mode === 'snapshot' && period) {
+    const histRows2 = (historyRes.data ?? []) as unknown as Array<Record<string, unknown>>;
+    const latest2 = histRows2.find((h) => h['period'] === period) ?? null;
+    const [tRes, dqRes2, retRes2] = await Promise.all([
+      sb.from('project_targets').select('metric, target').eq('project_id', projectId),
+      sb.from('dq_metrics').select('data')
+        .eq('project_id', projectId).eq('granularity', granularity).eq('period', period).maybeSingle(),
+      sb.from('returns_metrics').select('total_ph_exits, returns_2yr')
+        .eq('project_id', projectId).eq('granularity', granularity).eq('period', period)
+        .eq('household_type', household).eq('subpopulation', subpopulation).maybeSingle(),
+    ]);
+    const dqd = (dqRes2.data?.data ?? null) as Record<string, unknown> | null;
+    const ret = retRes2.data as { total_ph_exits: number | null; returns_2yr: number | null } | null;
+    targets = {
+      editable: viewer.isAdmin,
+      rows: ((tRes.data ?? []) as { metric: string; target: number }[]),
+      current: {
+        ph_exit_rate: typeof latest2?.['ph_exit_rate'] === 'number' ? (latest2['ph_exit_rate'] as number) : null,
+        dq_score: typeof dqd?.['DQ_Score'] === 'number' ? (dqd['DQ_Score'] as number) : null,
+        returns_2yr: ret && ret.total_ph_exits ? ((ret.returns_2yr ?? 0) / ret.total_ph_exits) * 100 : null,
+      },
+    };
+  }
+
+  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers, dest, survival, diagnosis, destProfile, targets });
 }

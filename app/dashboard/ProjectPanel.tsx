@@ -5,6 +5,7 @@ import { periodLabel, fmtInt } from '../../lib/format';
 import { TimeToHousing, type SurvivalRow } from '../../components/TimeToHousing';
 import PerformanceDiagnosis from './PerformanceDiagnosis';
 import DestProfile from './DestProfile';
+import TargetsSection, { type TargetsData } from './TargetsSection';
 import type { Diagnosis } from '../../lib/diagnosis';
 
 /* ── shapes returned by /api/project ─────────────────────────────────────── */
@@ -139,6 +140,7 @@ export default function ProjectPanel({
   const [surv, setSurv] = useState<{ project: SurvivalRow | null; type: SurvivalRow | null } | null>(null);
   const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
   const [destProfile, setDestProfile] = useState<Record<string, number> | null>(null);
+  const [targets, setTargets] = useState<TargetsData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const isRet = mode === 'returns';
 
@@ -154,7 +156,7 @@ export default function ProjectPanel({
         if (!live) return;
         setProj(j.project); setHistory(j.history); setPeers(j.peers ?? []); setDest(j.dest ?? null);
         setSurv(j.survival ?? null); setDiagnosis(j.diagnosis ?? null);
-        setDestProfile(j.destProfile ?? null);
+        setDestProfile(j.destProfile ?? null); setTargets(j.targets ?? null);
       })
       .catch(() => { if (live) { setErr('Could not load this project.'); setHistory([]); } });
     return () => { live = false; };
@@ -257,6 +259,10 @@ export default function ProjectPanel({
 
             {/* Where do clients go — ALL exits by destination (Pillar 3), snapshot only */}
             {!isRet && <DestProfile profile={destProfile} periodLabel={periodLabel(period)} />}
+
+            {/* Targets & progress (Pillar 3-4) — mounted only once data exists so
+                the section's initial state is seeded correctly */}
+            {!isRet && targets && <TargetsSection key={proj.project_id} projectId={proj.project_id} data={targets} />}
 
             {/* Destination breakdown — returns mode only */}
             {isRet && dest && Object.keys(dest).length > 0 && (

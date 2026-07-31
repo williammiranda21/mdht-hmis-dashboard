@@ -6,6 +6,7 @@ import PerformanceGrid from './PerformanceGrid';
 import ProjectPathways from './ProjectPathways';
 import DigestSection from './DigestSection';
 import LeaseUpFunnel from './LeaseUpFunnel';
+import WorklistNotes from './WorklistNotes';
 
 interface Opt { id: number; name: string; type: string }
 
@@ -81,6 +82,8 @@ function CopyId({ pid }: { pid: string }) {
 interface DeepDiveData {
   served: number; matched: number; unmatched: number; restricted?: boolean;
   lists: Record<ListKey, Client[]>;
+  /** pid → existing note count (shared bnl_notes thread) */
+  noteCounts?: Record<string, number>;
 }
 
 export default function DeepDiveView({
@@ -91,6 +94,9 @@ export default function DeepDiveView({
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<ListKey | null>('long_stay');
   const [data, setData] = useState<DeepDiveData | null>(null);
+  const [notesFor, setNotesFor] = useState<{ pid: string; name: string } | null>(null);
+  // Local bump so a just-posted note shows on the badge without a full refetch.
+  const [noteBump, setNoteBump] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -261,6 +267,16 @@ export default function DeepDiveView({
                                   <div className="bnl-nm">{c.name}</div>
                                   <div className="bnl-sub">{c.detail}</div>
                                   <CopyId pid={c.pid} />
+                                  {(() => {
+                                    const n = (data.noteCounts?.[c.pid] ?? 0) + (noteBump[c.pid] ?? 0);
+                                    return (
+                                      <button className="btn" style={{ marginLeft: 6, padding: '1px 8px', fontSize: 12 }}
+                                        title="Action notes — shared with the By-Name List drawer"
+                                        onClick={() => setNotesFor({ pid: c.pid, name: c.name ?? c.pid })}>
+                                        📝 {n > 0 ? n : '+'}
+                                      </button>
+                                    );
+                                  })()}
                                 </td>
                                 <td className="num">{c.age ?? '—'}</td>
                                 <td>
@@ -305,6 +321,12 @@ export default function DeepDiveView({
             </p>
           </div>
         </>
+      )}
+
+      {notesFor && (
+        <WorklistNotes pid={notesFor.pid} name={notesFor.name}
+          onClose={() => setNotesFor(null)}
+          onPosted={() => setNoteBump((b) => ({ ...b, [notesFor.pid]: (b[notesFor.pid] ?? 0) + 1 }))} />
       )}
     </>
   );

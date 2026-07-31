@@ -235,8 +235,24 @@ export async function GET(req: Request) {
     .sort(desc('days_since_contact'))
     .slice(0, LIMIT);
 
+  // ── Action-note counts — same bnl_notes thread the BNL drawer uses ─────────
+  // One thread per CLIENT (not per worklist): a note typed at Monday's worklist
+  // review is the same note a case manager sees in the BNL drawer. RLS: without
+  // BNL access the select silently returns nothing, matching the page gate.
+  const allListPids = new Set<string>();
+  for (const rows of [flagged.long_stay, flagged.awaiting_movein, openSuspectList, flagged.chronic])
+    for (const r of rows) if (servedBy.has(r.pid) || rows === openSuspectList) allListPids.add(r.pid);
+  for (const pid of dqByPid.keys()) allListPids.add(pid);
+  const noteCounts: Record<string, number> = {};
+  const pidArr = [...allListPids];
+  for (let i = 0; i < pidArr.length; i += 200) {
+    const { data } = await sb.from('bnl_notes').select('pid').in('pid', pidArr.slice(i, i + 200)).limit(1000);
+    for (const r of (data ?? []) as { pid: string }[]) noteCounts[r.pid] = (noteCounts[r.pid] ?? 0) + 1;
+  }
+
   return NextResponse.json({
     served,
+    noteCounts,
     matched: matchedPids.size,
     unmatched: served - matchedPids.size,
     lists: {
