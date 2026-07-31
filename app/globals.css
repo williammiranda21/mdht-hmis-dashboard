@@ -339,6 +339,13 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .bnl-mg .k{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
 .bnl-mg .v{font-size:14px;font-weight:700;color:var(--strong);margin-top:2px}
 .bnl-dq{margin-top:12px;background:var(--warn-light);border-radius:10px;padding:10px 13px;font-size:12.5px;color:var(--warn)}
+/* Youth risk strip (client drawer) — compact, visually distinct from the .bnl-mg
+   tiles: band-colored left edge + pill, factors inline. High band goes red. */
+.bnl-risk{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:10px;padding:8px 12px;border:1px solid var(--hair);border-left:3px solid var(--primary);border-radius:10px;background:var(--primary-soft);font-size:12.5px}
+.bnl-risk b{color:var(--strong);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bnl-risk-band{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--track);color:var(--muted)}
+.bnl-risk.hi{border-left-color:var(--danger)}
+.bnl-risk.hi .bnl-risk-band{background:var(--danger);color:#fff}
 /* ── 3-year homeless history card (BNL client drawer) ──
    Mirrors the card in generate_bnl.py so the gated static page and the web app
    look the same. All values are precomputed in bnl_core.py (hist3). */
@@ -513,8 +520,11 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .bnl-lockerr{color:var(--danger);font-size:12.5px;min-height:18px;margin-top:9px}
 .bnl-fp-vet{background:#E0F2FE;color:#0369A1} :root[data-theme="dark"] .bnl-fp-vet{background:#0c4a6e;color:#bae6fd}
 .bnl-fp-fam{background:var(--primary-light);color:var(--secondary)}
-.bnl-rp{display:inline-block;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:800}
-.bnl-rp-hi{background:var(--danger-light);color:var(--danger)} .bnl-rp-md{background:var(--warn-light);color:var(--warn)} .bnl-rp-lo{background:var(--track);color:var(--muted)}
+/* Youth risk pill — two bands only, per spec: Low 0-7 (neutral) · High 8+ (red).
+   nowrap keeps "N pts" on one line in the narrow column (it used to wrap and
+   read as an off-center circle). */
+.bnl-rp{display:inline-block;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:800;white-space:nowrap;line-height:1.2}
+.bnl-rp-hi{background:var(--danger-light);color:var(--danger)} .bnl-rp-lo{background:var(--track);color:var(--muted)}
 
 /* ── Deep Dive Phase 2: time to housing + small-multiples grid ──
    The grid deliberately uses ONE shared y-scale across every card (set in

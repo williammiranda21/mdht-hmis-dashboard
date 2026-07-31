@@ -298,10 +298,11 @@ export default function BnlView({
                     </td>
                     <td className="num">{r.sys_days3.toLocaleString()} d <span className="bnl-sub">· {r.episodes3} ep</span></td>
                     <td>{r.risk_pts == null ? <span className="bnl-sub">—</span> : (
-                      // Youth prioritization bands per spec: Low 1–7, High 8+
-                      <span className={`bnl-rp ${(r.risk_band ?? (r.risk_pts >= 8 ? 'High' : 'Low')) === 'High' ? 'bnl-rp-hi' : r.risk_pts >= 5 ? 'bnl-rp-md' : 'bnl-rp-lo'}`}
-                        title={`${r.risk_band ?? ''} priority — ${r.risk_pts} of ${r.risk_max} points (HNA items pending)`}>
-                        {r.risk_pts} pts{r.risk_band === 'High' ? ' · High' : ''}</span>
+                      // Youth prioritization bands per spec: Low 0–7, High 8+.
+                      // Two colors only — matches the ETL's risk_band exactly.
+                      <span className={`bnl-rp ${r.risk_pts >= 8 ? 'bnl-rp-hi' : 'bnl-rp-lo'}`}
+                        title={`${r.risk_pts >= 8 ? 'High' : 'Low'} priority — ${r.risk_pts} of ${r.risk_max} points (Low 0–7 · High 8+ · HNA + income pending)`}>
+                        {r.risk_pts} pts{r.risk_pts >= 8 ? ' · High' : ''}</span>
                     )}</td>
                     <td>{r.ref_type ? (
                       <><div>{r.ref_type} · <b>{r.ref_status}</b></div><div className="bnl-sub">{r.ref_date}{r.ref_prov ? ` · ${r.ref_prov}` : ''}</div></>
@@ -382,9 +383,24 @@ export default function BnlView({
               <div className="bnl-mg"><div className="k">DV</div><div className="v" style={{ fontSize: '.8rem' }}>{!detail ? '…' : detail.dv_fleeing ? <b style={{ color: 'var(--danger)' }}>Currently fleeing</b> : detail.dv_survivor ? 'Survivor' : detail.dv_survivor === false ? 'No' : '—'}</div></div>
               <div className="bnl-mg"><div className="k">Foster · Juv. justice</div><div className="v" style={{ fontSize: '.8rem' }}>{!detail ? '…' : <>{detail.foster == null ? 'unk' : detail.foster ? 'Yes' : 'No'} · {detail.jj == null ? 'unk' : detail.jj ? 'Yes' : 'No'}</>}</div></div>
               <div className="bnl-mg"><div className="k">Housing referral</div><div className="v" style={{ fontSize: '.8rem' }}>{drill.ref_type ? <>{drill.ref_type} · {drill.ref_status}{drill.ref_date ? ` · ${drill.ref_date}` : ''}{drill.ref_prov && <div className="bnl-sub">{drill.ref_prov}</div>}</> : '—'}</div></div>
-              {drill.risk_pts != null && <div className="bnl-mg"><div className="k">Risk points (partial)</div><div className="v num">{drill.risk_pts} / {drill.risk_max}</div><div className="bnl-sub">TAY · Housing Needs · income pending</div></div>}
               <div className="bnl-mg" style={{ gridColumn: '1 / -1' }}><div className="k">Status detail</div><div className="v" style={{ fontSize: '.78rem' }}>{drill.detail}</div></div>
             </div>
+            {/* Youth risk — its own strip, deliberately NOT another .bnl-mg tile:
+                the score is the prioritization signal, so it gets band color +
+                the itemized factors behind the number. Youth (18-24) only. */}
+            {drill.risk_pts != null && (
+              <div className={`bnl-risk${drill.risk_band === 'High' ? ' hi' : ''}`}>
+                <span className="bnl-risk-band">{drill.risk_band ?? '—'}</span>
+                <b>Risk {drill.risk_pts} / {drill.risk_max}</b>
+                <span className="bnl-sub" style={{ flex: 1 }}>
+                  {!detail ? '…'
+                    : detail.risk_detail?.length
+                      ? detail.risk_detail.map(([l, p]) => `${l} +${p}`).join(' · ')
+                      : 'no scored factors'}
+                  <span title="Housing Needs Assessment items (ADA unit, RS offender) and the income parameter are not scored yet"> · HNA + income pending</span>
+                </span>
+              </div>
+            )}
             {!!detail?.dq?.length && <div className="bnl-dq">⚠ {detail.dq.join(' — ')}</div>}
             <HistoryCard h={hist3} />
             <div className="bnl-tl">

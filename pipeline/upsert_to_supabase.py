@@ -445,7 +445,7 @@ def build_bnl_clients(bnl: dict | None) -> list[dict]:
             "ref_type": r["ref_type"], "ref_status": r["ref_status"],
             "ref_date": r["ref_date"], "ref_prov": r["ref_prov"],
             "risk_pts": r["risk_pts"], "risk_max": r["risk_max"],
-            "risk_band": r.get("risk_band"),
+            "risk_band": r.get("risk_band"), "risk_detail": r.get("risk_detail"),
             "spdat_score": r.get("spdat_score"), "spdat_tool": r.get("spdat_tool"),
             "spdat_date": r.get("spdat_date"),
             "chronic": r["chronic"], "is_new": r["new"], "returned": r["returned"],

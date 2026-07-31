@@ -88,6 +88,8 @@ export interface BnlDetail {
   jj: boolean | null;
   hoh: boolean;
   dq: string[];
+  /** [label, points] per scored youth-risk factor; null/[] when nothing scored. */
+  risk_detail: [string, number][] | null;
 }
 
 /**
