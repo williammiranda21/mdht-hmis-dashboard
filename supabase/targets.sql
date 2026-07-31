@@ -16,10 +16,12 @@ create table if not exists type_targets (
   primary key (project_type, metric)
 );
 
--- project_targets shipped with RLS never enabled — the admin gate lived only in
--- /api/targets, so any REST caller with the anon key could write targets
--- directly. Close both tables: approved users read, admins write. Policy names
--- and predicates match the house style (auth_rls.sql §1, auth_setup.sql).
+-- project_targets already has RLS from the hand-run setup SQL (2026-07-30):
+-- "read targets" (select using true — open to anon + unapproved) and
+-- "admin write targets" (is_admin). Writes were fine; the read policy is looser
+-- than the house standard. This block CONVERGES both tables to the standard:
+-- approved users read, admins write — dropping the old policy names so the
+-- open read doesn't survive alongside (policies OR together). Idempotent.
 alter table project_targets enable row level security;
 alter table type_targets    enable row level security;
 
@@ -28,6 +30,8 @@ declare t text;
 begin
   foreach t in array array['project_targets', 'type_targets'] loop
     execute format('drop policy if exists "public read" on %I;', t);
+    execute format('drop policy if exists "read targets" on %I;', t);
+    execute format('drop policy if exists "admin write targets" on %I;', t);
     execute format('drop policy if exists "authenticated read" on %I;', t);
     execute format(
       'create policy "authenticated read" on %I for select to authenticated '
