@@ -352,7 +352,7 @@ export default function BnlView({
                       // Youth prioritization bands per spec: Low 0–7, High 8+.
                       // Two colors only — matches the ETL's risk_band exactly.
                       <span className={`bnl-rp ${r.risk_pts >= 8 ? 'bnl-rp-hi' : 'bnl-rp-lo'}`}
-                        title={`${r.risk_pts >= 8 ? 'High' : 'Low'} priority — ${r.risk_pts} of ${r.risk_max} points (Low 0–7 · High 8+ · HNA + income pending)`}>
+                        title={`${r.risk_pts >= 8 ? 'High' : 'Low'} priority — ${r.risk_pts} of ${r.risk_max} points (Low 0–7 · High 8+ · HNA items pending)`}>
                         {r.risk_pts} pts{r.risk_pts >= 8 ? ' · High' : ''}</span>
                     )}</td>
                     <td>{r.ref_type ? (
@@ -446,7 +446,7 @@ export default function BnlView({
                     : detail.risk_detail?.length
                       ? detail.risk_detail.map(([l, p]) => `${l} +${p}`).join(' · ')
                       : 'no scored factors'}
-                  <span title="Housing Needs Assessment items (ADA unit, RS offender) and the income parameter are not scored yet"> · HNA + income pending</span>
+                  <span title="Housing Needs Assessment items (ADA unit, RS offender) are not scored yet"> · HNA pending</span>
                 </span>
               </div>
             )}
@@ -465,10 +465,14 @@ export default function BnlView({
                     const gap = d && next
                       ? Math.round((+new Date(next) - +new Date(d)) / 86400000) : null;
                     const known = gap != null && gap >= 0;
+                    // Terminal reached via an exit to a permanent destination
+                    // (no program move-in) — label it honestly.
+                    const exitHoused = k === 'movein' && detail.milestones?.['_via'] === 'exit';
                     return (
                       <span key={k} style={{ display: 'contents' }}>
-                        <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: d ? 'var(--strong)' : 'var(--faint)' }}>{label}</span>
+                        <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}
+                          title={exitHoused ? 'Housed via an exit to a permanent destination — there is no program move-in' : undefined}>
+                          <span style={{ fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: d ? 'var(--strong)' : 'var(--faint)' }}>{exitHoused ? 'Housed (exit)' : label}</span>
                           <span style={{ fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{d ?? '—'}</span>
                         </span>
                         {i < MILESTONES.length - 1 && (
