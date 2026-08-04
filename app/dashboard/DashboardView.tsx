@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import type { Granularity, ProjectMetric } from '../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../lib/types';
 import { periodLabel, rateBand, bandColorVar, fmtInt } from '../../lib/format';
+import { fmtTarget } from '../../lib/target-metrics';
+import type { TargetMiss } from '../../lib/target-flags';
 import ProjectPanel from './ProjectPanel';
 
 type Props = {
@@ -14,6 +16,8 @@ type Props = {
   period: string;
   household: string;
   subpopulation: string;
+  /** project_id → missed targets (empty on filtered household/subpop views). */
+  targetFlags?: Record<number, TargetMiss[]>;
 };
 
 // Extra columns available through the ⚙ Columns picker — pulled from the full jsonb record.
@@ -41,7 +45,7 @@ const mom = (r: ProjectMetric): number | null => {
 };
 
 export default function DashboardView({
-  rows, periods, granularity, period, household, subpopulation,
+  rows, periods, granularity, period, household, subpopulation, targetFlags = {},
 }: Props) {
   const router = useRouter();
 
@@ -314,6 +318,14 @@ export default function DashboardView({
                           onKeyDown={(e) => e.key === 'Enter' && setPanelProject(r.project_id)}>
                           {r.project_name}
                         </span>
+                        {(targetFlags[r.project_id]?.length ?? 0) > 0 && (
+                          <span className="tflag"
+                            title={targetFlags[r.project_id]
+                              .map((m) => `${m.label}: ${fmtTarget(m.current, m.unit)} vs target ${m.higherBetter ? '≥' : '≤'} ${fmtTarget(m.target, m.unit)}`)
+                              .join(' · ')}>
+                            ⚑ off target
+                          </span>
+                        )}
                       </span>
                     </td>
                     <td><span className="ty">{r.type_name}</span></td>

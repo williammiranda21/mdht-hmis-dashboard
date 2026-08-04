@@ -25,6 +25,8 @@ type EvaCount = { hp: number; error: number; warning: number };
 type EvaCatCounts = Record<string, EvaCount>;
 type Props = {
   periods: string[]; granularity: Granularity; period: string; rows: Row[];
+  /** Auto-open this project's fix-list on mount (deep-link from Deep Dive). */
+  focusProject?: number | null;
   evaCounts?: Record<number, EvaCatCounts>;
 };
 
@@ -92,7 +94,7 @@ function PctCell({ pct, thr, sub }: { pct: number | null; thr: number; sub?: str
 
 type SortKey = 'name' | 'type_name' | string;
 
-export default function DqView({ periods, granularity, period, rows, evaCounts }: Props) {
+export default function DqView({ periods, granularity, period, rows, evaCounts, focusProject = null }: Props) {
   const router = useRouter();
   // Column visibility — default all on; persisted per browser.
   const [visible, setVisible] = useState<Set<string>>(() => new Set(TOGGLE_COLS.map((c) => c.k)));
@@ -117,6 +119,14 @@ export default function DqView({ periods, granularity, period, rows, evaCounts }
   // Fix-list drills into client IDs, which drill_clients only holds monthly.
   const canFix = granularity === 'monthly';
   const [fixRow, setFixRow] = useState<Row | null>(null);
+
+  // Deep-link support: land with a project's fix-list already open.
+  useEffect(() => {
+    if (focusProject == null) return;
+    const r = rows.find((x) => x.project_id === focusProject);
+    if (r) setFixRow(r);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusProject]);
 
   const typeOptions = useMemo(() => {
     const s = new Set<string>();
@@ -261,7 +271,9 @@ export default function DqView({ periods, granularity, period, rows, evaCounts }
             )}
           </div>
         </div>
-        <div className="scroll">
+        {/* scroll-pin: viewport-bounded so the horizontal scrollbar is always
+            on screen (was only reachable at the very bottom of the page). */}
+        <div className="scroll scroll-pin">
           <table>
             <thead>
               <tr>

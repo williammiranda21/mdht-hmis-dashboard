@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
  * Access: the worklists are client-level and gated by can_see_bnl(), which is
  * stricter than a project grant because the rows carry real names.
  */
-export default async function DeepDivePage() {
+export default async function DeepDivePage({ searchParams }: { searchParams: { projects?: string } }) {
   const viewer = await getViewer();
   if (!viewer) return null; // middleware redirects
 
@@ -67,10 +67,17 @@ export default async function DeepDivePage() {
     }))
     .filter((p) => !granted || granted.includes(p.id));
 
+  // ?projects=1,2 deep-link (e.g. "Deep Dive →" from the DQ fix-list) —
+  // restricted to projects this viewer can already see.
+  const visibleIds = new Set(options.map((o) => o.id));
+  const fromUrl = (searchParams.projects ?? '')
+    .split(',').map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && visibleIds.has(n));
+
   return (
     <DeepDiveView
       options={options}
-      preselect={granted ?? []}
+      preselect={fromUrl.length ? fromUrl : (granted ?? [])}
       isAdmin={viewer.isAdmin}
       periods={periods}
       defaultPeriod={defaultPeriod}

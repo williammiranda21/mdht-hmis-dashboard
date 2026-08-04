@@ -37,12 +37,6 @@ const LISTS: { key: ListKey; title: string; why: string; empty: string }[] = [
     empty: 'No clients are waiting on a move-in.',
   },
   {
-    key: 'open_suspect',
-    title: 'Enrollment may have been left open',
-    why: 'The client exited to permanent housing after this enrollment opened, or later enrollments have since opened and closed around it. Verify whether they are still active here.',
-    empty: 'No enrollments look left open.',
-  },
-  {
     key: 'chronic',
     title: 'Chronically homeless',
     why: 'Meets the HUD chronic-homelessness definition. Longest self-reported episode first. This is about the client’s history across the whole system — not their stay at your project — and it drives prioritisation for permanent housing.',
@@ -51,7 +45,7 @@ const LISTS: { key: ListKey; title: string; why: string; empty: string }[] = [
   {
     key: 'data_quality',
     title: 'Data quality to fix',
-    why: 'APR Q6 errors on enrolments AT this project — a missing exit destination, missing move-in date, income missing or unknown at entry, or an overdue annual assessment. These affect your APR. Client-level issues from other projects (e.g. an open Street Outreach enrolment) are not shown here — they belong to that project. Same records as the fix-list on the Data Quality tab.',
+    why: 'A triage summary — the five worst records here, the FULL list with guided fix steps and CSV export lives on the Data Quality tab (one click below). APR Q6 errors on enrolments AT this project: missing exit destination, missing move-in date, income missing or unknown at entry, overdue annual assessment.',
     empty: 'No APR Q6 data-quality errors on this project’s enrolments. 🎉',
   },
 ];
@@ -261,7 +255,7 @@ export default function DeepDiveView({
                             </tr>
                           </thead>
                           <tbody>
-                            {rows.map((c) => (
+                            {(l.key === 'data_quality' ? rows.slice(0, 5) : rows).map((c) => (
                               <tr key={c.pid}>
                                 <td>
                                   <div className="bnl-nm">{c.name}</div>
@@ -297,7 +291,17 @@ export default function DeepDiveView({
                             ))}
                           </tbody>
                         </table>
-                        {rows.length === 100 && (
+                        {l.key === 'data_quality' ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '10px 16px' }}>
+                            <a className="btn" href={`/dashboard/dq?p=${encodeURIComponent(period)}${sel.length === 1 ? `&focus=${sel[0]}` : ''}`}>
+                              Open the full fix-list on the Data Quality tab →
+                            </a>
+                            <span className="bnl-sub">
+                              {rows.length > 5 ? `${Math.min(rows.length, 100)}${rows.length === 100 ? '+' : ''} records total — showing the 5 worst. ` : ''}
+                              The Data Quality tab groups them by element with guided WellSky fix steps and CSV export.
+                            </span>
+                          </div>
+                        ) : rows.length === 100 && (
                           <div className="bnl-cnote">
                             Showing the first 100 — narrow your project selection to see the rest.
                           </div>

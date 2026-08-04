@@ -1,4 +1,6 @@
 import { getPeriods, getProjectMetrics } from '../../lib/queries';
+import { getTargetFlags } from '../../lib/target-flags';
+import { supabaseServer } from '../../lib/supabase-server';
 import type { Granularity } from '../../lib/types';
 import DashboardView from './DashboardView';
 
@@ -33,6 +35,9 @@ export default async function DashboardPage({
   }
 
   const rows = await getProjectMetrics(granularity, period, household, subpopulation);
+  // Off-target chips — admin-set targets vs this period's stored values.
+  const targetFlags = await getTargetFlags(
+    supabaseServer(), granularity, period, household, subpopulation, rows);
 
   return (
     <DashboardView
@@ -42,6 +47,7 @@ export default async function DashboardPage({
       period={period}
       household={household}
       subpopulation={subpopulation}
+      targetFlags={targetFlags}
     />
   );
 }

@@ -13,11 +13,19 @@ import { periodLabel, fmtInt } from '../../../lib/format';
 interface Pair { prev: number | null; cur: number | null }
 interface DigestRow {
   project_id: number; name: string; type: string | null;
-  clients: Pair; ph_rate: Pair; avg_los: Pair; dq_score: Pair;
+  dq_score: Pair;
   err_new: number; err_cleared: number;
   top_new_element: { label: string; n: number } | null;
+  /** Fixed-since-refresh ledger (dq_snapshots) — records repaired since the
+   *  previous capture, incl. retroactive fixes invisible to the month diff. */
+  fixed_n: number;
+  fixed_top: { label: string; n: number } | null;
+  score_since: number | null;
 }
-interface DigestData { cur: string; prev: string; rows: DigestRow[] }
+interface DigestData {
+  cur: string; prev: string; rows: DigestRow[];
+  fixed_base: string | null; fixed_period: string | null;
+}
 
 /** Delta chip. `dir` says which direction is good; neutral renders muted. */
 function Delta({ p, unit, dir, dp = 1 }: { p: Pair; unit: string; dir: 'up' | 'down' | 'none'; dp?: number }) {
@@ -72,10 +80,10 @@ export default function DigestSection({ projectIds }: { projectIds: number[] }) 
         onClick={() => setOpen((o) => !o)}
         onKeyDown={(e) => e.key === 'Enter' && setOpen((o) => !o)}>
         <div>
-          <h3>What changed <span className="bnl-sub">{periodLabel(data.cur)} vs {periodLabel(data.prev)}</span></h3>
+          <h3>Data quality — what changed <span className="bnl-sub">{periodLabel(data.cur)} vs {periodLabel(data.prev)}</span></h3>
           <div className="meta">
             Last two complete months. New/cleared counts are unique clients on the
-            data-quality fix-list; the worklists below follow their own period picker.
+            data-quality fix-list. Performance deltas live in the performance grid below.
           </div>
         </div>
         <span className="dd-caret">{open ? '▾' : '▸'}</span>
@@ -85,20 +93,19 @@ export default function DigestSection({ projectIds }: { projectIds: number[] }) 
           <thead>
             <tr>
               <th>Project</th>
-              <th className="num">Clients</th>
-              <th className="num">PH exit rate</th>
-              <th className="num">Avg LOS</th>
               <th className="num">DQ score</th>
               <th>DQ fix-list</th>
+              {data.fixed_base && (
+                <th title={`Records repaired since the ${data.fixed_base} refresh capture — same-month comparison, so retroactive fixes count too`}>
+                  Fixed since {data.fixed_base}
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.project_id}>
                 <td title={r.type ?? undefined}>{r.name}</td>
-                <td className="num"><Delta p={r.clients} unit="" dir="none" dp={0} /></td>
-                <td className="num"><Delta p={r.ph_rate} unit="%" dir="up" dp={2} /></td>
-                <td className="num"><Delta p={r.avg_los} unit="d" dir="none" /></td>
                 <td className="num"><Delta p={r.dq_score} unit="" dir="up" /></td>
                 <td>
                   {r.err_new === 0 && r.err_cleared === 0
@@ -122,6 +129,23 @@ export default function DigestSection({ projectIds }: { projectIds: number[] }) 
                         )}
                       </>}
                 </td>
+                {data.fixed_base && (
+                  <td>
+                    {r.fixed_n > 0
+                      ? <>
+                          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{fmtInt(r.fixed_n)} fixed</span>
+                          {r.fixed_top && (
+                            <span style={{ color: 'var(--muted)', fontSize: 12 }}> (most: {r.fixed_top.label})</span>
+                          )}
+                          {r.score_since != null && Math.abs(r.score_since) >= 0.05 && (
+                            <span style={{ color: r.score_since > 0 ? 'var(--accent)' : 'var(--danger)', fontSize: 12, fontWeight: 600 }}>
+                              {' '}· score {r.score_since > 0 ? '+' : ''}{Number(r.score_since.toFixed(1))}
+                            </span>
+                          )}
+                        </>
+                      : <span style={{ color: 'var(--muted)' }}>—</span>}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

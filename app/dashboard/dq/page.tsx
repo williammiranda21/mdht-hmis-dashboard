@@ -6,7 +6,7 @@ import DqView from './DqView';
 
 export const dynamic = 'force-dynamic';
 
-type SearchParams = { g?: string; p?: string };
+type SearchParams = { g?: string; p?: string; focus?: string };
 
 const asGranularity = (g?: string): Granularity =>
   g === 'quarterly' || g === 'fiscal' ? g : 'monthly';
@@ -61,5 +61,11 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     d: r.data,
   }));
 
-  return <DqView periods={periods} granularity={granularity} period={period} rows={merged} evaCounts={evaCounts} />;
+  // Deep-link (?focus=<project_id>) — e.g. from the Deep Dive DQ summary card:
+  // opens that project's fix-list as soon as the page mounts.
+  const focusProject = Number.isFinite(Number(searchParams.focus)) && searchParams.focus
+    ? Number(searchParams.focus) : null;
+
+  return <DqView periods={periods} granularity={granularity} period={period} rows={merged}
+    evaCounts={evaCounts} focusProject={focusProject} />;
 }

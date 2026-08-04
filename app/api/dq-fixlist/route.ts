@@ -23,6 +23,9 @@ const ELEMENTS: { key: string; metric: string; pctKey: string }[] = [
   { key: 'income', metric: 'dq:income', pctKey: 'DQ_IncMiss_pct' },
   { key: 'incexit', metric: 'dq:incexit', pctKey: 'DQ_IncExit_pct' },
   { key: 'annual', metric: 'dq:annual', pctKey: 'DQ_Annual_pct' },
+  // Left-open enrollment suspects (pipeline/recompute_openstay.py) — a SNAPSHOT
+  // keyed to the latest complete month; no trend % exists for it.
+  { key: 'openstay', metric: 'dq:openstay', pctKey: 'DQ_OpenStay_pct' },
   // PII (Q6a) — client-level, fix once per client. Deduped to unique clients in
   // the ETL, so the count here is people-to-fix, while the trend % stays the
   // APR's per-enrollment rate (same count-vs-% split as income).

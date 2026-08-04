@@ -32,6 +32,9 @@ const ELEMENTS = [
   { key: 'annual', label: 'Overdue annual assessment',
     fix: 'Complete the annual assessment within ±30 days of the enrollment anniversary.',
     denomKey: 'DQ_AnnualDue' },
+  { key: 'openstay', label: 'Enrollment may have been left open',
+    fix: 'The client appears to have moved on — they exited to permanent housing elsewhere, or later enrollments opened and closed after this one, yet this enrollment never closed. Verify whether they are still active here; if not, enter an exit in Community Services with the correct exit date and destination. (Current snapshot — this list reflects today’s open enrollments, not the selected month.)',
+    denomKey: 'DQ_ActiveTotal' },
   // PII (Q6a) — fixed once on the client record, not per enrollment.
   { key: 'name', label: 'Name missing or incomplete',
     fix: 'Enter the client’s full legal name, or set the correct name data-quality value.',
@@ -145,7 +148,13 @@ export default function DqFixList({
     <div className="bnl-ov" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bnl-modal">
         <button className="bnl-x" onClick={onClose}>✕</button>
-        <h3>Data-quality fix-list</h3>
+        <h3>Data-quality fix-list{' '}
+          <a className="bnl-sub" style={{ fontWeight: 400 }}
+            href={`/dashboard/deep-dive?projects=${projectId}`}
+            title="Open this project's worklists on Deep Dive">
+            Deep Dive →
+          </a>
+        </h3>
         <div className="bnl-sub" style={{ marginTop: 2 }}>{projectName} · {periodLabel(period)}</div>
 
         {!cats && !err && <div className="hc-none">Loading fix-list…</div>}
