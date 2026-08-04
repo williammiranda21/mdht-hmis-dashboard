@@ -18,6 +18,7 @@ const TABS = [
   { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy', adminOnly: true },
   { href: '/dashboard/deep-dive', label: 'Deep Dive', icon: 'search' },
   { href: '/dashboard/admin', label: 'Users', icon: 'users', adminOnly: true },
+  { href: '/dashboard/admin/cohorts', label: 'Cohorts', icon: 'cohort', adminOnly: true },
   { href: '/dashboard/admin/targets', label: 'Targets', icon: 'target', adminOnly: true },
 ] as const;
 
@@ -69,6 +70,12 @@ const ICONS: Record<string, JSX.Element> = {
   target: (
     <>
       <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" />
+    </>
+  ),
+  cohort: (
+    <>
+      <circle cx="8" cy="8" r="3" /><circle cx="16" cy="8" r="3" />
+      <path d="M2 20v-1a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v1M14 14h3a5 5 0 0 1 5 5v1" />
     </>
   ),
 };
