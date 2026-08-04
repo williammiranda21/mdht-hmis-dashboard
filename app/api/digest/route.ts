@@ -114,7 +114,14 @@ export async function GET(req: Request) {
         if ((r.data ?? []).length < 1000) break;
       }
       if (cap.length) {
-        fixedPeriod = cap[0].period;
+        // A capture normally holds ONE period, but a same-day re-run after a
+        // load that advanced the month can mix two — diff only the latest.
+        fixedPeriod = [...new Set(cap.map((c) => c.period))].sort().pop() ?? null;
+        for (let i = cap.length - 1; i >= 0; i--) {
+          if (cap[i].period !== fixedPeriod) cap.splice(i, 1);
+        }
+      }
+      if (cap.length && fixedPeriod) {
         const live: { project_id: number; metric: string; personal_ids: string[] | null }[] = [];
         for (let from = 0; ; from += 1000) {
           const r = await sb.from('drill_clients')
