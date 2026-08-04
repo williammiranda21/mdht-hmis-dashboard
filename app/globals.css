@@ -424,15 +424,17 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
    the ~320px visible slice. */
 @media print {
   body * { visibility: hidden !important; }
-  #pp-printable, #pp-printable * { visibility: visible !important; }
+  #pp-printable, #pp-printable *,
+  #bnl-printable, #bnl-printable * { visibility: visible !important; }
   .pp-noprint { display: none !important; }
   .bnl-ov { position: static !important; background: none !important; padding: 0 !important;
             display: block !important; overflow: visible !important; }
-  #pp-printable { position: static !important; max-width: 100% !important; width: 100% !important;
+  #pp-printable, #bnl-printable {
+                  position: static !important; max-width: 100% !important; width: 100% !important;
                   max-height: none !important; overflow: visible !important;
                   box-shadow: none !important; border: 0 !important; }
   /* scroll containers must not clip when printing */
-  .pp-hist, .dr-ids, .scroll { max-height: none !important; overflow: visible !important; }
+  .pp-hist, .dr-ids, .scroll, .bnl-tl { max-height: none !important; overflow: visible !important; }
   .pp-hist thead th { position: static !important; }
   .hc-sub { break-after: avoid; }
   .peer-row, .hc-t, tr { break-inside: avoid; }

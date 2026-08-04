@@ -426,8 +426,14 @@ export default function BnlView({
 
       {drill && (
         <div className="bnl-ov" onClick={(e) => e.target === e.currentTarget && setDrill(null)}>
-          <div className="bnl-modal">
-            <button className="bnl-x" onClick={() => setDrill(null)}>✕</button>
+          {/* id + @media print rules = the card alone prints; browser dialog
+              offers "Save as PDF" (stylesheet approach, same as the project
+              panel — no blobs, survives the county's web isolation). */}
+          <div className="bnl-modal" id="bnl-printable">
+            <button className="btn pp-noprint" style={{ float: 'right', marginLeft: 8 }}
+              onClick={() => window.print()}
+              title="Opens the print dialog — choose “Save as PDF”">🖨 PDF</button>
+            <button className="bnl-x pp-noprint" onClick={() => setDrill(null)}>✕</button>
             <h3>{drill.name} <span className="bnl-sub">· age {drill.age ?? '—'}</span></h3>
             <div className="bnl-sub" style={{ fontFamily: 'ui-monospace, monospace', marginTop: 2, cursor: 'pointer' }}
               title="click to copy"
@@ -438,7 +444,7 @@ export default function BnlView({
               <span className={`bnl-chip bnl-${drill.status}`}>{drill.status}</span>{' '}
               <Flags r={drill} />
               {isAdmin && (
-                <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                <span className="pp-noprint" style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                   {cohortMsg && <span className="bnl-sub">{cohortMsg}</span>}
                   <select className="fselect" style={{ padding: '3px 26px 3px 10px', fontSize: 12, minWidth: 150 }} value=""
                     onChange={async (e) => {
