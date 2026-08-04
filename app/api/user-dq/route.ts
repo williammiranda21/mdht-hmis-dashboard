@@ -27,20 +27,24 @@ export async function GET(req: Request) {
   const userId = sp.get('user');
 
   const sb = supabaseServer();
+  type Unit = { pid: string; entry: string | null };
   type Row = {
     period: string; user_id: string; project_id: number; metric: string; n: number;
     user_name: string | null; user_email: string | null; is_import: boolean;
+    detail?: Unit[] | null;
   };
   const rows: Row[] = [];
   for (let from = 0; ; from += 1000) {
+    // detail (the actual client units) only travels for the single-user card —
+    // on the roster it would ship every unit for every visible user.
     let q = sb.from('user_dq')
-      .select('period, user_id, project_id, metric, n, user_name, user_email, is_import')
+      .select(`period, user_id, project_id, metric, n, user_name, user_email, is_import${userId ? ', detail' : ''}`)
       .order('user_id').order('period').order('project_id').order('metric')
       .range(from, from + 999);
     if (userId) q = q.eq('user_id', userId);
     const r = await q;
     if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
-    rows.push(...((r.data ?? []) as Row[]));
+    rows.push(...((r.data ?? []) as unknown as Row[]));
     if ((r.data ?? []).length < 1000) break;
   }
 
@@ -100,12 +104,18 @@ export async function GET(req: Request) {
     pp.created += r.n;
     perProject.set(r.project_id, pp);
   }
+  const perMetricClients = new Map<string, (Unit & { project_id: number })[]>();
   for (const r of win) {
     if (r.metric === 'created') continue;
     const pp = perProject.get(r.project_id) ?? { errors: 0, created: 0 };
     pp.errors += r.n;
     perMetric.set(r.metric, (perMetric.get(r.metric) ?? 0) + r.n);
     perProject.set(r.project_id, pp);
+    if (r.detail?.length) {
+      const list = perMetricClients.get(r.metric) ?? [];
+      list.push(...r.detail.map((u) => ({ ...u, project_id: r.project_id })));
+      perMetricClients.set(r.metric, list);
+    }
   }
   // project names for the split
   const ids = [...perProject.keys()];
@@ -120,7 +130,8 @@ export async function GET(req: Request) {
     user: first ? { user_id: first.user_id, name: first.user_name,
       email: first.user_email, is_import: first.is_import } : null,
     monthly,
-    metrics: [...perMetric.entries()].map(([metric, n]) => ({ metric, n }))
+    metrics: [...perMetric.entries()]
+      .map(([metric, n]) => ({ metric, n, clients: perMetricClients.get(metric) ?? [] }))
       .sort((a, b) => b.n - a.n),
     projects: [...perProject.entries()].map(([project_id, v]) => ({
       project_id, name: pname.get(project_id) ?? `Project ${project_id}`, ...v,

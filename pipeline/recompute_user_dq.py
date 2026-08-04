@@ -204,11 +204,18 @@ def main():
                 continue
             counts[(p, uid, proj, "created")] += 1
 
+    # Window rows carry the actual units ({pid, entry}) so the score card can
+    # list WHICH clients to fix, not just how many. Monthly rows stay count-only.
+    details: dict[tuple, list] = {}
     for (uid, proj, m), s in uniq.items():
         counts[("window", uid, proj, m)] = len(s)
+        details[("window", uid, proj, m)] = [
+            {"pid": pid, "entry": entry}
+            for pid, entry in sorted(s, key=lambda x: (x[1] or "", x[0]))]
 
     payload = [{"period": p, "user_id": uid, "project_id": proj, "metric": m,
                 "n": n,
+                "detail": details.get((p, uid, proj, m)),
                 "user_name": users.get(uid, {}).get("name"),
                 "user_email": users.get(uid, {}).get("email"),
                 "is_import": users.get(uid, {}).get("is_import", False)}

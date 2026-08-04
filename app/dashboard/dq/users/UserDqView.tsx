@@ -38,8 +38,8 @@ interface CardData {
   user: { user_id: string; name: string | null; email: string | null; is_import: boolean } | null;
   /** errors here = the OPEN-error level that month, not new incidents. */
   monthly: { period: string; created: number; errors: number }[];
-  /** unique records across the window (metric ≠ 'created'). */
-  metrics: { metric: string; n: number }[];
+  /** unique records across the window (metric ≠ 'created'), with the units. */
+  metrics: { metric: string; n: number; clients?: { pid: string; entry: string | null; project_id: number }[] }[];
   projects: { project_id: number; name: string | null; errors: number; created: number }[];
 }
 
@@ -53,6 +53,7 @@ const ratePill = (rate: number | null, created: number) => {
 
 function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void }) {
   const [d, setD] = useState<CardData | null>(null);
+  const [openMetric, setOpenMetric] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     fetch(`/api/user-dq?user=${encodeURIComponent(userId)}`)
@@ -89,8 +90,10 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
                   {totals.score == null ? '—' : totals.score}
                 </div>
                 <div className="bnl-sub">100 − error rate</div></div>
-              <div className="bnl-mg"><div className="k">Records created</div>
-                <div className="v num">{fmtInt(totals.created)}</div></div>
+              <div className="bnl-mg" title="Program enrollments + program exits + income/benefits assessments (entry, update, annual, exit) this user created in the window. Client demographic records aren’t counted as volume.">
+                <div className="k">Records created</div>
+                <div className="v num">{fmtInt(totals.created)}</div>
+                <div className="bnl-sub">enrollments · exits · income</div></div>
               <div className="bnl-mg"><div className="k">Errors attributed</div>
                 <div className="v num">{fmtInt(totals.errors)}</div>
                 <div className="bnl-sub">unique records{totals.rate == null ? '' : ` · ${totals.rate.toFixed(1)}% of created`}</div></div>
@@ -98,15 +101,46 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
                 <div className="v num">{d.projects.length}</div></div>
             </div>
 
-            <div className="hc-sub">Errors by element</div>
+            <div className="hc-sub">Errors by element <span className="bnl-sub" style={{ textTransform: 'none', letterSpacing: 0 }}>click an element to list the clients to fix</span></div>
             {d.metrics.length === 0 ? <div className="bnl-sub">No attributed errors. 🎉</div> : (
               <div style={{ display: 'grid', gap: 4 }}>
-                {d.metrics.slice(0, 8).map((m) => (
-                  <div key={m.metric} style={{ display: 'flex', gap: 8, fontSize: 12.5, alignItems: 'baseline' }}>
-                    <span style={{ minWidth: 40, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtInt(m.n)}</span>
-                    <span style={{ color: 'var(--muted)' }}>{label(m.metric)}</span>
-                  </div>
-                ))}
+                {d.metrics.slice(0, 8).map((m) => {
+                  const isOpen = openMetric === m.metric;
+                  const clients = m.clients ?? [];
+                  const pname = new Map(d.projects.map((p) => [p.project_id, p.name ?? `Project ${p.project_id}`]));
+                  return (
+                    <div key={m.metric}>
+                      <div style={{ display: 'flex', gap: 8, fontSize: 12.5, alignItems: 'baseline', cursor: clients.length ? 'pointer' : 'default' }}
+                        role="button" tabIndex={0}
+                        onClick={() => clients.length && setOpenMetric(isOpen ? null : m.metric)}
+                        onKeyDown={(e) => e.key === 'Enter' && clients.length && setOpenMetric(isOpen ? null : m.metric)}>
+                        <span style={{ minWidth: 40, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtInt(m.n)}</span>
+                        <span style={{ color: 'var(--muted)' }}>{label(m.metric)}</span>
+                        {clients.length > 0 && <span className="dd-caret" style={{ fontSize: 11 }}>{isOpen ? '▾' : '▸'}</span>}
+                        {isOpen && clients.length > 0 && (
+                          <button className="btn" style={{ padding: '0 8px', fontSize: 11, marginLeft: 'auto' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard?.writeText([...new Set(clients.map((c) => c.pid))].join('\n'));
+                              const el = e.currentTarget;
+                              el.textContent = 'Copied ✓';
+                              setTimeout(() => { el.textContent = '⧉ Copy IDs'; }, 1200);
+                            }}>⧉ Copy IDs</button>
+                        )}
+                      </div>
+                      {isOpen && (
+                        <div style={{ margin: '4px 0 8px 48px', display: 'grid', gap: 2, maxHeight: 200, overflowY: 'auto' }}>
+                          {clients.map((c, i) => (
+                            <div key={`${c.pid}|${c.entry}|${i}`} style={{ fontSize: 11.5 }}>
+                              <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--strong)' }}>{c.pid}</span>
+                              <span className="bnl-sub">{c.entry ? ` · entry ${c.entry}` : ''} · {pname.get(c.project_id) ?? c.project_id}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -213,7 +247,7 @@ export default function UserDqView() {
             <thead>
               <tr>
                 <th>User</th>
-                <th className="num">Records created</th>
+                <th className="num" title="Program enrollments + exits + income/benefits assessments created by this user in the trailing 12 months">Records created</th>
                 <th className="num">Errors</th>
                 <th className="num">Error rate</th>
                 <th>Top issue</th>
