@@ -121,7 +121,9 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
             <div className="hc-sub">Errors by element <span className="bnl-sub" style={{ textTransform: 'none', letterSpacing: 0 }}>click an element to list the clients to fix</span></div>
             {d.metrics.length === 0 ? <div className="bnl-sub">No attributed errors. 🎉</div> : (
               <div style={{ display: 'grid', gap: 4 }}>
-                {d.metrics.slice(0, 8).map((m) => {
+                {/* every element — a truncated list made the total look wrong
+                    (51 attributed vs 48 visible). The list is short in practice. */}
+                {d.metrics.map((m) => {
                   const isOpen = openMetric === m.metric;
                   const clients = m.clients ?? [];
                   const pname = new Map(d.projects.map((p) => [p.project_id, p.name ?? `Project ${p.project_id}`]));
@@ -186,7 +188,7 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
 
             <div className="hc-sub">By project</div>
             <div style={{ display: 'grid', gap: 4 }}>
-              {d.projects.slice(0, 5).map((p) => (
+              {d.projects.map((p) => (
                 <div key={p.project_id} style={{ display: 'flex', gap: 8, fontSize: 12.5, alignItems: 'baseline' }}>
                   <span style={{ minWidth: 40, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtInt(p.errors)}</span>
                   <span style={{ color: 'var(--muted)' }}>{p.name}</span>
