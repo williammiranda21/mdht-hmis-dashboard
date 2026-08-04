@@ -86,5 +86,5 @@ export default async function BnlPage() {
     );
   }
 
-  return <BnlView initialRows={rows} initialTotal={pageRes.count ?? 0} agg={agg} ceMilestones={ceMilestones} />;
+  return <BnlView initialRows={rows} initialTotal={pageRes.count ?? 0} agg={agg} ceMilestones={ceMilestones} isAdmin={viewer.isAdmin} />;
 }

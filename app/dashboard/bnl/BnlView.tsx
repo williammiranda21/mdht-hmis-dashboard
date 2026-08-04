@@ -49,9 +49,12 @@ function Flags({ r }: { r: BnlClient }) {
 // flow data still lives in agg.pops[pop].flow if it's ever wanted back).
 
 export default function BnlView({
-  initialRows, initialTotal, agg, ceMilestones = null,
-}: { initialRows: BnlClient[]; initialTotal: number; agg: BnlAgg; ceMilestones?: CeMilestonesAgg | null }) {
+  initialRows, initialTotal, agg, ceMilestones = null, isAdmin = false,
+}: { initialRows: BnlClient[]; initialTotal: number; agg: BnlAgg; ceMilestones?: CeMilestonesAgg | null; isAdmin?: boolean }) {
   const [pop, setPop] = useState<PopKey>('all');
+  // Add-to-cohort (admin-only) — cohort list loads lazily on first drawer open.
+  const [cohortOpts, setCohortOpts] = useState<{ id: number; name: string }[] | null>(null);
+  const [cohortMsg, setCohortMsg] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fFlag, setFFlag] = useState('');
@@ -68,6 +71,19 @@ export default function BnlView({
   const [timeline, setTimeline] = useState<BnlTimelineEvent[] | null>(null);
   const [hist3, setHist3] = useState<BnlHist3 | null>(null);
   const [detail, setDetail] = useState<BnlDetail | null>(null);
+
+  // Cohort options load once, the first time an admin opens any drawer.
+  useEffect(() => {
+    setCohortMsg(null);
+    if (drill && isAdmin && cohortOpts === null) {
+      fetch('/api/cohorts')
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((j) => setCohortOpts((j.cohorts ?? []).map(
+          (c: { id: number; name: string }) => ({ id: c.id, name: c.name }))))
+        .catch(() => setCohortOpts([]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drill, isAdmin]);
 
   // Debounced copy of the search box — only this triggers a fetch.
   const [qDebounced, setQDebounced] = useState('');
@@ -418,9 +434,28 @@ export default function BnlView({
               onClick={(e) => { navigator.clipboard?.writeText(drill.pid); const el = e.currentTarget; el.textContent = 'ID copied ✓'; setTimeout(() => { el.textContent = drill.pid; }, 1200); }}>
               {drill.pid}
             </div>
-            <div style={{ marginTop: 6 }}>
+            <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <span className={`bnl-chip bnl-${drill.status}`}>{drill.status}</span>{' '}
               <Flags r={drill} />
+              {isAdmin && (
+                <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                  {cohortMsg && <span className="bnl-sub">{cohortMsg}</span>}
+                  <select className="fselect" style={{ padding: '3px 26px 3px 10px', fontSize: 12, minWidth: 150 }} value=""
+                    onChange={async (e) => {
+                      const cid = Number(e.target.value);
+                      if (!cid) return;
+                      setCohortMsg(null);
+                      const r = await fetch('/api/cohorts', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'add_members', id: cid, pids: [drill.pid] }),
+                      });
+                      setCohortMsg(r.ok ? 'Added to cohort ✓' : 'Could not add.');
+                    }}>
+                    <option value="">+ Add to cohort…</option>
+                    {(cohortOpts ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </span>
+              )}
             </div>
             <div className="bnl-mgrid">
               <div className="bnl-mg"><div className="k">Self-reported (3.917)</div><div className="v num">{drill.days_homeless.toLocaleString()} d</div><div className="bnl-sub">{detail ? <>since {detail.ep_start}{detail.times3_sr ? ` · ${detail.times3_sr} time${detail.times3_sr === '1' ? '' : 's'} in 3 yrs` : ''}{detail.months3_sr ? ` · ${detail.months3_sr === 13 ? '12+' : detail.months3_sr} mo` : ''}</> : '…'}</div></div>
