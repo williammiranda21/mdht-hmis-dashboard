@@ -180,16 +180,6 @@ export default function BnlView({
         <span className="bnl-sub">{pa.n.toLocaleString()} clients in this population</span>
       </div>
 
-      <div className="bnl-kpis" style={{ marginTop: 16 }}>
-        {kpis.map(([label, val, note, color]) => (
-          <div key={label} className="bnl-kpi" style={{ ['--kc' as any]: color }}>
-            <div className="bnl-kpi-lbl">{label}</div>
-            <div className="bnl-kpi-val num">{typeof val === 'number' ? val.toLocaleString() : val}</div>
-            <div className="bnl-kpi-note">{note}</div>
-          </div>
-        ))}
-      </div>
-
       {/* CE journey — SYSTEM view (all populations, unaffected by the selector):
           median days per milestone leg for the housed cohort, the longest leg
           highlighted, plus where not-yet-housed clients are waiting right now.
@@ -278,6 +268,15 @@ export default function BnlView({
         );
       })()}
 
+      <div className="bnl-kpis" style={{ marginTop: 16 }}>
+        {kpis.map(([label, val, note, color]) => (
+          <div key={label} className="bnl-kpi" style={{ ['--kc' as any]: color }}>
+            <div className="bnl-kpi-lbl">{label}</div>
+            <div className="bnl-kpi-val num">{typeof val === 'number' ? val.toLocaleString() : val}</div>
+            <div className="bnl-kpi-note">{note}</div>
+          </div>
+        ))}
+      </div>
 
       <div className="panel" style={{ marginTop: 16 }}>
         <div className="fbar" style={{ marginBottom: 8 }}>
