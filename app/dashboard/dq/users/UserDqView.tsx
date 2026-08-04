@@ -93,7 +93,7 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
 
   return (
     <div className="bnl-ov" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="bnl-modal" style={{ maxWidth: 640 }}>
+      <div className="bnl-modal" style={{ maxWidth: 880 }}>
         <button className="bnl-x" onClick={onClose}>✕</button>
         {!d || !totals ? <div className="hc-none">Loading…</div> : (
           <>
@@ -278,7 +278,7 @@ export default function UserDqView() {
               {rows.map((u) => (
                 <tr key={u.user_id} style={{ cursor: 'pointer' }} onClick={() => setOpen(u.user_id)}>
                   <td>
-                    <div className="bnl-nm">{u.name ?? u.user_id}{u.is_import && <span className="bnl-fp bnl-fp-dq" style={{ marginLeft: 6 }}>IMPORT</span>}</div>
+                    <div className="bnl-nm"><span className="bnl-drillname">{u.name ?? u.user_id}</span>{u.is_import && <span className="bnl-fp bnl-fp-dq" style={{ marginLeft: 6 }}>IMPORT</span>}</div>
                     <div className="bnl-sub">{u.email ?? '—'}</div>
                   </td>
                   <td className="num">{fmtInt(u.created)}</td>

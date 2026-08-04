@@ -572,6 +572,7 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .bnl-drillname{display:inline-flex;align-items:baseline;gap:5px}
 .bnl-drillname::after{content:"🔍";font-size:.72em;opacity:.35;transition:opacity .12s}
 .bnl-row:hover .bnl-drillname::after{opacity:.9}
+tr:hover .bnl-drillname::after{opacity:.9}
 
 /* ── Deep Dive Phase 3: forecast ── */
 .fc-chart{width:100%;height:260px;display:block;margin-top:10px}
