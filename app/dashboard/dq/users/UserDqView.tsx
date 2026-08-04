@@ -43,6 +43,23 @@ interface CardData {
   projects: { project_id: number; name: string | null; errors: number; created: number }[];
 }
 
+/** One-click copy for a single client ID (⧉ → ✓). */
+function CopyPid({ pid }: { pid: string }) {
+  const [ok, setOk] = useState(false);
+  return (
+    <button className="btn" style={{ padding: '0 6px', fontSize: 10.5, marginLeft: 6, lineHeight: '16px' }}
+      title="Copy this client ID"
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard?.writeText(pid);
+        setOk(true);
+        setTimeout(() => setOk(false), 1200);
+      }}>
+      {ok ? '✓' : '⧉'}
+    </button>
+  );
+}
+
 const ratePill = (rate: number | null, created: number) => {
   if (rate == null || created < MIN_VOL) {
     return <span className="bnl-sub">low volume{created ? ` (${created})` : ''}</span>;
@@ -131,9 +148,10 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
                       {isOpen && (
                         <div style={{ margin: '4px 0 8px 48px', display: 'grid', gap: 2, maxHeight: 200, overflowY: 'auto' }}>
                           {clients.map((c, i) => (
-                            <div key={`${c.pid}|${c.entry}|${i}`} style={{ fontSize: 11.5 }}>
+                            <div key={`${c.pid}|${c.entry}|${i}`} style={{ fontSize: 11.5, display: 'flex', alignItems: 'center' }}>
                               <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--strong)' }}>{c.pid}</span>
-                              <span className="bnl-sub">{c.entry ? ` · entry ${c.entry}` : ''} · {pname.get(c.project_id) ?? c.project_id}</span>
+                              <CopyPid pid={c.pid} />
+                              <span className="bnl-sub" style={{ marginLeft: 6 }}>{c.entry ? `entry ${c.entry} · ` : ''}{pname.get(c.project_id) ?? c.project_id}</span>
                             </div>
                           ))}
                         </div>
