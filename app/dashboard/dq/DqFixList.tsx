@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { periodLabel, fmtInt } from '../../../lib/format';
 import { EVA_BY_ID, EVA_SEVERITY_META, type EvaCheck } from '../../../lib/evaChecks';
+import CopyId from '../../../components/CopyId';
 
 /**
  * Data-quality fix-list for one project — turns the APR Q6 percentages into the
@@ -185,9 +186,7 @@ export default function DqFixList({
                   <div className="dqfx-fix">→ {e.fix}</div>
                   <div className="dr-ids">
                     {(cat!.detail ?? cat!.ids.map((id) => ({ pid: id, entry: null }))).map((d, i) => (
-                      <code key={`${d.pid}-${i}`} title={d.entry ? `Entry date ${d.entry}` : undefined}>
-                        {d.pid}{d.entry ? <span style={{ color: 'var(--muted)' }}> · {d.entry}</span> : null}
-                      </code>
+                      <CopyId key={`${d.pid}-${i}`} pid={d.pid} suffix={d.entry} />
                     ))}
                   </div>
                   <button className="btn dqfx-copy" onClick={(ev) => {
@@ -228,9 +227,7 @@ export default function DqFixList({
                         <div className="bnl-sub" style={{ marginTop: 2 }}>Affects: {check.breaks}</div>
                         <div className="dr-ids">
                           {(f.detail ?? f.ids.map((id) => ({ pid: id, entry: null }))).map((d, i) => (
-                            <code key={`${d.pid}-${i}`} title={d.entry ? `Entry date ${d.entry}` : undefined}>
-                              {d.pid}{d.entry ? <span style={{ color: 'var(--muted)' }}> · {d.entry}</span> : null}
-                            </code>
+                            <CopyId key={`${d.pid}-${i}`} pid={d.pid} suffix={d.entry} />
                           ))}
                         </div>
                         <button className="btn dqfx-copy" onClick={(ev) => {

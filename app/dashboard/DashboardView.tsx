@@ -8,6 +8,7 @@ import { periodLabel, rateBand, bandColorVar, fmtInt } from '../../lib/format';
 import { fmtTarget } from '../../lib/target-metrics';
 import type { TargetMiss } from '../../lib/target-flags';
 import ProjectPanel from './ProjectPanel';
+import CopyId from '../../components/CopyId';
 
 type Props = {
   rows: ProjectMetric[];
@@ -465,11 +466,11 @@ export default function DashboardView({
                 ) : (
                   <>
                     <div className="dr-ids">
-                      {drillIds.map((id) => <code key={id}>{id}</code>)}
+                      {drillIds.map((id) => <CopyId key={id} pid={id} />)}
                     </div>
                     <p className="bnl-sub" style={{ marginTop: 10 }}>
                       These are hashed PersonalIDs — HMIS access is required to identify
-                      individuals. Paste one into HMIS client search to look it up.
+                      individuals. Click one to copy it for HMIS client search.
                     </p>
                   </>
                 )}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fmtInt } from '../../../../lib/format';
 import { EVA_BY_ID } from '../../../../lib/evaChecks';
+import CopyId from '../../../../components/CopyId';
 
 /**
  * Error rates by user — who is creating the records behind the fix-lists.
@@ -41,23 +42,6 @@ interface CardData {
   /** unique records across the window (metric ≠ 'created'), with the units. */
   metrics: { metric: string; n: number; clients?: { pid: string; entry: string | null; project_id: number }[] }[];
   projects: { project_id: number; name: string | null; errors: number; created: number }[];
-}
-
-/** One-click copy for a single client ID (⧉ → ✓). */
-function CopyPid({ pid }: { pid: string }) {
-  const [ok, setOk] = useState(false);
-  return (
-    <button className="btn" style={{ padding: '0 6px', fontSize: 10.5, marginLeft: 6, lineHeight: '16px' }}
-      title="Copy this client ID"
-      onClick={(e) => {
-        e.stopPropagation();
-        navigator.clipboard?.writeText(pid);
-        setOk(true);
-        setTimeout(() => setOk(false), 1200);
-      }}>
-      {ok ? '✓' : '⧉'}
-    </button>
-  );
 }
 
 const ratePill = (rate: number | null, created: number) => {
@@ -151,9 +135,8 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
                         <div style={{ margin: '4px 0 8px 48px', display: 'grid', gap: 2, maxHeight: 200, overflowY: 'auto' }}>
                           {clients.map((c, i) => (
                             <div key={`${c.pid}|${c.entry}|${i}`} style={{ fontSize: 11.5, display: 'flex', alignItems: 'center' }}>
-                              <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--strong)' }}>{c.pid}</span>
-                              <CopyPid pid={c.pid} />
-                              <span className="bnl-sub" style={{ marginLeft: 6 }}>{c.entry ? `entry ${c.entry} · ` : ''}{pname.get(c.project_id) ?? c.project_id}</span>
+                              <CopyId pid={c.pid} suffix={c.entry ? `entry ${c.entry}` : null} />
+                              <span className="bnl-sub" style={{ marginLeft: 6 }}>{pname.get(c.project_id) ?? c.project_id}</span>
                             </div>
                           ))}
                         </div>

@@ -7,6 +7,7 @@ import ProjectPathways from './ProjectPathways';
 import DigestSection from './DigestSection';
 import LeaseUpFunnel from './LeaseUpFunnel';
 import WorklistNotes from './WorklistNotes';
+import CopyId from '../../../components/CopyId';
 
 interface Opt { id: number; name: string; type: string }
 
@@ -52,26 +53,6 @@ const LISTS: { key: ListKey; title: string; why: string; empty: string }[] = [
 
 const days = (n: number | null) => (n == null ? '—' : `${n.toLocaleString()}d`);
 
-/** Click-to-copy hashed PersonalID — this is the value you paste into HMIS
- *  client search, so it needs to be one click away on every row. */
-function CopyId({ pid }: { pid: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      type="button"
-      className={`dd-pid${done ? ' ok' : ''}`}
-      title={`${pid} — click to copy for HMIS lookup`}
-      onClick={(e) => {
-        e.stopPropagation();
-        navigator.clipboard?.writeText(pid);
-        setDone(true);
-        setTimeout(() => setDone(false), 1200);
-      }}
-    >
-      {done ? 'copied ✓' : pid}
-    </button>
-  );
-}
 
 interface DeepDiveData {
   served: number; matched: number; unmatched: number; restricted?: boolean;
