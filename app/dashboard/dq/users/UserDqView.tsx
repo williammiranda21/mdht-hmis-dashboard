@@ -36,7 +36,9 @@ interface UserRow {
 }
 interface CardData {
   user: { user_id: string; name: string | null; email: string | null; is_import: boolean } | null;
-  monthly: { period: string; created: number; errors: number; rate: number | null }[];
+  /** errors here = the OPEN-error level that month, not new incidents. */
+  monthly: { period: string; created: number; errors: number }[];
+  /** unique records across the window (metric ≠ 'created'). */
   metrics: { metric: string; n: number }[];
   projects: { project_id: number; name: string | null; errors: number; created: number }[];
 }
@@ -63,7 +65,9 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
   const totals = useMemo(() => {
     if (!d) return null;
     const created = d.monthly.reduce((s, m) => s + m.created, 0);
-    const errors = d.monthly.reduce((s, m) => s + m.errors, 0);
+    // Unique records with a problem — NEVER the sum of monthly levels (an
+    // unfixed record sits on every month's list; summing overcounted 12×).
+    const errors = d.metrics.reduce((s, m) => s + m.n, 0);
     const rate = created > 0 ? (errors / created) * 100 : null;
     const score = rate == null ? null : Math.max(0, Math.round(100 - rate));
     return { created, errors, rate, score };
@@ -89,7 +93,7 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
                 <div className="v num">{fmtInt(totals.created)}</div></div>
               <div className="bnl-mg"><div className="k">Errors attributed</div>
                 <div className="v num">{fmtInt(totals.errors)}</div>
-                <div className="bnl-sub">{totals.rate == null ? '' : `${totals.rate.toFixed(1)}% of records`}</div></div>
+                <div className="bnl-sub">unique records{totals.rate == null ? '' : ` · ${totals.rate.toFixed(1)}% of created`}</div></div>
               <div className="bnl-mg"><div className="k">Projects</div>
                 <div className="v num">{d.projects.length}</div></div>
             </div>
@@ -106,20 +110,26 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
               </div>
             )}
 
-            <div className="hc-sub">Monthly error rate</div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: 56 }}>
-              {d.monthly.map((m) => {
-                const r = m.rate ?? 0;
-                const h = Math.min(52, 4 + r * 2);
-                const col = m.rate == null ? 'var(--track)' : r <= 5 ? 'var(--accent)' : r <= 15 ? 'var(--warn)' : 'var(--danger)';
-                return (
-                  <div key={m.period} title={`${m.period}: ${m.rate == null ? 'no records created' : `${m.rate.toFixed(1)}% (${m.errors}/${m.created})`}`}
-                    style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                    <span style={{ display: 'block', width: '100%', maxWidth: 26, height: h, borderRadius: 3, background: col, opacity: .9 }} />
-                    <span style={{ fontSize: 9, color: 'var(--faint)' }}>{m.period.slice(5)}</span>
-                  </div>
-                );
-              })}
+            <div className="hc-sub">Open errors by month <span className="bnl-sub" style={{ textTransform: 'none', letterSpacing: 0 }}>falling bars = their backlog being fixed</span></div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: 84 }}>
+              {(() => {
+                const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                const short = (p: string) => `${MON[Number(p.slice(5)) - 1] ?? p.slice(5)} ’${p.slice(2, 4)}`;
+                const max = Math.max(...d.monthly.map((m) => m.errors), 1);
+                return d.monthly.map((m) => {
+                  const h = 4 + (48 * m.errors) / max;
+                  return (
+                    <div key={m.period} title={`${short(m.period)}: ${m.errors} open error${m.errors === 1 ? '' : 's'} · ${m.created} record${m.created === 1 ? '' : 's'} created`}
+                      style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
+                        color: m.errors === 0 ? 'var(--accent)' : 'var(--text)' }}>{fmtInt(m.errors)}</span>
+                      <span style={{ display: 'block', width: '100%', maxWidth: 26, height: h, borderRadius: 3,
+                        background: m.errors === 0 ? 'var(--accent)' : 'var(--warn)', opacity: .9 }} />
+                      <span style={{ fontSize: 9.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{short(m.period)}</span>
+                    </div>
+                  );
+                });
+              })()}
             </div>
 
             <div className="hc-sub">By project</div>
@@ -183,8 +193,9 @@ export default function UserDqView() {
             <h3>Data entry — error rates by user</h3>
             <div className="meta">
               Fix-list records attributed to the HMIS user who CREATED the responsible record,
-              over the trailing 12 complete months. Rates are errors ÷ records created — raw
-              counts would punish high-volume staff. Click a user for their score card.
+              over the trailing 12 complete months. Errors count UNIQUE records — a record
+              that stays broken for months counts once, and it can predate the window.
+              Rates are errors ÷ records created. Click a user for their score card.
               <a href="/dashboard/dq" style={{ marginLeft: 8 }}>← Data Quality</a>
             </div>
           </div>

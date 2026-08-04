@@ -218,6 +218,12 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
             <span className="flabel">Search projects</span>
             <input className="finput" placeholder="Filter by name…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
+          <div className="fgroup" style={{ marginLeft: 'auto' }}>
+            <span className="flabel">&nbsp;</span>
+            <a className="btn" href="/dashboard/dq/users" title="Error rates and score cards per HMIS data-entry user">
+              👤 Error rates by user
+            </a>
+          </div>
         </div>
       </div>
 

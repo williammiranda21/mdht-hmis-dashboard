@@ -45,6 +45,9 @@ export async function GET(req: Request) {
   }
 
   if (!userId) {
+    // Errors come ONLY from the period='window' rows — unique records across
+    // the trailing 12 months (a record failing for a year counts once). The
+    // monthly rows are open-error LEVELS and must never be summed.
     const by = new Map<string, {
       user_id: string; name: string | null; email: string | null; is_import: boolean;
       created: number; errors: number; perMetric: Map<string, number>; projects: Set<number>;
@@ -55,8 +58,9 @@ export async function GET(req: Request) {
         is_import: r.is_import, created: 0, errors: 0,
         perMetric: new Map(), projects: new Set(),
       };
-      if (r.metric === 'created') e.created += r.n;
-      else {
+      if (r.metric === 'created') {
+        if (r.period !== 'window') e.created += r.n;
+      } else if (r.period === 'window') {
         e.errors += r.n;
         e.perMetric.set(r.metric, (e.perMetric.get(r.metric) ?? 0) + r.n);
         e.projects.add(r.project_id);
@@ -77,23 +81,30 @@ export async function GET(req: Request) {
   }
 
   // ── single-user card ────────────────────────────────────────────────────
-  const periods = [...new Set(rows.map((r) => r.period))].sort();
+  // monthly = open-error LEVEL per month (trend); totals/breakdowns = the
+  // deduped period='window' rows.
+  const win = rows.filter((r) => r.period === 'window');
+  const mon = rows.filter((r) => r.period !== 'window');
+  const periods = [...new Set(mon.map((r) => r.period))].sort();
   const monthly = periods.map((p) => {
-    const sub = rows.filter((r) => r.period === p);
+    const sub = mon.filter((r) => r.period === p);
     const created = sub.filter((r) => r.metric === 'created').reduce((s, r) => s + r.n, 0);
     const errors = sub.filter((r) => r.metric !== 'created').reduce((s, r) => s + r.n, 0);
-    return { period: p, created, errors,
-      rate: created > 0 ? (errors / created) * 100 : null };
+    return { period: p, created, errors };
   });
   const perMetric = new Map<string, number>();
   const perProject = new Map<number, { errors: number; created: number }>();
-  for (const r of rows) {
+  for (const r of mon) {
+    if (r.metric !== 'created') continue;
     const pp = perProject.get(r.project_id) ?? { errors: 0, created: 0 };
-    if (r.metric === 'created') pp.created += r.n;
-    else {
-      pp.errors += r.n;
-      perMetric.set(r.metric, (perMetric.get(r.metric) ?? 0) + r.n);
-    }
+    pp.created += r.n;
+    perProject.set(r.project_id, pp);
+  }
+  for (const r of win) {
+    if (r.metric === 'created') continue;
+    const pp = perProject.get(r.project_id) ?? { errors: 0, created: 0 };
+    pp.errors += r.n;
+    perMetric.set(r.metric, (perMetric.get(r.metric) ?? 0) + r.n);
     perProject.set(r.project_id, pp);
   }
   // project names for the split

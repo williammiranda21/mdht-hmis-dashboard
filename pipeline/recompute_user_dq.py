@@ -153,7 +153,14 @@ def main():
         return en_user.get(eid)  # movein / annual / openstay / eva:*
 
     # ── errors ──────────────────────────────────────────────────────────────
+    # Two shapes, because the fix-lists are LEVEL snapshots (an unfixed record
+    # appears on every month's list):
+    #   • per-period rows  — the open-error LEVEL each month (trend display)
+    #   • period='window'  — UNIQUE units across the whole window (one record
+    #     failing for a year counts ONCE) — the roster/rate numbers. Summing
+    #     the monthly levels instead produced >1000% "error rates" (observed).
     counts: Counter = Counter()          # (period, user, project, metric) → n
+    uniq: dict[tuple, set] = {}          # (user, project, metric) → unit set
     unattributed = 0
     total_units = 0
     for period in periods:
@@ -175,6 +182,8 @@ def main():
                     unattributed += 1
                     continue
                 counts[(period, uid, project, metric)] += 1
+                uniq.setdefault((uid, project, metric), set()) \
+                    .add((str(u["pid"]), u.get("entry")))
 
     # ── denominator: records created per user/project/month ─────────────────
     for df, ecol in ((en, None), (ex, "EnrollmentID"), (inc, "EnrollmentID")):
@@ -194,6 +203,9 @@ def main():
             if proj is None or uid == "nan":
                 continue
             counts[(p, uid, proj, "created")] += 1
+
+    for (uid, proj, m), s in uniq.items():
+        counts[("window", uid, proj, m)] = len(s)
 
     payload = [{"period": p, "user_id": uid, "project_id": proj, "metric": m,
                 "n": n,
@@ -226,7 +238,7 @@ def main():
     keys = {(r["period"], r["user_id"], r["project_id"], r["metric"]) for r in payload}
     existing = fetch_all(sb.table("user_dq")
                          .select("period, user_id, project_id, metric")
-                         .in_("period", periods)
+                         .in_("period", periods + ["window"])
                          .order("period").order("user_id"))
     stale = [r for r in existing
              if (r["period"], r["user_id"], int(r["project_id"]), r["metric"]) not in keys]
