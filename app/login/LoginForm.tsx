@@ -59,6 +59,9 @@ export default function LoginForm() {
       <button type="submit" className="btn primary lbtn" disabled={busy}>
         {busy ? 'Signing in…' : 'Sign in'}
       </button>
+      <p style={{ marginTop: 10, fontSize: 13, textAlign: 'right' }}>
+        <a href="/forgot">Forgot password?</a>
+      </p>
     </form>
   );
 }

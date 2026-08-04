@@ -9,7 +9,7 @@ import { NextResponse, type NextRequest } from 'next/server';
  * sign-in). This is defence in depth — RLS is the real boundary — but it keeps
  * unauthenticated users from ever rendering a page shell.
  */
-const PUBLIC_PATHS = ['/login', '/signup', '/auth/callback'];
+const PUBLIC_PATHS = ['/login', '/signup', '/auth/callback', '/forgot'];
 
 export async function middleware(req: NextRequest) {
   let res = NextResponse.next({ request: { headers: req.headers } });

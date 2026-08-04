@@ -248,6 +248,7 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
         <div className="panel-h">
           <div><h3>Data Quality · APR Q6</h3><div className="meta">
             {fmtInt(sorted.length)} projects · {periodLabel(period)} · click a column to sort
+            {' '}· <a href="/dashboard/dq/users">error rates by user →</a>
             {canFix
               ? ' · click a project name for its fix-list'
               : ' · switch to the monthly view for the per-record fix-list'}
