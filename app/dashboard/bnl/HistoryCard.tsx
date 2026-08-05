@@ -76,7 +76,7 @@ export default function HistoryCard({ h }: { h: BnlHist3 | null }) {
         <div className="hc-t">
           <div className="k">Returns to homeless</div>
           <div className="v">{h.returns}</div>
-          <div className="s">episodes after a move-in</div>
+          <div className="s">after housing · HUD M2 rule</div>
         </div>
       </div>
 
@@ -127,6 +127,11 @@ export default function HistoryCard({ h }: { h: BnlHist3 | null }) {
           <span className="d">
             {md(p.s)} › {p.open ? 'present' : md(p.e)}
             <span className="bnl-sub"> · {p.t}{p.p ? ` · ${p.p}` : ''}</span>
+            {p.ret && (
+              <span style={{ color: 'var(--warn)', marginLeft: 6 }}>
+                ↩ returned {p.ret === p.s ? 'same day' : md(p.ret)}
+              </span>
+            )}
           </span>
         </div>
       )) : <div className="hc-none">No housing placements in the last 3 years</div>}

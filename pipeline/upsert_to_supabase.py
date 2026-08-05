@@ -18,12 +18,24 @@ Sources (relative to the repo root, one level up from hmis-web/):
 Tables loaded: projects, project_metrics, dq_metrics, system_metrics,
 returns_metrics, returns_by_dest, util_metrics, drill_clients, meta.
 
+STALE-ROW PRUNE (task #13): upsert can only insert/update, so rows that vanish
+from the source used to linger forever (~22k orphans; returns_metrics carried
+2× its source; 51 stale is_partial flags mislabeled complete months). Every row
+this script writes now carries `loaded_at` = one timestamp per run
+(supabase/loaded_at.sql adds the column), and after a table's load completes
+the run deletes that table's rows the run didn't stamp. A table is pruned ONLY
+in the invocation that just rewrote its entire source (and only if the source
+produced rows), so a live row can never be deleted. drill_clients keeps its
+recompute-owned rows (metric eva:* / dq:openstay — loaded later in the
+runbook); meta / bnl_clients / util_metrics etc. are exempt (see loaded_at.sql).
+
 Usage:
   python upsert_to_supabase.py                 # load everything
   python upsert_to_supabase.py --dry-run       # parse + print row counts, no network
   python upsert_to_supabase.py --only projects,project_metrics
   python upsert_to_supabase.py --skip drill_clients
   python upsert_to_supabase.py --verify        # after load, compare table counts to source
+  python upsert_to_supabase.py --no-prune      # load without deleting stale rows
 
 Env (read from hmis-web/.env.local or the process environment):
   NEXT_PUBLIC_SUPABASE_URL
@@ -714,6 +726,74 @@ def build_all(dry: bool):
     }
 
 
+# ── Stale-row prune (task #13) ───────────────────────────────────────────────
+# Tables whose contents this script fully owns. After a table's load completes,
+# any row NOT stamped by this run (loaded_at < run_ts, or NULL = predates the
+# watermark column) vanished from the source and is deleted. Exemptions and the
+# rationale live in supabase/loaded_at.sql; drill_clients additionally keeps
+# its recompute-owned metrics (eva:* / dq:openstay).
+PRUNED_TABLES = {
+    "projects", "project_metrics", "dq_metrics", "system_metrics",
+    "returns_metrics", "returns_by_dest", "drill_clients", "bnl_flow",
+    "survival_metrics", "project_pathways", "system_forecast",
+}
+# Tables where the prune has period granularity available for a chunked retry.
+_PERIOD_KEYED = {
+    "project_metrics", "dq_metrics", "system_metrics",
+    "returns_metrics", "returns_by_dest", "drill_clients",
+}
+
+
+def _stale_filter(q, table: str, run_ts: str):
+    q = q.or_(f"loaded_at.is.null,loaded_at.lt.{run_ts}")
+    if table == "drill_clients":
+        # recompute_eva.py / recompute_openstay.py own these rows and run AFTER
+        # this upsert — their stamps are from earlier runs by design.
+        q = q.not_.like("metric", "eva:*").neq("metric", "dq:openstay")
+    return q
+
+
+def _stale_periods(client, table: str, run_ts: str) -> list[str]:
+    """Distinct periods that still carry un-stamped rows (paged past the
+    PostgREST 1000-row cap)."""
+    periods: set[str] = set()
+    offset = 0
+    while True:
+        res = (
+            _stale_filter(client.table(table).select("period"), table, run_ts)
+            .range(offset, offset + 999)
+            .execute()
+        )
+        rows = res.data or []
+        periods.update(r["period"] for r in rows)
+        if len(rows) < 1000:
+            return sorted(periods)
+        offset += 1000
+
+
+def prune_stale(client, table: str, run_ts: str) -> int:
+    """Delete rows the current run didn't stamp. One filtered DELETE; if that
+    times out (57014 — first-run sweeps can be ~10k rows), fall back to
+    per-period chunks for the period-keyed tables."""
+    try:
+        res = _stale_filter(
+            client.table(table).delete(count="exact"), table, run_ts
+        ).execute()
+        return res.count or 0
+    except Exception:
+        if table not in _PERIOD_KEYED:
+            raise
+        total = 0
+        for period in _stale_periods(client, table, run_ts):
+            res = (
+                _stale_filter(client.table(table).delete(count="exact"), table, run_ts)
+                .eq("period", period)
+                .execute()
+            )
+            total += res.count or 0
+        return total
+
+
 # Insertion order respects the projects FK-ish dependency (projects first).
 # NOTE: util_metrics is intentionally NOT in the default load order. The util payload
 # in data.json includes DV / Victim Service Provider beds, which must be excluded
@@ -743,6 +823,7 @@ def main() -> None:
     ap.add_argument("--only", help="Comma list of tables to load (default: all).")
     ap.add_argument("--skip", help="Comma list of tables to skip.")
     ap.add_argument("--verify", action="store_true", help="After load, compare table counts to source.")
+    ap.add_argument("--no-prune", action="store_true", help="Skip the stale-row prune after loading.")
     args = ap.parse_args()
 
     only = set(args.only.split(",")) if args.only else None
@@ -760,6 +841,13 @@ def main() -> None:
         client = make_client(url, key)
         print(f"Connected to {url}", flush=True)
 
+    # One watermark for the whole run: every row upserted below carries it, and
+    # the per-table prune deletes what the run didn't stamp. Captured BEFORE any
+    # write so no stamped row can ever sort below it. The Z-suffix form (never
+    # "+00:00") survives PostgREST URL filters, where a raw "+" can decode to a
+    # space.
+    run_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
     counts: dict[str, int] = {}
     for table in targets:
         builder, on_conflict = builders[table]
@@ -769,11 +857,20 @@ def main() -> None:
         print(f"[{table}] {len(rows):,} rows", flush=True)
         if args.dry_run:
             continue
+        if table in PRUNED_TABLES:
+            # (only these tables have the loaded_at column — see loaded_at.sql)
+            for r in rows:
+                r["loaded_at"] = run_ts
         n = 0
         for batch in chunked(rows, BATCH_OVERRIDE.get(table, BATCH)):
             client.table(table).upsert(batch, on_conflict=on_conflict).execute()
             n += len(batch)
             print(f"  upserted {n:,}/{len(rows):,}", flush=True)
+        # Prune only when THIS run just rewrote the table's entire source; an
+        # empty build (missing side-car file) must never empty the table.
+        if table in PRUNED_TABLES and rows and not args.no_prune:
+            gone = prune_stale(client, table, run_ts)
+            print(f"[{table}] pruned {gone:,} stale rows", flush=True)
 
     if args.verify and not args.dry_run:
         print("\nVerifying row counts (source vs table) …", flush=True)
@@ -781,7 +878,12 @@ def main() -> None:
             res = client.table(table).select("*", count="exact", head=True).execute()
             db = res.count or 0
             src = counts[table]
-            flag = "ok" if db >= src else "MISMATCH"
+            # Pruned tables must now match the source EXACTLY. drill_clients
+            # legitimately exceeds it (recompute-owned eva:*/dq:openstay rows),
+            # as do exempt tables (meta carries snapshot keys).
+            exact = table in PRUNED_TABLES and table != "drill_clients"
+            ok = (db == src) if exact else (db >= src)
+            flag = "ok" if ok else "MISMATCH"
             print(f"  {table:<18} source {src:>8,}  db {db:>8,}  {flag}", flush=True)
 
     print("\nDone." + (" (dry run — nothing written)" if args.dry_run else ""), flush=True)

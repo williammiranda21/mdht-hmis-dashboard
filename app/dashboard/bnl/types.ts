@@ -19,11 +19,14 @@ export interface BnlHist3 {
   days: number;         // == sys_days3
   eps: number;          // == episodes3
   housed_n: number;     // PH move-ins inside the window
-  returns: number;      // episodes beginning after a move-in (client-level, NOT SPM M2)
+  returns: number;      // HUD-qualifying returns after a housing event (client-level, NOT SPM M2)
   last: string | null;  // last observed homeless date
   types: { t: string; d: number; pct: number }[];
   ranges: { s: string; e: string; d: number }[];
-  placed: { s: string; e: string; p: string | null; t: string; open: boolean }[];
+  // ret = first HUD-qualifying return after the placement (SPM M2 test: new
+  // SO/ES/TH/SH entry, same-day counts; PH entry only >14d and not a transfer).
+  // For k='exit' placements the housed interval END equals ret when set.
+  placed: { s: string; e: string; p: string | null; t: string; open: boolean; ret?: string | null }[];
 }
 
 /**

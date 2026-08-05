@@ -163,11 +163,29 @@ Leadership reports against these numbers.
 - The County firewall TLS-inspects HTTPS, so Python needs `truststore.inject_into_ssl()` (already
   wired into the pipeline scripts). Port 5432 direct is unreachable; the pooler and REST work.
 
-- **Upsert NEVER deletes — only inserts/updates.** PostgREST upsert has no concept of rows that
-  vanished from the source, so when the BNL roster shrinks, departed clients linger as phantoms.
-  Run `pipeline/prune_stale_bnl.py` as the last step of every refresh. It prunes by **pid-set
-  difference**, deliberately *not* by `as_of` — a date-based prune silently misses every orphan when
-  two regens land on the same calendar day (observed 2026-07-23: it missed all 145).
+- **RLS policy quals MUST wrap no-arg helper calls in a scalar subquery:**
+  `using ((select public.can_see_bnl()))`, never `using (public.can_see_bnl())`. The bare form
+  is evaluated PER ROW (the helpers are SECURITY DEFINER → not inlinable, ~0.34 ms each), and a
+  full-scan query pays it for every row — the BNL page died in prod on exactly this
+  (2026-08-05: 23,958 rows × 2 passes ≈ 8 s → statement timeout 57014 → Next digest screen).
+  The wrapped form is an InitPlan, evaluated once per statement, identical semantics.
+  `supabase/rls_initplan.sql` converges every policy; any NEW policy must follow the pattern.
+  **Corollary: never verify query health with the service-role key alone** — it bypasses RLS and
+  hides this entire failure class. Probe with a real session JWT (create a throwaway auto-confirmed
+  user via the auth admin API, approve via service role, password-grant sign-in, delete after).
+
+- **Upsert now PRUNES its own tables (task #13, 2026-08-05)** — but only them. PostgREST upsert
+  has no concept of rows that vanished from the source; ~22k orphans accumulated this way
+  (returns_metrics 2× its source; the stale-is_partial June/July bug). `upsert_to_supabase.py`
+  stamps every row with a per-run `loaded_at` watermark (column added by run-once
+  `supabase/loaded_at.sql`) and, after each table's load completes, deletes the rows that run
+  didn't stamp. A table is pruned only when its build produced rows, so a missing side-car file
+  can never empty a table; `--no-prune` opts out. EXEMPT: `meta` (snapshot writers own keys),
+  recompute-owned tables (util/dest_profile/leaseup), and drill_clients rows with metric
+  `eva:*`/`dq:openstay` (loaded later in the runbook).
+  **bnl_clients stays on `pipeline/prune_stale_bnl.py`** — pid-set difference, deliberately *not*
+  date-based: an `as_of`-DATE prune silently misses every orphan when two regens land on the same
+  calendar day (observed 2026-07-23: it missed all 145). Run it as step 9 of the refresh as before.
 - **Referrals come from two sources, merged in `bnl_core.py`.** `Event.csv` (HUD 4.20 CE events) is
   sparse for PSH — it had only 47 PSH referrals. Any `hud_data/*referral*.csv` side-car (the PSH
   referral report) is merged on `Personal ID`, which is the same hashed PersonalID as the export, so
@@ -192,12 +210,9 @@ Everything in the old version of this section (RLS flip, drill-downs, deploy) is
 The live queue and open user actions are maintained in the auto-memory
 `project_pending.md` — its top ⭐ block is the source of truth. Highlights as of 2026-08-04:
 
-- **Stale-row prune (task #13)**: the upsert never deletes; ~22k orphaned rows across the
-  period tables (returns_metrics carries 2× its source). Bit us once already — 51 stale
-  `is_partial` flags labeled complete months "partial" (fixed: flags cleared + the badge now
-  keys off `meta.partial_period`). Design: `loaded_at` watermark column stamped by the upsert,
-  one filtered DELETE per table after; EXEMPT recompute-owned data (util, leaseup, `eva:%`,
-  `dq:openstay`).
+- ~~Stale-row prune (task #13)~~ **BUILT 2026-08-05** — `loaded_at` watermark stamped by the
+  upsert + post-load filtered DELETE per owned table (see §6). Run-once `supabase/loaded_at.sql`
+  adds the column; first full upsert after it sweeps the ~22k accumulated orphans.
 - **County domain** `hmis.miamidade.gov` — the standing blocker for county-PC access.
 - Metric glossary page · off-target flags on Rankings · milestone worklists · Eva parity pass.
 
@@ -344,7 +359,7 @@ The **Housing Predictor** (`predictor_ml`) remains unbuilt — needs explicit si
 ETL half: `py refresh.py` (unzips newest export, runs all four generators).
 Load half, in order (`py hmis-web/pipeline/<script>` — use SYSTEM `py`, the root
 `.venv` lacks the supabase/truststore packages):
-1. `upsert_to_supabase.py --verify`
+1. `upsert_to_supabase.py --verify` (now also prunes its own tables' stale rows — §6; `--no-prune` opts out)
 2. `recompute_util.py` (authoritative utilization, DV-excluded)
 3. `recompute_dest.py` (destination profiles)
 4. `recompute_leaseup.py` (lease-up funnel)
