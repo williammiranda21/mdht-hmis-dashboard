@@ -38,6 +38,12 @@ export default async function DashboardPage({
   // Off-target chips — admin-set targets vs this period's stored values.
   const targetFlags = await getTargetFlags(
     supabaseServer(), granularity, period, household, subpopulation, rows);
+  // Authoritative partial month (meta) — the per-row is_partial flags can go
+  // stale on orphaned rows (upsert never deletes; observed 2026-08-04: 51
+  // leftover flags marked June/July "partial"), so the badge keys off meta.
+  const { data: ppRow } = await supabaseServer()
+    .from('meta').select('value').eq('key', 'partial_period').maybeSingle();
+  const partialPeriod = (ppRow?.value as string | null) ?? null;
 
   return (
     <DashboardView
@@ -48,6 +54,7 @@ export default async function DashboardPage({
       household={household}
       subpopulation={subpopulation}
       targetFlags={targetFlags}
+      partialPeriod={partialPeriod}
     />
   );
 }

@@ -19,6 +19,8 @@ type Props = {
   subpopulation: string;
   /** project_id → missed targets (empty on filtered household/subpop views). */
   targetFlags?: Record<number, TargetMiss[]>;
+  /** meta.partial_period — authoritative in-progress month for the badge. */
+  partialPeriod?: string | null;
 };
 
 // Extra columns available through the ⚙ Columns picker — pulled from the full jsonb record.
@@ -46,7 +48,7 @@ const mom = (r: ProjectMetric): number | null => {
 };
 
 export default function DashboardView({
-  rows, periods, granularity, period, household, subpopulation, targetFlags = {},
+  rows, periods, granularity, period, household, subpopulation, targetFlags = {}, partialPeriod = null,
 }: Props) {
   const router = useRouter();
 
@@ -250,7 +252,7 @@ export default function DashboardView({
             <h3>Project Performance</h3>
             <div className="meta">
               {fmtInt(sorted.length)} projects · {periodLabel(period)}
-              {rows.some((r) => r.is_partial) && <span className="pill warn" style={{ marginLeft: 8 }}>partial period</span>}
+              {period === partialPeriod && <span className="pill warn" style={{ marginLeft: 8 }}>partial period</span>}
               {' · click a column to sort'}
               {canDrill
                 ? ' · click an underlined count (🔍) to list its clients'
