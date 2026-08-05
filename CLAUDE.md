@@ -8,8 +8,9 @@ data, auth is in place, and every metric has been verified against the source pi
 
 > ⚠️ This file was rewritten 2026-07-22 to describe the **current state**. The original version
 > described the plan before it was built — ignore any older copy.
-> **Updated 2026-07-23:** corrected the refresh runbook (it's `refresh.py` — four generators, not
-> two), added `prune_stale_bnl.py`, and documented the referral side-car merge.
+> **Updated 2026-08-04:** status table refreshed (RLS/drills/deploy all DONE long since), the
+> load-half runbook is now TEN steps (§12), and the auto-memory `project_pending.md` carries the
+> live handoff — read its top block for what's actually open.
 
 ---
 
@@ -17,15 +18,15 @@ data, auth is in place, and every metric has been verified against the source pi
 
 | Area | State |
 |---|---|
-| Data pipeline → Supabase | ✅ Done, row counts verified against source |
-| All 7 dashboard tabs | ✅ Built, numbers verified digit-for-digit |
-| Supabase Auth (signup + admin approval) | ✅ Done, PIN auth fully removed |
-| Admin console (approve / projects / password reset) | ✅ Done |
-| **RLS flip — aggregates still `public read`** | ⬜ **NOT DONE — see §7** |
-| **Project Performance drill-downs** | ⬜ **NOT DONE — see §7** |
-| **GitHub + Vercel deploy** | ⬜ Not started — see §8 |
+| Data pipeline → Supabase | ✅ Done, verified; **load half = 10 steps, see §12 runbook** |
+| Dashboard tabs (Projects/Returns/System/Forecast/DQ/Util/BNL/Rankings/Deep Dive) | ✅ Built + verified |
+| Admin suite (Users / Targets / Cohorts) | ✅ Built (Targets = type defaults + overrides; Cohorts = tracked client groups) |
+| Supabase Auth + RLS flip + forgot-password flow | ✅ Done (`auth_rls.sql` run; forgot-password awaits Supabase URL config) |
+| Drill-downs, DQ fix-lists + Eva checks, error-rates-by-user, CE milestones | ✅ Built |
+| **GitHub + Vercel deploy** | ✅ **LIVE**: github.com/williammiranda21/mdht-hmis-dashboard → hmisdashboard.vercel.app |
+| County-network access (vercel.app proxied — client fetches die on county PCs) | ⬜ Blocked on `hmis.miamidade.gov` + ITD allowlist |
 
-Run locally: `cd hmis-web && npm run dev` (the user typically runs on port 3000).
+Run locally: `cd hmis-web && npm run dev -- -p 3011` (the user demos on **3011**).
 
 ## 2. Architecture
 
@@ -187,20 +188,18 @@ Supabase: if they differ, you only need the load half (§ DEPLOYMENT.md 5).
 
 ## 7. What's left to build
 
-1. **Flip RLS off public-read** — `supabase/auth_rls.sql` (not yet written). The aggregate tables
-   still have `public read using (true)`, so an anon key can read them. Target matrix:
-   - project-dimensioned (`projects`, `project_metrics`, `dq_metrics`, `returns_metrics`,
-     `returns_by_dest`) → `to authenticated using (can_see_project(project_id))`
-   - `system_metrics`, `util_metrics`, `meta`, `bnl_flow` → `to authenticated using (true)`
-   - `bnl_clients` → `is_admin()` · `drill_clients` → `is_admin() OR (project_id <> 0 AND
-     can_see_project(project_id))` — **both already exist** from `auth_setup.sql`
-   - ⚠️ Caveat needing a user decision: `util_metrics` embeds a per-project list inside jsonb that
-     RLS cannot row-filter, so an agency user would see other agencies' utilization.
-   - Do this **after** confirming login works, or the dashboard goes blank.
-2. **Project Performance drill-downs** — the `.drill` spans in `app/dashboard/DashboardView.tsx`
-   are a **false affordance**: styled clickable, no handler. Wire them to `drill_clients`
-   (`period|project_id|metric` → hashed `personal_ids[]`) via `supabaseServer()` so RLS scopes them.
-3. **Deploy** — see §8.
+Everything in the old version of this section (RLS flip, drill-downs, deploy) is **DONE**.
+The live queue and open user actions are maintained in the auto-memory
+`project_pending.md` — its top ⭐ block is the source of truth. Highlights as of 2026-08-04:
+
+- **Stale-row prune (task #13)**: the upsert never deletes; ~22k orphaned rows across the
+  period tables (returns_metrics carries 2× its source). Bit us once already — 51 stale
+  `is_partial` flags labeled complete months "partial" (fixed: flags cleared + the badge now
+  keys off `meta.partial_period`). Design: `loaded_at` watermark column stamped by the upsert,
+  one filtered DELETE per table after; EXEMPT recompute-owned data (util, leaseup, `eva:%`,
+  `dq:openstay`).
+- **County domain** `hmis.miamidade.gov` — the standing blocker for county-PC access.
+- Metric glossary page · off-target flags on Rankings · milestone worklists · Eva parity pass.
 
 ## 8. Deploy — READ BEFORE `git init`
 
@@ -341,6 +340,21 @@ worklists** — those rows don't open anything, so a 🔍 there would be a false
 The **Housing Predictor** (`predictor_ml`) remains unbuilt — needs explicit sign-off on framing
 (see the Phase 3 memory). Do not surface a per-client success score without it.
 
-### Refresh runbook
-`refresh.py` runs `generate_pathways.py` + `generate_analytics.py` (writes both JSONs). The
-full upsert ORDER now covers `survival_metrics`, `project_pathways`, `system_forecast`.
+### Refresh runbook — CURRENT FULL ORDER (2026-08-04; ten load steps)
+ETL half: `py refresh.py` (unzips newest export, runs all four generators).
+Load half, in order (`py hmis-web/pipeline/<script>` — use SYSTEM `py`, the root
+`.venv` lacks the supabase/truststore packages):
+1. `upsert_to_supabase.py --verify`
+2. `recompute_util.py` (authoritative utilization, DV-excluded)
+3. `recompute_dest.py` (destination profiles)
+4. `recompute_leaseup.py` (lease-up funnel)
+5. `recompute_eva.py` (Eva checks, latest complete month snapshot)
+6. `recompute_openstay.py` (left-open enrollments → dq:openstay; period from meta.dq_periods)
+7. `recompute_user_dq.py` (error rates by user — AFTER eva/openstay so it attributes them)
+8. `snapshot_dq.py` (fixed-since-refresh ledger capture)
+9. `prune_stale_bnl.py` (BNL orphan prune)
+10. `snapshot_cohorts.py` (cohort trend points — last, roster is final)
+
+Skipping the load half leaves Supabase stale while local JSONs advance — the classic
+"which half ran" trap (§6). New SQL run-once files since 2026-07-31: `targets.sql`,
+`dq_snapshots.sql`, `user_dq.sql`, `cohorts.sql` (all already run in prod).
