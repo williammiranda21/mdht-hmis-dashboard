@@ -64,6 +64,14 @@ export default function BnlView({
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
   const [drill, setDrill] = useState<BnlClient | null>(null);
+  // Hover card for the notes column — a fixed-position panel (so the table's
+  // scroll container can't clip it), opening to the LEFT of the cell since
+  // the column is rightmost. pointer-events: none = it never steals the
+  // mouse; the full thread lives in the drawer.
+  const [notePop, setNotePop] = useState<{
+    x: number; y: number; name: string;
+    notes: NonNullable<BnlClient['notes2']>;
+  } | null>(null);
 
   // Debounced copy of the search box — only this triggers a fetch.
   const [qDebounced, setQDebounced] = useState('');
@@ -461,11 +469,16 @@ export default function BnlView({
                           <div className="bnl-sub">{r.spdat_tool}{r.spdat_score != null ? ` · ${r.spdat_score}` : ''}</div>
                         )}</>
                       : <span className="bnl-sub">no</span>}</td>
-                    <td style={{ maxWidth: 220 }}>
+                    <td style={{ maxWidth: 220 }}
+                      onMouseEnter={(e) => {
+                        if (!r.notes2?.length) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setNotePop({ x: rect.left, y: rect.top, name: r.name, notes: r.notes2 });
+                      }}
+                      onMouseLeave={() => setNotePop(null)}>
                       {(r.notes2?.length ?? 0)
                         ? r.notes2!.map((n, i) => (
                             <div key={i} className="bnl-sub"
-                              title={`${n.at}${n.author ? ` · ${n.author}` : ''}\n${n.body}`}
                               style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>
                               <span style={{ fontVariantNumeric: 'tabular-nums' }}>{n.at}</span> · {n.body}
                             </div>
@@ -517,6 +530,34 @@ export default function BnlView({
           12+ continuous months or 4+ occasions totaling 12+ months. Confirm statuses in case conferencing.
         </p>
       </div>
+
+      {/* Notes hover card — fixed so the table's scroll area can't clip it;
+          opens leftward from the rightmost column, clamped to the viewport. */}
+      {notePop && (
+        <div className="panel" style={{
+          position: 'fixed',
+          right: Math.max(window.innerWidth - notePop.x + 10, 12),
+          top: Math.min(notePop.y, Math.max(window.innerHeight - 320, 12)),
+          width: 380, maxWidth: '60vw', maxHeight: 300, overflow: 'hidden',
+          zIndex: 60, pointerEvents: 'none',
+          padding: '12px 14px', boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+        }}>
+          <div style={{ fontWeight: 700, fontSize: '.85rem', marginBottom: 6 }}>
+            {notePop.name} <span className="bnl-sub">· latest notes</span>
+          </div>
+          {notePop.notes.map((n, i) => (
+            <div key={i} style={{ marginBottom: i < notePop.notes.length - 1 ? 10 : 0 }}>
+              <div className="bnl-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {n.at}{n.author ? ` · ${n.author}` : ''}
+              </div>
+              <div style={{ fontSize: '.82rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {n.body}
+              </div>
+            </div>
+          ))}
+          <div className="bnl-sub" style={{ marginTop: 8 }}>open the client for the full thread</div>
+        </div>
+      )}
 
       {drill && (
         <ClientDrawer row={drill} asOf={agg.as_of} isAdmin={isAdmin}
