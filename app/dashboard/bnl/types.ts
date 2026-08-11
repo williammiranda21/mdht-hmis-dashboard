@@ -56,6 +56,11 @@ export interface BnlClient {
   spdat_tool: string | null;
   spdat_date: string | null;
   risk_max: number | null;
+  /** live CE worklist leg (furthest milestone; active + not moved in only)
+   *  and days on it — the journey bar's waiting numbers click through to
+   *  rows filtered on these. */
+  ms_stage: string | null;
+  ms_wait: number | null;
   ref_type: string | null;
   ref_status: string | null;
   ref_date: string | null;

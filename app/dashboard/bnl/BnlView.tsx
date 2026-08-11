@@ -8,7 +8,7 @@ import {
 import JourneyBar from '../../../components/JourneyBar';
 import ClientDrawer, { Flags } from './ClientDrawer';
 
-type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'assessed';
+type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'assessed' | 'ms_wait';
 
 const COLS: Array<[SortKey | 'flags', string]> = [
   ['name', 'Client'],
@@ -18,10 +18,14 @@ const COLS: Array<[SortKey | 'flags', string]> = [
   ['project', 'Project'],
   ['days_homeless', 'Self-reported days'],
   ['sys_days3', 'In HMIS (3y)'],
+  ['ms_wait', 'CE leg wait'],
   ['risk_pts', 'Risk'],
   ['ref_status', 'Referral'],
   ['assessed', 'CE assessed'],
 ];
+
+/** milestone key → label, for the CE-leg-wait cells and the stage filter chip */
+const MS_LABELS = Object.fromEntries(MILESTONES);
 
 /** Rows per fetch. Must match PAGE_SIZE in lib/bnl-query.ts. */
 const PAGE = 200;
@@ -41,6 +45,8 @@ export default function BnlView({
   const [fStatus, setFStatus] = useState('');
   const [fFlag, setFFlag] = useState('');
   const [fAsmt, setFAsmt] = useState('');
+  // Milestone worklist — set by clicking a waiting number on the journey bar.
+  const [fStage, setFStage] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('days_homeless');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -61,9 +67,9 @@ export default function BnlView({
   const pa = agg.pops[pop];
 
   const params = useCallback((offset: number) => new URLSearchParams({
-    pop, status: fStatus, flag: fFlag, asmt: fAsmt, q: qDebounced,
+    pop, status: fStatus, flag: fFlag, asmt: fAsmt, stage: fStage, q: qDebounced,
     sort: sortKey, dir: sortDir, offset: String(offset), limit: String(PAGE),
-  }), [pop, fStatus, fFlag, fAsmt, qDebounced, sortKey, sortDir]);
+  }), [pop, fStatus, fFlag, fAsmt, fStage, qDebounced, sortKey, sortDir]);
 
   // Which request is current. A slow response for an old filter must not
   // overwrite a newer one — without this, typing fast can leave stale rows.
@@ -172,9 +178,15 @@ export default function BnlView({
             </div>
             {/* The bar itself is shared with the cohort dashboard — see
                 components/JourneyBar.tsx. Semantics (proportional widths,
-                worst-leg warn, live-wait line) live there. */}
+                worst-leg warn, live-wait line) live there. Clicking a waiting
+                number filters the roster below to that leg's worklist. */}
             <JourneyBar order={ord} labels={labels}
-                        housed={ceMilestones.housed} waiting={ceMilestones.waiting} />
+                        housed={ceMilestones.housed} waiting={ceMilestones.waiting}
+                        onLegClick={(k) => {
+                          setFStage(k);
+                          setSortKey('ms_wait');
+                          setSortDir('desc');
+                        }} />
             {total?.median != null && (
               <div className="bnl-sub" style={{ marginTop: 6 }}>
                 End to end {labels[ord[0]] ?? ord[0]} → {labels[ord[ord.length - 1]] ?? ord[ord.length - 1]}:{' '}
@@ -238,6 +250,15 @@ export default function BnlView({
                 <option value="n">Not assessed</option>
               </select>
             </div>
+            {fStage && (
+              <div className="fgroup">
+                <span className="flabel">Worklist</span>
+                <button className="btn" onClick={() => setFStage('')}
+                  title="Showing clients stuck on this CE leg (from the journey bar). Click to clear.">
+                  ⏳ Waiting at {MS_LABELS[fStage] ?? fStage} ✕
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -267,6 +288,9 @@ export default function BnlView({
                       </div>
                     </td>
                     <td className="num">{r.sys_days3.toLocaleString()} d <span className="bnl-sub">· {r.episodes3} ep</span></td>
+                    <td className="num">{r.ms_wait != null
+                      ? <>{r.ms_wait.toLocaleString()}d <span className="bnl-sub">· {MS_LABELS[r.ms_stage ?? ''] ?? r.ms_stage}</span></>
+                      : <span className="bnl-sub">—</span>}</td>
                     <td>{r.risk_pts == null ? <span className="bnl-sub">—</span> : (
                       // Youth prioritization bands per spec: Low 0–7, High 8+.
                       // Two colors only — matches the ETL's risk_band exactly.

@@ -512,6 +512,7 @@ def build_bnl_clients(bnl: dict | None) -> list[dict]:
             "risk_pts": r["risk_pts"], "risk_max": r["risk_max"],
             "risk_band": r.get("risk_band"), "risk_detail": r.get("risk_detail"),
             "milestones": r.get("milestones"),
+            "ms_stage": r.get("ms_stage"), "ms_wait": r.get("ms_wait"),
             "spdat_score": r.get("spdat_score"), "spdat_tool": r.get("spdat_tool"),
             "spdat_date": r.get("spdat_date"),
             "chronic": r["chronic"], "is_new": r["new"], "returned": r["returned"],

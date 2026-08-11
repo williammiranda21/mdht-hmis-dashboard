@@ -19,7 +19,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export const ROSTER_COLS =
   'pid, name, age, status, detail, enrolled, project, ptype, ' +
   'days_homeless, sys_days3, episodes3, risk_pts, risk_max, risk_band, ' +
-  'spdat_score, spdat_tool, spdat_date, ' +
+  'spdat_score, spdat_tool, spdat_date, ms_stage, ms_wait, ' +
   'ref_type, ref_status, ref_date, ref_prov, assessed, dq_n, ' +
   'chronic, is_new, returned, veteran, family, parenting, unaccompanied, in_school';
 
@@ -40,12 +40,15 @@ export interface RosterQuery {
   /** exact-match single-client lookup (cohort member → drawer); other filters
    *  stay at their defaults so the row is found regardless of population. */
   pid: string;
+  /** milestone worklist: clients whose live CE leg is this milestone key
+   *  (active + not moved in, by construction of ms_stage in bnl_core). */
+  stage: string;
 }
 
 /** Sortable columns. Whitelisted — never interpolate a user string into order(). */
 const SORTABLE = new Set([
   'name', 'age', 'status', 'project', 'days_homeless', 'sys_days3',
-  'risk_pts', 'ref_status', 'assessed',
+  'risk_pts', 'ref_status', 'assessed', 'ms_wait',
 ]);
 
 const FLAG_COLS = new Set([
@@ -67,6 +70,7 @@ export function parseRosterQuery(sp: URLSearchParams): RosterQuery {
     offset: Math.max(0, Number(sp.get('offset') ?? 0) || 0),
     limit: Math.min(Math.max(1, limit || PAGE_SIZE), 500),
     pid: (sp.get('pid') ?? '').trim(),
+    stage: (sp.get('stage') ?? '').trim(),
   };
 }
 
@@ -113,6 +117,7 @@ export async function queryRoster(
   else if (FLAG_COLS.has(p.flag)) qb = qb.eq(p.flag, true);
   if (p.asmt === 'y') qb = qb.not('assessed', 'is', null);
   else if (p.asmt === 'n') qb = qb.is('assessed', null);
+  if (p.stage) qb = qb.eq('ms_stage', p.stage);
 
   if (p.q) {
     const t = safeLike(p.q);
