@@ -118,22 +118,47 @@ export default function ClientDrawer({ row, asOf, isAdmin = false, onClose }: {
           <div className="bnl-mg"><div className="k">Monthly income</div><div className="v num">{detail ? (detail.income != null ? `$${detail.income.toLocaleString()}` : '—') : '…'}</div><div className="bnl-sub">{detail?.income_date ? `as of ${detail.income_date}` : ''}</div></div>
           <div className="bnl-mg"><div className="k">DV</div><div className="v" style={{ fontSize: '.8rem' }}>{!detail ? '…' : detail.dv_fleeing ? <b style={{ color: 'var(--danger)' }}>Currently fleeing</b> : detail.dv_survivor ? 'Survivor' : detail.dv_survivor === false ? 'No' : '—'}</div></div>
           <div className="bnl-mg"><div className="k">Foster · Juv. justice</div><div className="v" style={{ fontSize: '.8rem' }}>{!detail ? '…' : <>{detail.foster == null ? 'unk' : detail.foster ? 'Yes' : 'No'} · {detail.jj == null ? 'unk' : detail.jj ? 'Yes' : 'No'}</>}</div></div>
-          <div className="bnl-mg"><div className="k">Housing referral</div><div className="v" style={{ fontSize: '.8rem' }}>
-            {row.ref_type ? <>{row.ref_type} · {row.ref_status}{row.ref_date ? ` · ${row.ref_date}` : ''}{row.ref_prov && <div className="bnl-sub">{row.ref_prov}</div>}</> : '—'}
-            {/* the rest of the history — the headline above is the live-first
-                pick, but a same-day canceled referral is part of the story */}
-            {(detail?.referrals?.length ?? 0) > 1 && (
-              <div className="bnl-sub" style={{ marginTop: 4, lineHeight: 1.5 }}>
-                {detail!.referrals!
-                  .filter((x) => !(x.date === row.ref_date && x.status === row.ref_status && x.prov === row.ref_prov))
-                  .slice(0, 3)
-                  .map((x, i) => (
-                    <div key={i}>also: {x.status ?? '?'} · {x.date ?? '—'}{x.prov ? ` · ${x.prov}` : ''}</div>
-                  ))}
-                {detail!.referrals!.length > 4 && <div>+ {detail!.referrals!.length - 4} earlier</div>}
-              </div>
-            )}
-          </div></div>
+          {/* Housing referrals — LIST view (user-approved mockup 2026-08-11):
+              one row per referral, newest first — status pill · date · type ·
+              provider. The live-first headline (= roster ref_*) is highlighted
+              and tagged "current"; dead referrals stay visible but muted. */}
+          <div className="bnl-mg" style={{ gridColumn: '1 / -1' }}>
+            <div className="k">Housing referrals{(detail?.referrals?.length ?? 0) > 0 ? ` · ${detail!.referrals!.length}` : ''}</div>
+            <div className="v" style={{ fontSize: '.78rem', display: 'grid', gap: 4, marginTop: 2 }}>
+              {!detail ? '…' : (() => {
+                const list = detail.referrals?.length
+                  ? detail.referrals
+                  : row.ref_type
+                    ? [{ date: row.ref_date, type: row.ref_type, status: row.ref_status, prov: row.ref_prov }]
+                    : [];
+                if (!list.length) return <span className="bnl-sub">—</span>;
+                const DEAD = ['canceled', 'declined', 'rejected', 'client rejected', 'provider rejected'];
+                const curIdx = list.findIndex((x) =>
+                  x.date === row.ref_date && x.status === row.ref_status && x.prov === row.ref_prov);
+                return list.map((x, i) => {
+                  const dead = DEAD.includes((x.status ?? '').toLowerCase());
+                  const cur = i === curIdx;
+                  const col = dead ? 'var(--danger)' : x.status === 'accepted' ? 'var(--accent)' : 'var(--warn)';
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px',
+                      borderRadius: 6, border: `1px solid ${cur ? col : 'rgba(148,163,184,0.25)'}`,
+                      opacity: dead && !cur ? 0.75 : 1 }}>
+                      <span style={{ color: col, fontWeight: 700, fontSize: '.72rem', whiteSpace: 'nowrap' }}>{x.status ?? '?'}</span>
+                      <span className="bnl-sub" style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{x.date ?? '—'}</span>
+                      {x.type && <span className="bnl-sub" style={{ whiteSpace: 'nowrap' }}>{x.type}</span>}
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={x.prov ?? undefined}>{x.prov ?? '—'}</span>
+                      {cur && (
+                        <span style={{ color: col, fontSize: '.68rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                          current{row.ms_stage === 'referred' && row.ms_wait != null ? ` · ${row.ms_wait}d waiting` : ''}
+                        </span>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </div>
           {/* Household roster — every population, not just Family: who
               shares the current enrollment's household. HoH badged, ages
               in parens (minors read directly off the age). */}
