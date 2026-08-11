@@ -3,11 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   POP_DEFS, MILESTONES,
-  type BnlAgg, type BnlClient, type BnlDetail, type BnlHist3,
-  type BnlTimelineEvent, type CeMilestonesAgg, type PopKey,
+  type BnlAgg, type BnlClient, type CeMilestonesAgg, type PopKey,
 } from './types';
-import HistoryCard from './HistoryCard';
-import Notes from './Notes';
+import JourneyBar from '../../../components/JourneyBar';
+import ClientDrawer, { Flags } from './ClientDrawer';
 
 type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'assessed';
 
@@ -29,21 +28,7 @@ const PAGE = 200;
 /** Search is a server round-trip now, so wait for a pause in typing. */
 const SEARCH_DEBOUNCE_MS = 250;
 
-function Flags({ r }: { r: BnlClient }) {
-  return (
-    <>
-      {r.is_new && <span className="bnl-fp bnl-fp-new">NEW</span>}
-      {r.returned && <span className="bnl-fp bnl-fp-ret">RETURNED</span>}
-      {r.chronic && <span className="bnl-fp bnl-fp-chr">CHRONIC</span>}
-      {r.veteran && <span className="bnl-fp bnl-fp-vet">VET</span>}
-      {r.family && <span className="bnl-fp bnl-fp-fam">FAMILY</span>}
-      {r.parenting && <span className="bnl-fp bnl-fp-par">PARENTING</span>}
-      {r.unaccompanied && r.age != null && r.age < 25 && <span className="bnl-fp bnl-fp-una">UNACC.</span>}
-      {r.in_school && <span className="bnl-fp bnl-fp-sch">SCHOOL</span>}
-      {r.dq_n > 0 && <span className="bnl-fp bnl-fp-dq" title={`${r.dq_n} data-quality flag${r.dq_n === 1 ? '' : 's'} — open the client for detail`}>⚠ DQ</span>}
-    </>
-  );
-}
+// Flags moved to ClientDrawer.tsx (shared with the cohort dashboard).
 
 // Inflow/Outflow chart removed 2026-07-31 (user: duplicated elsewhere — the
 // flow data still lives in agg.pops[pop].flow if it's ever wanted back).
@@ -52,9 +37,6 @@ export default function BnlView({
   initialRows, initialTotal, agg, ceMilestones = null, isAdmin = false,
 }: { initialRows: BnlClient[]; initialTotal: number; agg: BnlAgg; ceMilestones?: CeMilestonesAgg | null; isAdmin?: boolean }) {
   const [pop, setPop] = useState<PopKey>('all');
-  // Add-to-cohort (admin-only) — cohort list loads lazily on first drawer open.
-  const [cohortOpts, setCohortOpts] = useState<{ id: number; name: string }[] | null>(null);
-  const [cohortMsg, setCohortMsg] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fFlag, setFFlag] = useState('');
@@ -68,22 +50,6 @@ export default function BnlView({
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
   const [drill, setDrill] = useState<BnlClient | null>(null);
-  const [timeline, setTimeline] = useState<BnlTimelineEvent[] | null>(null);
-  const [hist3, setHist3] = useState<BnlHist3 | null>(null);
-  const [detail, setDetail] = useState<BnlDetail | null>(null);
-
-  // Cohort options load once, the first time an admin opens any drawer.
-  useEffect(() => {
-    setCohortMsg(null);
-    if (drill && isAdmin && cohortOpts === null) {
-      fetch('/api/cohorts')
-        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-        .then((j) => setCohortOpts((j.cohorts ?? []).map(
-          (c: { id: number; name: string }) => ({ id: c.id, name: c.name }))))
-        .catch(() => setCohortOpts([]));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drill, isAdmin]);
 
   // Debounced copy of the search box — only this triggers a fetch.
   const [qDebounced, setQDebounced] = useState('');
@@ -138,20 +104,8 @@ export default function BnlView({
     }
   }
 
-  async function openDrill(r: BnlClient) {
-    setDrill(r);
-    setTimeline(null); setHist3(null); setDetail(null);
-    try {
-      const res = await fetch(`/api/bnl/client?pid=${encodeURIComponent(r.pid)}`);
-      if (res.ok) {
-        const j = await res.json() as {
-          timeline: BnlTimelineEvent[]; hist3: BnlHist3 | null; detail: BnlDetail | null;
-        };
-        setTimeline(j.timeline); setHist3(j.hist3); setDetail(j.detail);
-      } else setTimeline([]);
-    } catch {
-      setTimeline([]);
-    }
+  function openDrill(r: BnlClient) {
+    setDrill(r);   // detail/timeline/hist3 load inside ClientDrawer
   }
 
   function setSort(k: SortKey | 'flags') {
@@ -193,7 +147,11 @@ export default function BnlView({
             </button>
           ))}
         </div>
-        <span className="bnl-sub">{pa.n.toLocaleString()} clients in this population</span>
+        <span className="bnl-sub">
+          {pop === 'family'
+            ? <>{pa.n.toLocaleString()} households in this population{pa.people != null && <> · {pa.people.toLocaleString()} people</>}</>
+            : <>{pa.n.toLocaleString()} clients in this population</>}
+        </span>
       </div>
 
       {/* CE journey — SYSTEM view (all populations, unaffected by the selector):
@@ -203,9 +161,6 @@ export default function BnlView({
       {ceMilestones && (() => {
         const labels = Object.fromEntries(MILESTONES);
         const ord = ceMilestones.order;
-        const legs = ord.slice(0, -1).map((a, i) => [a, ord[i + 1]] as const);
-        const meds = legs.map(([a, b]) => ceMilestones.housed[`${a}_${b}`]?.median ?? null);
-        const worst = Math.max(...meds.map((m) => m ?? -1));
         const total = ceMilestones.housed[`${ord[0]}_${ord[ord.length - 1]}`];
         return (
           <div className="panel" style={{ marginTop: 16, padding: '12px 18px' }}>
@@ -215,67 +170,16 @@ export default function BnlView({
                 clients housed in the last {ceMilestones.window_months} months · all populations
               </span>
             </div>
-            {/* Journey bar — bold milestone labels as nodes; each connector's
-                WIDTH is proportional to its median days (min width keeps 0d
-                legs visible). The bar is on the labels' vertical center; the
-                day count floats above its segment. Longest leg in warn. */}
-            <div style={{ display: 'flex', alignItems: 'center', overflowX: 'auto', padding: '24px 4px 28px' }}>
-              {ord.map((k, i) => {
-                const isLast = i === ord.length - 1;
-                const b = ord[i + 1];
-                const s = isLast ? null : ceMilestones.housed[`${k}_${b}`];
-                const isWorst = s?.median != null && s.median === worst && worst >= 0;
-                return (
-                  <span key={k} style={{ display: 'contents' }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--strong)', whiteSpace: 'nowrap', letterSpacing: '.01em' }}>
-                      {labels[k] ?? k}
-                    </span>
-                    {!isLast && (() => {
-                      // Live cohort stuck on THIS leg: their furthest milestone
-                      // is k, so days-since-k is the leg's in-progress wait —
-                      // e.g. accepted-but-not-moved-in = today − housing entry.
-                      const w = ceMilestones.waiting[k];
-                      // The live wait carries the visual weight when it dwarfs
-                      // the completed experience (≥2× it, 7d floor) — i.e. the
-                      // completed median is a workflow artifact (Accepted →
-                      // Move-in's 0d) and the backlog is the real story.
-                      const liveIsStory = (w?.median ?? 0) >= 2 * Math.max(s?.median ?? 0, 7);
-                      return (
-                        <span
-                          title={`${labels[k] ?? k} → ${labels[b] ?? b}${s?.n ? ` — completed: median ${s.median}d · avg ${s.mean}d · ${s.n} clients${isWorst ? ' · longest leg' : ''}` : ' — no completed pairs'}${w?.n ? ` · waiting now: ${w.n} clients, median ${w.median}d${w.mean != null ? ` · avg ${w.mean}d` : ''} and counting` : ''}`}
-                          style={{ position: 'relative', display: 'flex', alignItems: 'center',
-                            flexGrow: Math.max(s?.median ?? 0, 4), flexBasis: 84, minWidth: 84, padding: '0 10px' }}>
-                          <span style={{ position: 'absolute', top: -19, left: 0, right: 0, textAlign: 'center',
-                            fontSize: 11.5, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
-                            color: isWorst ? 'var(--warn)' : 'var(--muted)' }}>
-                            <b>{s?.median != null ? `${s.median}d` : '—'}</b>
-                            {s?.mean != null && <span style={{ fontSize: 10, opacity: .85 }}> · avg {Math.round(s.mean)}d</span>}
-                            {isWorst ? ' ⏳' : ''}
-                          </span>
-                          <span style={{ display: 'block', width: '100%', height: 6, borderRadius: 3,
-                            background: isWorst ? 'var(--warn)' : 'var(--primary)',
-                            opacity: s?.median != null ? 0.9 : 0.25 }} />
-                          {(w?.n ?? 0) > 0 && (
-                            <span style={{ position: 'absolute', top: 'calc(50% + 8px)', left: 0, right: 0, textAlign: 'center',
-                              whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-                              fontSize: liveIsStory ? 11 : 10.5,
-                              fontWeight: liveIsStory ? 700 : 400,
-                              color: liveIsStory ? 'var(--warn)' : 'var(--muted)' }}>
-                              {(w!.n).toLocaleString()} waiting · <b>{w!.median}d</b>
-                              {w!.mean != null && <span style={{ fontSize: 10, opacity: .85 }}> · avg {Math.round(w!.mean!)}d</span>}
-                            </span>
-                          )}
-                        </span>
-                      );
-                    })()}
-                  </span>
-                );
-              })}
-            </div>
+            {/* The bar itself is shared with the cohort dashboard — see
+                components/JourneyBar.tsx. Semantics (proportional widths,
+                worst-leg warn, live-wait line) live there. */}
+            <JourneyBar order={ord} labels={labels}
+                        housed={ceMilestones.housed} waiting={ceMilestones.waiting} />
             {total?.median != null && (
               <div className="bnl-sub" style={{ marginTop: 6 }}>
                 End to end {labels[ord[0]] ?? ord[0]} → {labels[ord[ord.length - 1]] ?? ord[ord.length - 1]}:{' '}
-                <b style={{ color: 'var(--strong)' }}>{total.median}d</b> median (n={total.n})
+                <b style={{ color: 'var(--strong)' }}>{total.median}d</b> median
+                {total.mean != null && <> · avg {Math.round(total.mean)}d</>} (n={total.n})
                 {' '}· above each segment: completed journeys · below: clients on that leg right now, days so far
                 {' '}· bold = median (typical client), avg = mean (pulled up by long-tail outliers)
               </div>
@@ -425,155 +329,8 @@ export default function BnlView({
       </div>
 
       {drill && (
-        <div className="bnl-ov" onClick={(e) => e.target === e.currentTarget && setDrill(null)}>
-          {/* id + @media print rules = the card alone prints; browser dialog
-              offers "Save as PDF" (stylesheet approach, same as the project
-              panel — no blobs, survives the county's web isolation). */}
-          <div className="bnl-modal" id="bnl-printable">
-            <button className="btn pp-noprint" style={{ float: 'right', marginLeft: 8 }}
-              onClick={() => window.print()}
-              title="Opens the print dialog — choose “Save as PDF”">🖨 PDF</button>
-            <button className="bnl-x pp-noprint" onClick={() => setDrill(null)}>✕</button>
-            <h3>{drill.name} <span className="bnl-sub">· age {drill.age ?? '—'}</span></h3>
-            <div className="bnl-sub" style={{ fontFamily: 'ui-monospace, monospace', marginTop: 2, cursor: 'pointer' }}
-              title="click to copy"
-              onClick={(e) => { navigator.clipboard?.writeText(drill.pid); const el = e.currentTarget; el.textContent = 'ID copied ✓'; setTimeout(() => { el.textContent = drill.pid; }, 1200); }}>
-              {drill.pid}
-            </div>
-            <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span className={`bnl-chip bnl-${drill.status}`}>{drill.status}</span>{' '}
-              <Flags r={drill} />
-              {isAdmin && (
-                <span className="pp-noprint" style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                  {cohortMsg && <span className="bnl-sub">{cohortMsg}</span>}
-                  <select className="fselect" style={{ padding: '3px 26px 3px 10px', fontSize: 12, minWidth: 150 }} value=""
-                    onChange={async (e) => {
-                      const cid = Number(e.target.value);
-                      if (!cid) return;
-                      setCohortMsg(null);
-                      const r = await fetch('/api/cohorts', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'add_members', id: cid, pids: [drill.pid] }),
-                      });
-                      setCohortMsg(r.ok ? 'Added to cohort ✓' : 'Could not add.');
-                    }}>
-                    <option value="">+ Add to cohort…</option>
-                    {(cohortOpts ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </span>
-              )}
-            </div>
-            <div className="bnl-mgrid">
-              <div className="bnl-mg"><div className="k">Self-reported (3.917)</div><div className="v num">{drill.days_homeless.toLocaleString()} d</div><div className="bnl-sub">{detail ? <>since {detail.ep_start}{detail.times3_sr ? ` · ${detail.times3_sr} time${detail.times3_sr === '1' ? '' : 's'} in 3 yrs` : ''}{detail.months3_sr ? ` · ${detail.months3_sr === 13 ? '12+' : detail.months3_sr} mo` : ''}</> : '…'}</div></div>
-              <div className="bnl-mg"><div className="k">Observed in HMIS (3y)</div><div className="v num">{drill.sys_days3.toLocaleString()} d</div><div className="bnl-sub">{drill.episodes3} occasion{drill.episodes3 === 1 ? '' : 's'} (7-night break)</div></div>
-              <div className="bnl-mg"><div className="k">CE assessed</div><div className="v num">{drill.assessed ?? 'No'}</div></div>
-              <div className="bnl-mg"><div className="k">DOB · Sex · Race</div><div className="v" style={{ fontSize: '.8rem' }}>{detail ? <>{detail.dob ?? '—'} · {detail.sex ?? '—'}<div className="bnl-sub">{detail.race ?? 'race not recorded'}</div></> : '…'}</div></div>
-              <div className="bnl-mg"><div className="k">Monthly income</div><div className="v num">{detail ? (detail.income != null ? `$${detail.income.toLocaleString()}` : '—') : '…'}</div><div className="bnl-sub">{detail?.income_date ? `as of ${detail.income_date}` : ''}</div></div>
-              <div className="bnl-mg"><div className="k">DV</div><div className="v" style={{ fontSize: '.8rem' }}>{!detail ? '…' : detail.dv_fleeing ? <b style={{ color: 'var(--danger)' }}>Currently fleeing</b> : detail.dv_survivor ? 'Survivor' : detail.dv_survivor === false ? 'No' : '—'}</div></div>
-              <div className="bnl-mg"><div className="k">Foster · Juv. justice</div><div className="v" style={{ fontSize: '.8rem' }}>{!detail ? '…' : <>{detail.foster == null ? 'unk' : detail.foster ? 'Yes' : 'No'} · {detail.jj == null ? 'unk' : detail.jj ? 'Yes' : 'No'}</>}</div></div>
-              <div className="bnl-mg"><div className="k">Housing referral</div><div className="v" style={{ fontSize: '.8rem' }}>{drill.ref_type ? <>{drill.ref_type} · {drill.ref_status}{drill.ref_date ? ` · ${drill.ref_date}` : ''}{drill.ref_prov && <div className="bnl-sub">{drill.ref_prov}</div>}</> : '—'}</div></div>
-              <div className="bnl-mg" style={{ gridColumn: '1 / -1' }}><div className="k">Status detail</div><div className="v" style={{ fontSize: '.78rem' }}>{drill.detail}</div></div>
-            </div>
-            {/* Youth risk — its own strip, deliberately NOT another .bnl-mg tile:
-                the score is the prioritization signal, so it gets band color +
-                the itemized factors behind the number. Youth (18-24) only. */}
-            {drill.risk_pts != null && (
-              <div className={`bnl-risk${drill.risk_band === 'High' ? ' hi' : ''}`}>
-                <span className="bnl-risk-band">{drill.risk_band ?? '—'}</span>
-                <b>Risk {drill.risk_pts} / {drill.risk_max}</b>
-                <span className="bnl-sub" style={{ flex: 1 }}>
-                  {!detail ? '…'
-                    : detail.risk_detail?.length
-                      ? detail.risk_detail.map(([l, p]) => `${l} +${p}`).join(' · ')
-                      : 'no scored factors'}
-                  <span title="Housing Needs Assessment items (ADA unit, RS offender) are not scored yet"> · HNA pending</span>
-                </span>
-              </div>
-            )}
-            {/* CE journey — same proportional bar as the system card: bold
-                milestone nodes with their dates beneath, segment width ∝ the
-                day gap between adjacent known milestones. A segment fades (no
-                number) when either of its dates is missing. */}
-            {detail?.milestones && (
-              <div className="bnl-ms">
-                <span className="bnl-ms-t">CE journey</span>
-                <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 360, overflowX: 'auto', padding: '16px 2px 2px' }}>
-                  {MILESTONES.map(([k, label], i) => {
-                    const d = detail.milestones?.[k] ?? null;
-                    const next = i < MILESTONES.length - 1
-                      ? (detail.milestones?.[MILESTONES[i + 1][0]] ?? null) : null;
-                    const gap = d && next
-                      ? Math.round((+new Date(next) - +new Date(d)) / 86400000) : null;
-                    const known = gap != null && gap >= 0;
-                    // Terminal reached via an exit to a permanent destination
-                    // (no program move-in) — label it honestly.
-                    const exitHoused = k === 'movein' && detail.milestones?.['_via'] === 'exit';
-                    return (
-                      <span key={k} style={{ display: 'contents' }}>
-                        <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}
-                          title={exitHoused ? 'Housed via an exit to a permanent destination — there is no program move-in' : undefined}>
-                          <span style={{ fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: d ? 'var(--strong)' : 'var(--faint)' }}>{exitHoused ? 'Housed (exit)' : label}</span>
-                          <span style={{ fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{d ?? '—'}</span>
-                        </span>
-                        {i < MILESTONES.length - 1 && (
-                          <span
-                            title={known ? `${label} → ${MILESTONES[i + 1][1]}: ${gap} days` : 'not measurable — a milestone date is missing'}
-                            style={{ position: 'relative', display: 'flex', alignItems: 'center',
-                              flexGrow: known ? Math.max(gap, 4) : 3, flexBasis: 40, minWidth: 40, padding: '0 8px' }}>
-                            {known && (
-                              <span style={{ position: 'absolute', top: -15, left: 0, right: 0, textAlign: 'center',
-                                fontSize: 10.5, fontWeight: 700, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                                +{gap}d
-                              </span>
-                            )}
-                            <span style={{ display: 'block', width: '100%', height: 5, borderRadius: 3,
-                              background: 'var(--primary)', opacity: known ? 0.9 : 0.18 }} />
-                          </span>
-                        )}
-                      </span>
-                    );
-                  })}
-                </div>
-                {/* Total journey: first known milestone → move-in (housed) or
-                    the data date (still waiting — count keeps growing). */}
-                {(() => {
-                  const ms = detail.milestones!;
-                  const first = MILESTONES.find(([k]) => ms[k]);
-                  if (!first) return null;
-                  const mi = ms['movein'] ?? null;
-                  const end = mi ?? agg.as_of;
-                  const t = Math.round((+new Date(end) - +new Date(ms[first[0]] as string)) / 86400000);
-                  if (t < 0) return null;
-                  return mi ? (
-                    <span title={`${first[1]} ${ms[first[0]]} → moved in ${mi}`}
-                      style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
-                      housed in {t.toLocaleString()}d
-                    </span>
-                  ) : (
-                    <span title={`${first[1]} ${ms[first[0]]} → not yet housed as of ${agg.as_of}`}
-                      style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 700, color: 'var(--warn)', whiteSpace: 'nowrap' }}>
-                      {t.toLocaleString()}d and counting
-                    </span>
-                  );
-                })()}
-              </div>
-            )}
-            {!!detail?.dq?.length && <div className="bnl-dq">⚠ {detail.dq.join(' — ')}</div>}
-            <HistoryCard h={hist3} />
-            <div className="bnl-tl">
-              {timeline === null && <div className="bnl-sub">Loading history…</div>}
-              {timeline?.map((t, i) => (
-                <div key={i} className={`bnl-ev ${t.exit ? (t.ph ? 'ph' : '') : 'open'}`}>
-                  <b>{t.type}</b> · {t.project}
-                  <div className="bnl-sub">{t.entry} → {t.exit ?? 'open'}{t.dest ? <> · to <b>{t.dest}</b></> : null}{t.ph ? <span style={{ color: 'var(--accent)' }}> ✓ PH</span> : null}</div>
-                </div>
-              ))}
-            </div>
-            {/* Last in the drawer: the record is read top-down (who they are →
-                history → enrollments), and notes are what you add after reading. */}
-            <Notes pid={drill.pid} />
-          </div>
-        </div>
+        <ClientDrawer row={drill} asOf={agg.as_of} isAdmin={isAdmin}
+                      onClose={() => setDrill(null)} />
       )}
     </>
   );

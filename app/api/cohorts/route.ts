@@ -24,6 +24,8 @@ const median = (v: number[]): number | null => {
   const s = [...v].sort((a, b) => a - b);
   return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
 };
+const mean = (v: number[]): number | null =>
+  v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null;
 
 export async function GET(req: Request) {
   const viewer = await getViewer();
@@ -65,11 +67,12 @@ export async function GET(req: Request) {
     project: string | null; ptype: string | null; enrolled: boolean;
     days_homeless: number | null; chronic: boolean; returned: boolean;
     risk_band: string | null; milestones: Record<string, string | null> | null;
+    as_of: string | null;
   };
   const members: Member[] = [];
   for (let i = 0; i < pids.length; i += 200) {
     const r = await sb.from('bnl_clients')
-      .select('pid, name, age, status, project, ptype, enrolled, days_homeless, chronic, returned, risk_band, milestones')
+      .select('pid, name, age, status, project, ptype, enrolled, days_homeless, chronic, returned, risk_band, milestones, as_of')
       .in('pid', pids.slice(i, i + 200));
     if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
     members.push(...((r.data ?? []) as Member[]));
@@ -82,6 +85,10 @@ export async function GET(req: Request) {
   let returned = 0, chronic = 0, highRisk = 0;
   const dh: number[] = [];
   const legDays: Record<string, number[]> = {};
+  const waitDays: Record<string, number[]> = {};
+  // Roster generation date — live waits are measured to it (same clock as
+  // the BNL's system card), never to the browser's "now".
+  const asOf = members[0]?.as_of ?? null;
   for (const m of members) {
     if (m.status in by) by[m.status as keyof typeof by]++;
     if (m.returned) returned++;
@@ -100,6 +107,17 @@ export async function GET(req: Request) {
       const d = Math.round((+new Date(ms['movein']) - +new Date(ms['ident'])) / 86400000);
       if (d >= 0) (legDays['ident_movein'] ??= []).push(d);
     }
+    // Live stalls — mirrors bnl_core's ce_milestones `waiting` semantics:
+    // ACTIVE members not yet moved in, bucketed by furthest milestone
+    // reached, measuring days since that date. Feeds the under-segment
+    // "N waiting · Xd" line of the shared JourneyBar.
+    if (m.status === 'active' && !ms['movein'] && asOf) {
+      const last = [...MS_ORDER].reverse().find((k) => k !== 'movein' && ms[k]);
+      if (last) {
+        const d = Math.round((+new Date(asOf) - +new Date(ms[last]!)) / 86400000);
+        if (d >= 0) (waitDays[last] ??= []).push(d);
+      }
+    }
   }
 
   members.sort((a, b) =>
@@ -117,7 +135,8 @@ export async function GET(req: Request) {
       housed_pct: members.length ? (by.housed / members.length) * 100 : null,
       returned, chronic, high_risk: highRisk,
       median_days_homeless: median(dh),
-      legs: Object.fromEntries(Object.entries(legDays).map(([k, v]) => [k, { n: v.length, median: median(v) }])),
+      legs: Object.fromEntries(Object.entries(legDays).map(([k, v]) => [k, { n: v.length, median: median(v), mean: mean(v) }])),
+      waiting: Object.fromEntries(Object.entries(waitDays).map(([k, v]) => [k, { n: v.length, median: median(v), mean: mean(v) }])),
     },
   });
 }

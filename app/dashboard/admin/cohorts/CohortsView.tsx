@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import { fmtInt } from '../../../../lib/format';
 import CopyId from '../../../../components/CopyId';
+import JourneyBar from '../../../../components/JourneyBar';
+import ClientDrawer from '../../bnl/ClientDrawer';
+import { MILESTONES, type BnlClient } from '../../bnl/types';
 
 /**
  * Client cohorts — create a named group, paste hashed PersonalIDs (every ID
@@ -13,18 +16,17 @@ import CopyId from '../../../../components/CopyId';
  * clients stay, that's the point.
  */
 
-const MS_LABEL: Record<string, string> = {
-  ident_assessed: 'Identified → Assessed', assessed_referred: 'Assessed → Referred',
-  referred_accepted: 'Referred → Accepted', accepted_movein: 'Accepted → Moved in',
-  ident_movein: 'Identified → Moved in',
-};
-const LEG_ORDER = ['ident_assessed', 'assessed_referred', 'referred_accepted', 'accepted_movein'];
+/** Milestone order + labels come from the shared BNL registry (bnl/types.ts),
+ *  so a future milestone added there flows into this bar untouched. */
+const MS_ORDER = MILESTONES.map(([k]) => k);
+const MS_LABELS = Object.fromEntries(MILESTONES);
 
 interface CohortRow { id: number; name: string; description: string | null; created_by: string | null; created_at: string; members: number }
 interface Member {
   pid: string; name: string | null; age: number | null; status: string;
   project: string | null; ptype: string | null; enrolled: boolean;
   days_homeless: number | null; chronic: boolean; returned: boolean; risk_band: string | null;
+  as_of: string | null;
 }
 interface Detail {
   cohort: { id: number; name: string; description: string | null; created_by: string | null; created_at: string };
@@ -35,7 +37,8 @@ interface Detail {
     n: number; active: number; housed: number; inactive: number;
     housed_pct: number | null; returned: number; chronic: number; high_risk: number;
     median_days_homeless: number | null;
-    legs: Record<string, { n: number; median: number | null }>;
+    legs: Record<string, { n: number; median: number | null; mean: number | null }>;
+    waiting: Record<string, { n: number; median: number | null; mean: number | null }>;
   };
 }
 
@@ -49,6 +52,22 @@ export default function CohortsView() {
   const [paste, setPaste] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Member click → the SAME client card as the BNL (ClientDrawer). The member
+  // row is slim, so fetch the full roster row by pid first.
+  const [drill, setDrill] = useState<BnlClient | null>(null);
+  const [drillAsOf, setDrillAsOf] = useState<string | null>(null);
+
+  async function openMember(m: Member) {
+    try {
+      const r = await fetch(`/api/bnl/roster?pid=${encodeURIComponent(m.pid)}&limit=1`);
+      if (!r.ok) throw new Error(String(r.status));
+      const j = (await r.json()) as { rows: BnlClient[] };
+      if (j.rows[0]) { setDrillAsOf(m.as_of); setDrill(j.rows[0]); }
+      else setMsg('Client is no longer on the By-Name List roster.');
+    } catch {
+      setMsg('Could not load the client card.');
+    }
+  }
 
   const loadList = () => {
     fetch('/api/cohorts')
@@ -151,28 +170,27 @@ export default function CohortsView() {
             </div>
           </div>
 
-          {/* Cohort CE journey — median days per completed leg, this cohort only */}
+          {/* Cohort CE journey — the same proportional bar as the BNL system
+              card (components/JourneyBar), fed by this cohort's members only:
+              completed legs above the bar, members stuck on each leg below. */}
           <div className="panel" style={{ marginTop: 16, padding: '12px 18px' }}>
-            <div className="hc-sub" style={{ margin: '0 0 8px' }}>
-              Cohort CE journey — median days per leg
-              {detail.agg.legs['ident_movein']?.median != null && (
-                <span className="bnl-sub" style={{ marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>
-                  end to end {fmtInt(detail.agg.legs['ident_movein'].median!)}d (n={detail.agg.legs['ident_movein'].n})
-                </span>
-              )}
+            <div className="hc-sub" style={{ margin: '0 0 10px' }}>
+              Cohort CE journey — median days between milestones
+              <span className="bnl-sub" style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                this cohort&apos;s members only
+              </span>
             </div>
-            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 12.5 }}>
-              {LEG_ORDER.map((k) => {
-                const s = detail.agg.legs[k];
-                return (
-                  <span key={k} style={{ display: 'inline-flex', gap: 6, alignItems: 'baseline' }}>
-                    <span style={{ color: 'var(--muted)' }}>{MS_LABEL[k]}</span>
-                    <b style={{ fontVariantNumeric: 'tabular-nums' }}>{s?.median != null ? `${fmtInt(s.median)}d` : '—'}</b>
-                    {s?.n ? <span className="bnl-sub">n={s.n}</span> : null}
-                  </span>
-                );
-              })}
-            </div>
+            <JourneyBar order={MS_ORDER} labels={MS_LABELS}
+                        housed={detail.agg.legs} waiting={detail.agg.waiting ?? {}} />
+            {detail.agg.legs['ident_movein']?.median != null && (
+              <div className="bnl-sub" style={{ marginTop: 6 }}>
+                End to end {MS_LABELS['ident'] ?? 'Identified'} → {MS_LABELS['movein'] ?? 'Moved in'}:{' '}
+                <b style={{ color: 'var(--strong)' }}>{fmtInt(detail.agg.legs['ident_movein'].median!)}d</b> median
+                {detail.agg.legs['ident_movein'].mean != null && <> · avg {Math.round(detail.agg.legs['ident_movein'].mean!)}d</>}
+                {' '}(n={detail.agg.legs['ident_movein'].n})
+                {' '}· above each segment: completed legs · below: members on that leg right now, days so far
+              </div>
+            )}
           </div>
 
           {/* Trend — % housed per refresh capture */}
@@ -235,9 +253,12 @@ export default function CohortsView() {
                 </thead>
                 <tbody>
                   {detail.members.map((m) => (
-                    <tr key={m.pid}>
+                    /* row opens the shared client card; CopyId and the remove
+                       button stop propagation so they stay independent */
+                    <tr key={m.pid} onClick={() => openMember(m)} style={{ cursor: 'pointer' }}
+                        title="Open client card">
                       <td>
-                        <div className="bnl-nm">{m.name ?? m.pid}</div>
+                        <div className="bnl-nm bnl-drillname">{m.name ?? m.pid}</div>
                         <CopyId pid={m.pid} />
                       </td>
                       <td className="num">{m.age ?? '—'}</td>
@@ -252,7 +273,8 @@ export default function CohortsView() {
                       <td className="num">
                         <button className="btn" style={{ padding: '0 8px', fontSize: 12 }} title="Remove from cohort"
                           disabled={busy}
-                          onClick={async () => {
+                          onClick={async (e) => {
+                            e.stopPropagation();
                             const r = await act({ action: 'remove_member', id: sel, pid: m.pid });
                             if (r?.ok) { loadDetail(sel!); loadList(); }
                           }}>✕</button>
@@ -269,6 +291,13 @@ export default function CohortsView() {
         </>
       )}
       {sel != null && !detail && !msg && <div className="panel" style={{ marginTop: 16 }}><div className="hc-none">Loading…</div></div>}
+
+      {/* The SAME client card as the BNL — cohorts is admin-only, so the
+          add-to-cohort control inside the drawer is always shown. */}
+      {drill && (
+        <ClientDrawer row={drill} asOf={drillAsOf} isAdmin
+                      onClose={() => setDrill(null)} />
+      )}
     </>
   );
 }

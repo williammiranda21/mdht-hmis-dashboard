@@ -89,6 +89,10 @@ export interface BnlDetail {
   foster: boolean | null;
   jj: boolean | null;
   hoh: boolean;
+  /** Household on the current enrollment: member count + roster (HoH first,
+   *  then oldest-first). null/1 for solo or unknown-household clients. */
+  hh_n: number | null;
+  hh_members: { pid: string; name: string; age: number | null; hoh: boolean }[] | null;
   dq: string[];
   /** [label, points] per scored youth-risk factor; null/[] when nothing scored. */
   risk_detail: [string, number][] | null;
@@ -127,6 +131,8 @@ export interface CeMilestonesAgg {
  */
 export interface BnlPopAgg {
   n: number;
+  /** family pop only: person count alongside the household count in `n`. */
+  people?: number;
   counts: {
     active: number; housed: number; inactive: number; new30: number;
     chronic: number; vet: number; fam: number; assessed: number;
@@ -153,6 +159,8 @@ export const POP_DEFS: Record<PopKey, { label: string }> = {
   all: { label: 'Everyone' },
   youth: { label: 'Youth 18–24' },
   vet: { label: 'Veterans' },
+  // One row per HOUSEHOLD (the fam_rep representative) — see bnl_core POPS
+  // and lib/bnl-query.ts, which must agree with this definition.
   family: { label: 'Families' },
   single: { label: 'Single adults 25+' },
   senior: { label: 'Seniors 62+' },

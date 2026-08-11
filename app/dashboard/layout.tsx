@@ -3,10 +3,25 @@ import Link from 'next/link';
 import ThemeToggle from '../../components/ThemeToggle';
 import TabNav from '../../components/TabNav';
 import UserMenu from '../../components/UserMenu';
-import { getViewer } from '../../lib/supabase-server';
+import { getViewer, supabaseServer } from '../../lib/supabase-server';
+
+/** '2026-08-10' → '8/10/2026' without a Date parse (timezone-safe). */
+function fmtAsOf(s: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? `${+m[2]}/${+m[3]}/${m[1]}` : s;
+}
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const viewer = await getViewer();
+
+  // Data cutoff (Export.csv ExportEndDate, loaded into meta.export_end) —
+  // shown on every page so nobody mistakes the dashboard for live HMIS.
+  let exportEnd: string | null = null;
+  if (viewer?.isApproved) {
+    const { data } = await supabaseServer()
+      .from('meta').select('value').eq('key', 'export_end').maybeSingle();
+    exportEnd = (data?.value as string | null) ?? null;
+  }
 
   // Signed in but not approved yet (or switched off): show the status screen
   // instead of the dashboard. RLS would return nothing anyway — this just makes
@@ -79,6 +94,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <div className="sub">Miami-Dade County · Continuum of Care</div>
           </div>
           <span className="sp" />
+          {exportEnd && (
+            <span title="End date of the HMIS export behind every number on this dashboard"
+              style={{ fontSize: 12.5, color: 'var(--muted)', whiteSpace: 'nowrap', marginRight: 10 }}>
+              Data as of <b style={{ color: 'var(--strong)' }}>{fmtAsOf(exportEnd)}</b>
+            </span>
+          )}
           {viewer && (
             <UserMenu
               label={viewer.displayName || viewer.email || 'Signed in'}

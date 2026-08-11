@@ -26,7 +26,8 @@ export async function GET(req: Request) {
     .from('bnl_clients')
     .select('pid, timeline, hist3, dq, entry, days_since_contact, ep_start, ' +
             'times3_sr, months3_sr, dob, sex, race, income, income_date, ' +
-            'dv_fleeing, dv_survivor, foster, jj, hoh, risk_detail, milestones')
+            'dv_fleeing, dv_survivor, foster, jj, hoh, risk_detail, milestones, ' +
+            'hh_n, hh_members')
     .eq('pid', pid)
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

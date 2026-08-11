@@ -37,6 +37,9 @@ export interface RosterQuery {
   dir: 'asc' | 'desc';
   offset: number;
   limit: number;
+  /** exact-match single-client lookup (cohort member → drawer); other filters
+   *  stay at their defaults so the row is found regardless of population. */
+  pid: string;
 }
 
 /** Sortable columns. Whitelisted — never interpolate a user string into order(). */
@@ -63,6 +66,7 @@ export function parseRosterQuery(sp: URLSearchParams): RosterQuery {
     dir: sp.get('dir') === 'asc' ? 'asc' : 'desc',
     offset: Math.max(0, Number(sp.get('offset') ?? 0) || 0),
     limit: Math.min(Math.max(1, limit || PAGE_SIZE), 500),
+    pid: (sp.get('pid') ?? '').trim(),
   };
 }
 
@@ -89,10 +93,15 @@ export async function queryRoster(
     ? sb.from('bnl_clients').select(cols, { count: 'exact' })
     : sb.from('bnl_clients').select(cols);
 
+  if (p.pid) qb = qb.eq('pid', p.pid);
+
   // ── population ────────────────────────────────────────────────────────────
   if (p.pop === 'youth') qb = qb.gte('age', 18).lt('age', 25);
   else if (p.pop === 'vet') qb = qb.eq('veteran', true);
-  else if (p.pop === 'family') qb = qb.eq('family', true);
+  // Family = HOUSEHOLDS: one row per family — the representative (HoH when
+  // recorded, else oldest member; fam_rep computed in bnl_core so no-HoH
+  // households never vanish). Members surface in the drawer's household card.
+  else if (p.pop === 'family') qb = qb.eq('family', true).eq('fam_rep', true);
   else if (p.pop === 'single') qb = qb.gte('age', 25).eq('family', false);
   else if (p.pop === 'senior') qb = qb.gte('age', 62);
   // 'all' adds nothing. Note gte/lt on age also excludes NULL age, matching the

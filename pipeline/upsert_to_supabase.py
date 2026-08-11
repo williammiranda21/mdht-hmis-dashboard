@@ -388,6 +388,22 @@ def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None) -> list[
     rows = [
         {"key": "generated_at", "value": now},
         {"key": "partial_period", "value": data.get("partial_period")},
+        # Export end date — the data cutoff behind every number on the
+        # dashboard, from the HUD export's own metadata (Export.csv
+        # ExportEndDate). Shown in the app header ("Data as of …").
+        # Appended below only when readable, so a missing file can never
+        # blank a good value.
+    ]
+    try:
+        import csv as _csv
+        with (REPO / "hud_data" / "Export.csv").open(encoding="utf-8-sig", newline="") as f:
+            _exp = next(_csv.DictReader(f), None)
+        _eed = ((_exp or {}).get("ExportEndDate") or "").strip()
+        if _eed:
+            rows.append({"key": "export_end", "value": _eed})
+    except OSError:
+        pass
+    rows += [
         {"key": "periods", "value": data.get("periods", [])},
         {"key": "qtr_periods", "value": qf.get("qtr_periods", [])},
         {"key": "fy_periods", "value": qf.get("fy_periods", [])},
@@ -423,6 +439,38 @@ def _dedupe(rows: list[dict], pk: tuple[str, ...]) -> list[dict]:
 def chunked(rows: list[dict], n: int):
     for i in range(0, len(rows), n):
         yield rows[i : i + n]
+
+
+def upsert_batch(client, table: str, batch: list[dict], on_conflict: str, attempts: int = 4):
+    """Upsert one batch, riding out transient failures.
+
+    2026-08-11: a 40-minute load died at drill_clients 138k/143k on a single
+    57014 (statement timeout) — one blip, whole run lost. Retries with backoff;
+    if a batch times out repeatedly (drill rows carry large personal_ids
+    arrays), split it in half down to 25 rows before giving up.
+    """
+    import time as _t
+    for i in range(attempts):
+        try:
+            client.table(table).upsert(batch, on_conflict=on_conflict).execute()
+            return
+        except Exception as e:  # postgrest APIError carries .code
+            code = str(getattr(e, "code", "") or "")
+            transient = code in {"57014", "502", "503", "504"} or "timeout" in str(e).lower()
+            if not transient:
+                raise
+            if i < attempts - 1:
+                wait = (2, 5, 10)[min(i, 2)]
+                print(f"  transient {code or type(e).__name__} — retry {i + 1}/{attempts - 1} in {wait}s", flush=True)
+                _t.sleep(wait)
+            elif len(batch) > 25:
+                half = len(batch) // 2
+                print(f"  still failing — splitting batch of {len(batch)}", flush=True)
+                upsert_batch(client, table, batch[:half], on_conflict, attempts)
+                upsert_batch(client, table, batch[half:], on_conflict, attempts)
+                return
+            else:
+                raise
 
 
 # ── Youth By-Name List (PII — names). Source: outputs/bnl_data.json ─────────
@@ -468,6 +516,8 @@ def build_bnl_clients(bnl: dict | None) -> list[dict]:
             "spdat_date": r.get("spdat_date"),
             "chronic": r["chronic"], "is_new": r["new"], "returned": r["returned"],
             "veteran": r["veteran"], "family": r["family"], "hoh": r["hoh"],
+            "hh_n": r.get("hh_n"), "hh_members": r.get("hh_members"),
+            "fam_rep": r.get("fam_rep", True),
             "parenting": r["parenting"], "unaccompanied": r["unaccompanied"],
             "assessed": r["assessed"], "in_school": r["in_school"],
             "dq": r["dq"], "dq_n": r.get("dq_n", len(r["dq"])),
@@ -863,7 +913,7 @@ def main() -> None:
                 r["loaded_at"] = run_ts
         n = 0
         for batch in chunked(rows, BATCH_OVERRIDE.get(table, BATCH)):
-            client.table(table).upsert(batch, on_conflict=on_conflict).execute()
+            upsert_batch(client, table, batch, on_conflict)
             n += len(batch)
             print(f"  upserted {n:,}/{len(rows):,}", flush=True)
         # Prune only when THIS run just rewrote the table's entire source; an
