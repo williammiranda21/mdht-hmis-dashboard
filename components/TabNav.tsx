@@ -17,6 +17,7 @@ const TABS = [
   { href: '/dashboard/bnl', label: 'By-Name List', icon: 'lock' },
   { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy', adminOnly: true },
   { href: '/dashboard/deep-dive', label: 'Deep Dive', icon: 'search' },
+  { href: '/dashboard/glossary', label: 'Glossary', icon: 'book' },
   { href: '/dashboard/admin', label: 'Users', icon: 'users', adminOnly: true },
   { href: '/dashboard/admin/cohorts', label: 'Cohorts', icon: 'cohort', adminOnly: true },
   { href: '/dashboard/admin/targets', label: 'Targets', icon: 'target', adminOnly: true },
@@ -76,6 +77,12 @@ const ICONS: Record<string, JSX.Element> = {
     <>
       <circle cx="8" cy="8" r="3" /><circle cx="16" cy="8" r="3" />
       <path d="M2 20v-1a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v1M14 14h3a5 5 0 0 1 5 5v1" />
+    </>
+  ),
+  book: (
+    <>
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4a2 2 0 0 0-2-2H6.5A2.5 2.5 0 0 0 4 4.5z" />
+      <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
     </>
   ),
 };
