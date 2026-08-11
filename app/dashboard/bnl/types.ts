@@ -61,6 +61,12 @@ export interface BnlClient {
    *  rows filtered on these. */
   ms_stage: string | null;
   ms_wait: number | null;
+  /** household size on the current enrollment (1 = solo/unknown) */
+  hh_n: number | null;
+  /** enrichment (lib/bnl-enrich.ts, page-scoped): last 2 notes + focus mark.
+   *  Optional — absent on rows that skipped enrichment (e.g. CSV export). */
+  notes2?: { body: string; author: string | null; at: string }[] | null;
+  focused?: boolean;
   ref_type: string | null;
   ref_status: string | null;
   ref_date: string | null;
@@ -137,6 +143,9 @@ export interface CeMilestonesAgg {
     housed: Record<string, { n: number; median: number | null; mean: number | null }>;
     waiting: Record<string, { n: number; median: number | null; mean?: number | null }>;
   }>;
+  /** per-leg medians by MOVE-IN fiscal quarter (all populations, trailing
+   *  24 months) — the "is the system getting faster?" trend strip. */
+  trend?: { q: string; legs: Record<string, { n: number; median: number | null }> }[];
 }
 
 /**

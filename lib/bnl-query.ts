@@ -17,7 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  *  jj/times3_sr/…) are deliberately absent — the drawer fetches those per
  *  client, which is what keeps this payload small. */
 export const ROSTER_COLS =
-  'pid, name, age, status, detail, enrolled, project, ptype, ' +
+  'pid, name, age, status, detail, enrolled, project, ptype, hh_n, ' +
   'days_homeless, sys_days3, episodes3, risk_pts, risk_max, risk_band, ' +
   'spdat_score, spdat_tool, spdat_date, ms_stage, ms_wait, ' +
   'ref_type, ref_status, ref_date, ref_prov, assessed, dq_n, ' +
@@ -43,12 +43,16 @@ export interface RosterQuery {
   /** milestone worklist: clients whose live CE leg is this milestone key
    *  (active + not moved in, by construction of ms_stage in bnl_core). */
   stage: string;
+  /** referral filter: '' | psh | rrh | none — against the LIVE headline referral */
+  ref: string;
+  /** comma-separated project_id list (multi-select); '' = all projects */
+  projects: string;
 }
 
 /** Sortable columns. Whitelisted — never interpolate a user string into order(). */
 const SORTABLE = new Set([
   'name', 'age', 'status', 'project', 'days_homeless', 'sys_days3',
-  'risk_pts', 'ref_status', 'assessed', 'ms_wait',
+  'risk_pts', 'ref_status', 'assessed', 'ms_wait', 'hh_n',
 ]);
 
 const FLAG_COLS = new Set([
@@ -71,6 +75,8 @@ export function parseRosterQuery(sp: URLSearchParams): RosterQuery {
     limit: Math.min(Math.max(1, limit || PAGE_SIZE), 500),
     pid: (sp.get('pid') ?? '').trim(),
     stage: (sp.get('stage') ?? '').trim(),
+    ref: (sp.get('ref') ?? '').trim(),
+    projects: (sp.get('projects') ?? '').trim(),
   };
 }
 
@@ -92,6 +98,9 @@ export async function queryRoster(
   p: RosterQuery,
   cols: string = ROSTER_COLS,
   withCount = true,
+  /** restrict to these pids (the ★ Focused filter — the caller resolves the
+   *  bnl_focus list first, since this builder is synchronous) */
+  pidsIn?: string[],
 ) {
   let qb = withCount
     ? sb.from('bnl_clients').select(cols, { count: 'exact' })
@@ -118,6 +127,17 @@ export async function queryRoster(
   if (p.asmt === 'y') qb = qb.not('assessed', 'is', null);
   else if (p.asmt === 'n') qb = qb.is('assessed', null);
   if (p.stage) qb = qb.eq('ms_stage', p.stage);
+
+  // Live-referral filter. 'rrh' uses ilike so 'Joint TH-RRH' referrals match.
+  if (p.ref === 'psh') qb = qb.eq('ref_type', 'PSH');
+  else if (p.ref === 'rrh') qb = qb.ilike('ref_type', '%RRH%');
+  else if (p.ref === 'none') qb = qb.is('ref_type', null);
+
+  if (p.projects) {
+    const ids = p.projects.split(',').map((s) => Number(s)).filter((n) => Number.isFinite(n));
+    if (ids.length) qb = qb.in('project_id', ids);
+  }
+  if (pidsIn) qb = qb.in('pid', pidsIn);
 
   if (p.q) {
     const t = safeLike(p.q);

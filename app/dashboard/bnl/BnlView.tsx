@@ -8,11 +8,12 @@ import {
 import JourneyBar from '../../../components/JourneyBar';
 import ClientDrawer, { Flags } from './ClientDrawer';
 
-type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'assessed' | 'ms_wait';
+type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'assessed' | 'ms_wait' | 'hh_n';
 
-const COLS: Array<[SortKey | 'flags', string]> = [
+const COLS: Array<[SortKey | 'flags' | 'notes', string]> = [
   ['name', 'Client'],
   ['age', 'Age'],
+  ['hh_n', 'HH'],
   ['status', 'Status'],
   ['flags', 'Flags'],
   ['project', 'Project'],
@@ -22,6 +23,7 @@ const COLS: Array<[SortKey | 'flags', string]> = [
   ['risk_pts', 'Risk'],
   ['ref_status', 'Referral'],
   ['assessed', 'CE assessed'],
+  ['notes', 'Latest notes'],
 ];
 
 /** milestone key → label, for the CE-leg-wait cells and the stage filter chip */
@@ -38,15 +40,21 @@ const SEARCH_DEBOUNCE_MS = 250;
 // flow data still lives in agg.pops[pop].flow if it's ever wanted back).
 
 export default function BnlView({
-  initialRows, initialTotal, agg, ceMilestones = null, isAdmin = false,
-}: { initialRows: BnlClient[]; initialTotal: number; agg: BnlAgg; ceMilestones?: CeMilestonesAgg | null; isAdmin?: boolean }) {
+  initialRows, initialTotal, agg, ceMilestones = null, isAdmin = false, projectOpts = [],
+}: { initialRows: BnlClient[]; initialTotal: number; agg: BnlAgg; ceMilestones?: CeMilestonesAgg | null; isAdmin?: boolean;
+     projectOpts?: { id: number; name: string; type: string | null }[] }) {
   const [pop, setPop] = useState<PopKey>('all');
   const [q, setQ] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fFlag, setFFlag] = useState('');
   const [fAsmt, setFAsmt] = useState('');
+  const [fRef, setFRef] = useState('');
   // Milestone worklist — set by clicking a waiting number on the journey bar.
   const [fStage, setFStage] = useState('');
+  // Multi-project filter (1..n projects; empty = all).
+  const [selProjects, setSelProjects] = useState<number[]>([]);
+  const [projOpen, setProjOpen] = useState(false);
+  const [projQ, setProjQ] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('days_homeless');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -67,9 +75,10 @@ export default function BnlView({
   const pa = agg.pops[pop];
 
   const params = useCallback((offset: number) => new URLSearchParams({
-    pop, status: fStatus, flag: fFlag, asmt: fAsmt, stage: fStage, q: qDebounced,
+    pop, status: fStatus, flag: fFlag, asmt: fAsmt, stage: fStage, ref: fRef,
+    projects: selProjects.join(','), q: qDebounced,
     sort: sortKey, dir: sortDir, offset: String(offset), limit: String(PAGE),
-  }), [pop, fStatus, fFlag, fAsmt, fStage, qDebounced, sortKey, sortDir]);
+  }), [pop, fStatus, fFlag, fAsmt, fStage, fRef, selProjects, qDebounced, sortKey, sortDir]);
 
   // Which request is current. A slow response for an old filter must not
   // overwrite a newer one — without this, typing fast can leave stale rows.
@@ -114,8 +123,28 @@ export default function BnlView({
     setDrill(r);   // detail/timeline/hist3 load inside ClientDrawer
   }
 
-  function setSort(k: SortKey | 'flags') {
-    if (k === 'flags') return;
+  // Focus toggle — optimistic; reverts if the POST fails. Updates the open
+  // drawer's copy too so the ★ stays in sync everywhere.
+  async function toggleFocus(r: BnlClient) {
+    const next = !r.focused;
+    const apply = (v: boolean) => {
+      setRows((prev) => prev.map((x) => (x.pid === r.pid ? { ...x, focused: v } : x)));
+      setDrill((d) => (d && d.pid === r.pid ? { ...d, focused: v } : d));
+    };
+    apply(next);
+    try {
+      const res = await fetch('/api/bnl/focus', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: r.pid, on: next }),
+      });
+      if (!res.ok) apply(!next);
+    } catch {
+      apply(!next);
+    }
+  }
+
+  function setSort(k: SortKey | 'flags' | 'notes') {
+    if (k === 'flags' || k === 'notes') return;
     setSortDir(sortKey === k ? (sortDir === 'desc' ? 'asc' : 'desc') : k === 'name' ? 'asc' : 'desc');
     setSortKey(k);
   }
@@ -199,6 +228,72 @@ export default function BnlView({
                 {' '}· bold = median (typical client), avg = mean (pulled up by long-tail outliers)
               </div>
             )}
+            {/* Journey trend — sparkline per leg by MOVE-IN fiscal quarter
+                (user-approved mockup 2026-08-11). All populations regardless
+                of the selector; lower is faster; green ▼ = latest quarter
+                faster than the prior one. Quarters with no completed pairs
+                are gaps, not zeros. */}
+            {(ceMilestones.trend?.length ?? 0) >= 2 && (() => {
+              const tr = ceMilestones.trend!;
+              const legPairs = ord.slice(0, -1).map((a, i) =>
+                [`${a}_${ord[i + 1]}`, `${labels[a] ?? a} → ${labels[ord[i + 1]] ?? ord[i + 1]}`] as const);
+              const e2eKey = `${ord[0]}_${ord[ord.length - 1]}`;
+              const cards = [...legPairs, [e2eKey, 'End to end'] as const];
+              return (
+                <div style={{ marginTop: 12, borderTop: '1px solid rgba(148,163,184,0.15)', paddingTop: 10 }}>
+                  <div className="bnl-sub" style={{ marginBottom: 8 }}>
+                    Trend by move-in quarter · {tr[0].q} → {tr[tr.length - 1].q} · all populations · lower is faster
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    {cards.map(([k, lbl]) => {
+                      const isE2E = k === e2eKey;
+                      const pts = tr
+                        .map((t) => ({ q: t.q, n: t.legs[k]?.n ?? 0, median: t.legs[k]?.median ?? null }))
+                        .filter((p): p is { q: string; n: number; median: number } => p.median != null);
+                      const base = {
+                        flex: isE2E ? 1.2 : 1, minWidth: isE2E ? 132 : 118,
+                        border: `1px solid ${isE2E ? 'var(--primary)' : 'rgba(148,163,184,0.2)'}`,
+                        borderRadius: 8, padding: '8px 10px',
+                      } as const;
+                      if (pts.length < 2) {
+                        return (
+                          <div key={k} style={base}>
+                            <div style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lbl}</div>
+                            <div className="bnl-sub" style={{ marginTop: 6 }}>not enough quarters</div>
+                          </div>
+                        );
+                      }
+                      const last = pts[pts.length - 1], prev = pts[pts.length - 2];
+                      const d = last.median - prev.median;
+                      const col = d < 0 ? 'var(--accent)' : d > 0 ? 'var(--warn)' : 'var(--muted)';
+                      const W = 110, H = 26, P = 3;
+                      const meds = pts.map((p) => p.median);
+                      const mn = Math.min(...meds), mx = Math.max(...meds);
+                      const x = (i: number) => P + (i * (W - 2 * P)) / (pts.length - 1);
+                      const y = (m: number) => (mx === mn ? H - 6 : (H - P) - ((m - mn) / (mx - mn)) * (H - 2 * P));
+                      const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.median).toFixed(1)}`).join(' ');
+                      return (
+                        <div key={k} style={base}
+                          title={pts.map((p) => `${p.q}: median ${Math.round(p.median)}d (n=${p.n})`).join('\n')}>
+                          <div style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lbl}</div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, margin: '2px 0 4px' }}>
+                            <span style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{Math.round(last.median)}d</span>
+                            <span style={{ fontSize: 10.5, color: col, whiteSpace: 'nowrap' }}>
+                              {d < 0 ? `▼ ${Math.abs(Math.round(d))}d faster` : d > 0 ? `▲ ${Math.round(d)}d slower` : '— flat'}
+                            </span>
+                          </div>
+                          <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: H, display: 'block' }} aria-hidden="true">
+                            <polyline points={line} fill="none" stroke={col} strokeWidth={1.8}
+                              strokeLinejoin="round" strokeLinecap="round" />
+                            <circle cx={x(pts.length - 1)} cy={y(last.median)} r={2.4} fill={col} />
+                          </svg>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         );
       })()}
@@ -243,7 +338,27 @@ export default function BnlView({
                 <option value="unaccompanied">Unaccompanied</option>
                 <option value="in_school">In school</option>
                 <option value="dq">Has DQ issue</option>
+                <option value="focus">★ Focused</option>
               </select>
+            </div>
+            <div className="fgroup">
+              <span className="flabel">Referral</span>
+              <select className="fselect" value={fRef} onChange={(e) => setFRef(e.target.value)}>
+                <option value="">Any</option>
+                <option value="psh">PSH</option>
+                <option value="rrh">RRH</option>
+                <option value="none">No referral</option>
+              </select>
+            </div>
+            <div className="fgroup">
+              <span className="flabel">Projects</span>
+              <button className="btn" onClick={() => setProjOpen((o) => !o)}
+                title="Filter the roster to one or more projects">
+                {selProjects.length ? `${selProjects.length} selected` : 'All'} {projOpen ? '▴' : '▾'}
+              </button>
+              {selProjects.length > 0 && (
+                <button className="btn" onClick={() => setSelProjects([])} title="Clear project filter">✕</button>
+              )}
             </div>
             <div className="fgroup">
               <span className="flabel">CE assessed</span>
@@ -263,6 +378,27 @@ export default function BnlView({
               </div>
             )}
           </div>
+          {/* Multi-project picker — same option chips as Deep Dive's. */}
+          {projOpen && (
+            <div style={{ marginTop: 8 }}>
+              <input className="finput" placeholder="Filter projects…" value={projQ}
+                onChange={(e) => setProjQ(e.target.value)} style={{ minWidth: 220, marginBottom: 8 }} />
+              <div className="dd-opts">
+                {projectOpts
+                  .filter((o) => !projQ || o.name.toLowerCase().includes(projQ.toLowerCase()))
+                  .map((o) => (
+                    <label key={o.id} className={`dd-opt${selProjects.includes(o.id) ? ' on' : ''}`}
+                      title={o.type ? `${o.name} · ${o.type}` : o.name}>
+                      <input type="checkbox" checked={selProjects.includes(o.id)}
+                        onChange={() => setSelProjects((s) =>
+                          s.includes(o.id) ? s.filter((x) => x !== o.id) : [...s, o.id])} />
+                      <span className="dd-nm">{o.name}</span>
+                      {o.type && <span className="ty">{o.type}</span>}
+                    </label>
+                  ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="scroll" style={loading ? { opacity: 0.55, transition: 'opacity .15s' } : undefined}>
@@ -278,9 +414,25 @@ export default function BnlView({
               {rows.map((r) => {
                 const col = r.days_homeless >= 365 ? 'var(--danger)' : r.days_homeless >= 180 ? 'var(--warn)' : 'var(--secondary)';
                 return (
-                  <tr key={r.pid} className="bnl-row" onClick={() => openDrill(r)}>
-                    <td><div className="bnl-nm bnl-drillname" style={/unsheltered/.test(r.detail ?? '') ? { color: 'var(--danger)' } : undefined}>{r.name}</div><div className="bnl-sub">{r.detail}</div></td>
+                  <tr key={r.pid} className="bnl-row" onClick={() => openDrill(r)}
+                    style={r.focused ? { background: 'rgba(234,179,8,0.08)', boxShadow: 'inset 3px 0 0 var(--warn)' } : undefined}>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                        <span className="pp-noprint" role="button"
+                          title={r.focused ? 'On the focus list — click to remove' : 'Focus this client for case conferencing'}
+                          onClick={(e) => { e.stopPropagation(); toggleFocus(r); }}
+                          style={{ cursor: 'pointer', fontSize: 14, lineHeight: 1,
+                            color: r.focused ? 'var(--warn)' : 'var(--faint)' }}>
+                          {r.focused ? '★' : '☆'}
+                        </span>
+                        <div className="bnl-nm bnl-drillname" style={/unsheltered/.test(r.detail ?? '') ? { color: 'var(--danger)' } : undefined}>{r.name}</div>
+                      </div>
+                      <div className="bnl-sub">{r.detail}</div>
+                    </td>
                     <td className="num">{r.age ?? '—'}</td>
+                    <td className="num">{(r.hh_n ?? 1) > 1
+                      ? <span title={`${r.hh_n} people in this household — open the client for the member list`}>{r.hh_n}</span>
+                      : <span className="bnl-sub">1</span>}</td>
                     <td><span className={`bnl-chip bnl-${r.status}`}>{r.status === 'active' ? 'Active' : r.status === 'housed' ? 'Housed' : 'Inactive'}</span></td>
                     <td><Flags r={r} /></td>
                     <td>{r.project ? <><span className="ty">{r.ptype ?? '?'}</span> {r.project}{r.enrolled ? null : <span className="bnl-sub" title="not a current enrollment — last known project"> (former)</span>}</> : <span className="bnl-sub">—</span>}</td>
@@ -309,6 +461,17 @@ export default function BnlView({
                           <div className="bnl-sub">{r.spdat_tool}{r.spdat_score != null ? ` · ${r.spdat_score}` : ''}</div>
                         )}</>
                       : <span className="bnl-sub">no</span>}</td>
+                    <td style={{ maxWidth: 220 }}>
+                      {(r.notes2?.length ?? 0)
+                        ? r.notes2!.map((n, i) => (
+                            <div key={i} className="bnl-sub"
+                              title={`${n.at}${n.author ? ` · ${n.author}` : ''}\n${n.body}`}
+                              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>
+                              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{n.at}</span> · {n.body}
+                            </div>
+                          ))
+                        : <span className="bnl-sub">—</span>}
+                    </td>
                   </tr>
                 );
               })}
@@ -357,6 +520,7 @@ export default function BnlView({
 
       {drill && (
         <ClientDrawer row={drill} asOf={agg.as_of} isAdmin={isAdmin}
+                      focused={drill.focused} onToggleFocus={() => toggleFocus(drill)}
                       onClose={() => setDrill(null)} />
       )}
     </>

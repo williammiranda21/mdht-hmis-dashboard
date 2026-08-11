@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../../lib/supabase-server';
 import { parseRosterQuery, queryRoster } from '../../../../lib/bnl-query';
+import { enrichRoster, focusPids } from '../../../../lib/bnl-enrich';
+import type { BnlClient } from '../../../dashboard/bnl/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,8 +19,18 @@ export async function GET(req: Request) {
   if (!viewer.canSeeBnl) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const params = parseRosterQuery(new URL(req.url).searchParams);
-  const { data, error, count } = await queryRoster(supabaseServer(), params);
+  const sb = supabaseServer();
+  // ★ Focused filter: bnl_focus is a side table (no FK to the roster), so
+  // resolve the pid list first and constrain the roster query to it.
+  let pidsIn: string[] | undefined;
+  if (params.flag === 'focus') {
+    pidsIn = await focusPids(sb);
+    if (!pidsIn.length) return NextResponse.json({ rows: [], total: 0, offset: 0 });
+  }
+  const { data, error, count } = await queryRoster(sb, params, undefined, true, pidsIn);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ rows: data ?? [], total: count ?? 0, offset: params.offset });
+  const rows = (data ?? []) as unknown as BnlClient[];
+  await enrichRoster(sb, rows);   // last-2 notes + focus marks, page-scoped
+  return NextResponse.json({ rows, total: count ?? 0, offset: params.offset });
 }

@@ -32,12 +32,16 @@ export function Flags({ r }: { r: BnlClient }) {
   );
 }
 
-export default function ClientDrawer({ row, asOf, isAdmin = false, onClose }: {
+export default function ClientDrawer({ row, asOf, isAdmin = false, onClose, focused, onToggleFocus }: {
   row: BnlClient;
   /** Roster generation date — the "and counting" clock for un-housed journeys. */
   asOf?: string | null;
   isAdmin?: boolean;
   onClose: () => void;
+  /** case-conferencing focus mark — button hidden when no handler is supplied
+   *  (e.g. the cohort dashboard's drawer) */
+  focused?: boolean;
+  onToggleFocus?: () => void;
 }) {
   const [timeline, setTimeline] = useState<BnlTimelineEvent[] | null>(null);
   const [hist3, setHist3] = useState<BnlHist3 | null>(null);
@@ -80,6 +84,14 @@ export default function ClientDrawer({ row, asOf, isAdmin = false, onClose }: {
         <button className="btn pp-noprint" style={{ float: 'right', marginLeft: 8 }}
           onClick={() => window.print()}
           title="Opens the print dialog — choose “Save as PDF”">🖨 PDF</button>
+        {onToggleFocus && (
+          <button className="btn pp-noprint"
+            style={{ float: 'right', marginLeft: 8, color: focused ? 'var(--warn)' : undefined }}
+            onClick={onToggleFocus}
+            title={focused ? 'On the focus list — click to remove' : 'Highlight this client for current / future meetings'}>
+            {focused ? '★ Focused' : '☆ Focus'}
+          </button>
+        )}
         <button className="bnl-x pp-noprint" onClick={onClose}>✕</button>
         <h3>{row.name} <span className="bnl-sub">· age {row.age ?? '—'}</span></h3>
         <div className="bnl-sub" style={{ fontFamily: 'ui-monospace, monospace', marginTop: 2, cursor: 'pointer' }}

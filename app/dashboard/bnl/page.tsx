@@ -1,5 +1,6 @@
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
 import { parseRosterQuery, queryRoster, PAGE_SIZE } from '../../../lib/bnl-query';
+import { enrichRoster } from '../../../lib/bnl-enrich';
 import BnlView from './BnlView';
 import type { BnlAgg, BnlClient, CeMilestonesAgg } from './types';
 
@@ -43,14 +44,19 @@ export default async function BnlPage() {
   const supabase = supabaseServer();
   const params = parseRosterQuery(new URLSearchParams({ limit: String(PAGE_SIZE) }));
 
-  const [aggRes, msRes, pageRes] = await Promise.all([
+  const [aggRes, msRes, pageRes, projRes] = await Promise.all([
     supabase.from('meta').select('value').eq('key', 'bnl_agg').maybeSingle(),
     supabase.from('meta').select('value').eq('key', 'ce_milestones').maybeSingle(),
     queryRoster(supabase, params),
+    // options for the multi-project filter (name + type; small)
+    supabase.from('projects').select('project_id, name, type_name').order('name'),
   ]);
 
   if (pageRes.error) throw pageRes.error;
   const rows = (pageRes.data ?? []) as unknown as BnlClient[];
+  await enrichRoster(supabase, rows);   // last-2 notes + focus marks
+  const projectOpts = ((projRes.data ?? []) as { project_id: number; name: string | null; type_name: string | null }[])
+    .map((p) => ({ id: Number(p.project_id), name: p.name ?? String(p.project_id), type: p.type_name }));
   const agg = (aggRes.data?.value ?? null) as BnlAgg | null;
   // Absent until the milestones regen+load has run — the card simply hides.
   const ceMilestones = (msRes.data?.value ?? null) as CeMilestonesAgg | null;
@@ -86,5 +92,7 @@ export default async function BnlPage() {
     );
   }
 
-  return <BnlView initialRows={rows} initialTotal={pageRes.count ?? 0} agg={agg} ceMilestones={ceMilestones} isAdmin={viewer.isAdmin} />;
+  return <BnlView initialRows={rows} initialTotal={pageRes.count ?? 0} agg={agg}
+                  ceMilestones={ceMilestones} isAdmin={viewer.isAdmin}
+                  projectOpts={projectOpts} />;
 }
