@@ -53,10 +53,13 @@ export async function GET(req: Request) {
   }
 
   const cohortId = Number(id);
-  const [cRes, mRes, sRes] = await Promise.all([
+  const [cRes, mRes, sRes, msRes] = await Promise.all([
     sb.from('cohorts').select('id, name, description, created_by, created_at').eq('id', cohortId).maybeSingle(),
     sb.from('cohort_members').select('pid, added_at').eq('cohort_id', cohortId),
     sb.from('cohort_snapshots').select('captured_on, counts').eq('cohort_id', cohortId).order('captured_on'),
+    // system-wide journey benchmark — rendered as the ghost figures on the
+    // cohort's journey bar ("are we faster than the system?")
+    sb.from('meta').select('value').eq('key', 'ce_milestones').maybeSingle(),
   ]);
   if (cRes.error) return NextResponse.json({ error: cRes.error.message }, { status: 500 });
   if (!cRes.data) return NextResponse.json({ error: 'not found' }, { status: 404 });
@@ -69,13 +72,14 @@ export async function GET(req: Request) {
     days_homeless: number | null; chronic: boolean; returned: boolean;
     risk_band: string | null; milestones: Record<string, string | null> | null;
     as_of: string | null;
+    ms_stage: string | null; ms_wait: number | null;
     // server-side only (housed-curve reconstruction) — stripped before the response
     hist3?: { placed?: Placed[] } | null;
   };
   const members: Member[] = [];
   for (let i = 0; i < pids.length; i += 200) {
     const r = await sb.from('bnl_clients')
-      .select('pid, name, age, status, project, ptype, enrolled, days_homeless, chronic, returned, risk_band, milestones, as_of, hist3')
+      .select('pid, name, age, status, project, ptype, enrolled, days_homeless, chronic, returned, risk_band, milestones, as_of, ms_stage, ms_wait, hist3')
       .in('pid', pids.slice(i, i + 200));
     if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
     members.push(...((r.data ?? []) as Member[]));
@@ -110,17 +114,11 @@ export async function GET(req: Request) {
       const d = Math.round((+new Date(ms['movein']) - +new Date(ms['ident'])) / 86400000);
       if (d >= 0) (legDays['ident_movein'] ??= []).push(d);
     }
-    // Live stalls — mirrors bnl_core's ce_milestones `waiting` semantics:
-    // ACTIVE members not yet moved in, bucketed by furthest milestone
-    // reached, measuring days since that date. Feeds the under-segment
-    // "N waiting · Xd" line of the shared JourneyBar.
-    if (m.status === 'active' && !ms['movein'] && asOf) {
-      const last = [...MS_ORDER].reverse().find((k) => k !== 'movein' && ms[k]);
-      if (last) {
-        const d = Math.round((+new Date(asOf) - +new Date(ms[last]!)) / 86400000);
-        if (d >= 0) (waitDays[last] ??= []).push(d);
-      }
-    }
+    // Live stalls — straight from the ETL's per-row worklist fields
+    // (ms_stage/ms_wait, the SAME source as the BNL journey bar), so the
+    // cohort bar's waiting numbers and the click-through member list can
+    // never disagree.
+    if (m.ms_stage && m.ms_wait != null) (waitDays[m.ms_stage] ??= []).push(m.ms_wait);
   }
 
   // ── Housed % by EVENT date, not refresh date ────────────────────────────
@@ -156,6 +154,32 @@ export async function GET(req: Request) {
       if (at >= tEnd) break;
     }
   }
+  // ── Housing retention — did the housing stick? ──────────────────────────
+  // Anchor = each member's FIRST placement in the 3y window; retained at a
+  // horizon = no HUD-qualifying return within that many days of it. Members
+  // whose placement is YOUNGER than a horizon are excluded from that
+  // horizon's denominator (censoring) — never counted as retained by default.
+  const firstPlaced = members
+    .map((m) => (m.hist3?.placed ?? [])
+      .map((p) => ({ s: D(p.s), ret: p.ret ? D(p.ret) : null }))
+      .sort((a, b) => a.s - b.s)[0])
+    .filter((p): p is { s: number; ret: number | null } => p != null);
+  const retDays = firstPlaced.filter((p) => p.ret != null)
+    .map((p) => Math.round(((p.ret as number) - p.s) / DAY));
+  const retention = {
+    placed_n: firstPlaced.length,
+    returned_n: retDays.length,
+    median_days_to_return: median(retDays),
+    horizons: [180, 365, 730].map((h) => {
+      const eligible = firstPlaced.filter((p) => tEnd - p.s >= h * DAY);
+      const kept = eligible.filter((p) => p.ret == null || (p.ret as number) - p.s > h * DAY);
+      return {
+        days: h, n: eligible.length, kept: kept.length,
+        pct: eligible.length ? (100 * kept.length) / eligible.length : null,
+      };
+    }),
+  };
+
   for (const m of members) delete m.hist3;   // heavy + drawer fetches its own
 
   members.sort((a, b) =>
@@ -176,6 +200,9 @@ export async function GET(req: Request) {
       legs: Object.fromEntries(Object.entries(legDays).map(([k, v]) => [k, { n: v.length, median: median(v), mean: mean(v) }])),
       waiting: Object.fromEntries(Object.entries(waitDays).map(([k, v]) => [k, { n: v.length, median: median(v), mean: mean(v) }])),
       housed_curve: housedCurve,
+      retention,
+      // system benchmark legs (medians/means) for the ghost figures
+      sys_legs: (msRes.data?.value as { housed?: unknown } | null)?.housed ?? null,
     },
   });
 }

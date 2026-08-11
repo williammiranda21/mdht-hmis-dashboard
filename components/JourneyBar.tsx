@@ -22,13 +22,17 @@ export interface JourneyLegStat {
   mean?: number | null;
 }
 
-export default function JourneyBar({ order, labels, housed, waiting, onLegClick }: {
+export default function JourneyBar({ order, labels, housed, waiting, onLegClick, benchmark = null }: {
   order: string[];                                      // milestone keys, journey order
   labels: Record<string, string>;                       // key → display label
   housed: Record<string, JourneyLegStat | undefined>;   // completed legs, keyed `${a}_${b}`
   waiting?: Record<string, JourneyLegStat | undefined>; // live stalls, keyed by milestone
   /** makes each "N waiting" line clickable — the worklist for that leg */
   onLegClick?: (milestone: string) => void;
+  /** comparison legs (e.g. the SYSTEM medians under a cohort's bar) — renders
+   *  a muted "sys Nd" beside each completed median, green/amber tinting the
+   *  cohort figure when it beats/trails the benchmark by 25%+ */
+  benchmark?: Record<string, JourneyLegStat | undefined> | null;
 }) {
   const legs = order.slice(0, -1).map((a, i) => [a, order[i + 1]] as const);
   const meds = legs.map(([a, b]) => housed[`${a}_${b}`]?.median ?? null);
@@ -49,16 +53,23 @@ export default function JourneyBar({ order, labels, housed, waiting, onLegClick 
             {!isLast && (() => {
               const w = waiting?.[k];
               const liveIsStory = (w?.median ?? 0) >= 2 * Math.max(s?.median ?? 0, 7);
+              const bm = benchmark?.[`${k}_${b}`];
+              // faster/slower than the benchmark by 25%+ → tint the median
+              const vsBm = s?.median != null && bm?.median != null && bm.median > 0
+                ? (s.median <= bm.median * 0.75 ? 'var(--accent)'
+                  : s.median >= bm.median * 1.25 ? 'var(--warn)' : null)
+                : null;
               return (
                 <span
-                  title={`${labels[k] ?? k} → ${labels[b] ?? b}${s?.n ? ` — completed: median ${s.median}d · avg ${s.mean}d · ${s.n} clients${isWorst ? ' · longest leg' : ''}` : ' — no completed pairs'}${w?.n ? ` · waiting now: ${w.n} clients, median ${w.median}d${w.mean != null ? ` · avg ${w.mean}d` : ''} and counting` : ''}`}
+                  title={`${labels[k] ?? k} → ${labels[b] ?? b}${s?.n ? ` — completed: median ${s.median}d · avg ${s.mean}d · ${s.n} clients${isWorst ? ' · longest leg' : ''}` : ' — no completed pairs'}${bm?.median != null ? ` · system median ${bm.median}d` : ''}${w?.n ? ` · waiting now: ${w.n} clients, median ${w.median}d${w.mean != null ? ` · avg ${w.mean}d` : ''} and counting` : ''}`}
                   style={{ position: 'relative', display: 'flex', alignItems: 'center',
                     flexGrow: Math.max(s?.median ?? 0, 4), flexBasis: 84, minWidth: 84, padding: '0 10px' }}>
                   <span style={{ position: 'absolute', top: -19, left: 0, right: 0, textAlign: 'center',
                     fontSize: 11.5, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
                     color: isWorst ? 'var(--warn)' : 'var(--muted)' }}>
-                    <b>{s?.median != null ? `${s.median}d` : '—'}</b>
+                    <b style={vsBm ? { color: vsBm } : undefined}>{s?.median != null ? `${s.median}d` : '—'}</b>
                     {s?.mean != null && <span style={{ fontSize: 10, opacity: .85 }}> · avg {Math.round(s.mean)}d</span>}
+                    {bm?.median != null && <span style={{ fontSize: 10, opacity: .75 }}> · sys {bm.median}d</span>}
                     {isWorst ? ' ⏳' : ''}
                   </span>
                   <span style={{ display: 'block', width: '100%', height: 6, borderRadius: 3,

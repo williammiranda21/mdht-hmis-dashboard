@@ -27,6 +27,8 @@ interface Member {
   project: string | null; ptype: string | null; enrolled: boolean;
   days_homeless: number | null; chronic: boolean; returned: boolean; risk_band: string | null;
   as_of: string | null;
+  /** live CE worklist leg + days on it (ETL fields — same source as the bar) */
+  ms_stage: string | null; ms_wait: number | null;
 }
 interface Detail {
   cohort: { id: number; name: string; description: string | null; created_by: string | null; created_at: string };
@@ -41,6 +43,13 @@ interface Detail {
     waiting: Record<string, { n: number; median: number | null; mean: number | null }>;
     /** weekly housed % by ACTUAL event dates (placements/returns), not refresh dates */
     housed_curve?: { d: string; pct: number; n: number }[];
+    /** did the housing stick — from each member's FIRST placement */
+    retention?: {
+      placed_n: number; returned_n: number; median_days_to_return: number | null;
+      horizons: { days: number; n: number; kept: number; pct: number | null }[];
+    };
+    /** system-wide journey legs (meta.ce_milestones.housed) — the ghost figures */
+    sys_legs?: Record<string, { n: number; median: number | null; mean?: number | null }> | null;
   };
 }
 
@@ -58,6 +67,10 @@ export default function CohortsView() {
   // row is slim, so fetch the full roster row by pid first.
   const [drill, setDrill] = useState<BnlClient | null>(null);
   const [drillAsOf, setDrillAsOf] = useState<string | null>(null);
+  // Journey-bar worklist: clicking "N waiting" filters the member table to
+  // that leg, longest-waiting first (same behavior as the BNL page).
+  const [fStage, setFStage] = useState('');
+  useEffect(() => setFStage(''), [sel]);   // a stage filter never outlives its cohort
 
   async function openMember(m: Member) {
     try {
@@ -183,13 +196,17 @@ export default function CohortsView() {
               </span>
             </div>
             <JourneyBar order={MS_ORDER} labels={MS_LABELS}
-                        housed={detail.agg.legs} waiting={detail.agg.waiting ?? {}} />
+                        housed={detail.agg.legs} waiting={detail.agg.waiting ?? {}}
+                        benchmark={detail.agg.sys_legs}
+                        onLegClick={(k) => setFStage(k)} />
             {detail.agg.legs['ident_movein']?.median != null && (
               <div className="bnl-sub" style={{ marginTop: 6 }}>
                 End to end {MS_LABELS['ident'] ?? 'Identified'} → {MS_LABELS['movein'] ?? 'Moved in'}:{' '}
                 <b style={{ color: 'var(--strong)' }}>{fmtInt(detail.agg.legs['ident_movein'].median!)}d</b> median
                 {detail.agg.legs['ident_movein'].mean != null && <> · avg {Math.round(detail.agg.legs['ident_movein'].mean!)}d</>}
                 {' '}(n={detail.agg.legs['ident_movein'].n})
+                {detail.agg.sys_legs?.['ident_movein']?.median != null &&
+                  <> · system {fmtInt(detail.agg.sys_legs['ident_movein'].median!)}d</>}
                 {' '}· above each segment: completed legs · below: members on that leg right now, days so far
               </div>
             )}
@@ -265,6 +282,51 @@ export default function CohortsView() {
             </div>
           )}
 
+          {/* Returns after first housing — HUD M2 framing (first placement,
+              returns within windows; a later re-housing does NOT erase the
+              return — that is exactly how the SPM counts it). Framed as the
+              EVENT ("N returned within…"), never as "retention", because a
+              member can be housed today AND have a counted return — a
+              "retention 0%" read as current status started an argument
+              (user, 2026-08-11). Denominators are censored: only first
+              placements at least that old are gradeable. "Housed today"
+              alongside keeps both truths on screen. */}
+          {(detail.agg.retention?.placed_n ?? 0) > 0 && (() => {
+            const rt = detail.agg.retention!;
+            const H_LBL: Record<number, string> = { 180: '6 mo', 365: '12 mo', 730: '24 mo' };
+            return (
+              <div className="panel" style={{ marginTop: 16, padding: '12px 18px' }}>
+                <div className="hc-sub" style={{ margin: '0 0 8px' }}>
+                  Returns after first housing
+                  <span className="bnl-sub" style={{ marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>
+                    HUD return test, from each member&apos;s first placement · re-housing later doesn&apos;t erase a return (SPM M2 convention)
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', alignItems: 'baseline', fontSize: 13 }}>
+                  {rt.horizons.map((h) => {
+                    const returned = h.n - h.kept;
+                    return (
+                      <span key={h.days} title={h.n
+                        ? `${h.n} first placement${h.n === 1 ? '' : 's'} old enough to grade at ${H_LBL[h.days]}; ${returned} had a HUD-qualifying return within that window`
+                        : `no first placement is ${H_LBL[h.days]} old yet — nothing to grade`}>
+                        <span className="bnl-sub">within {H_LBL[h.days] ?? `${h.days}d`}: </span>
+                        {h.n
+                          ? <><b style={{ fontVariantNumeric: 'tabular-nums', color: returned ? 'var(--warn)' : 'var(--accent)' }}>{returned}</b><span className="bnl-sub"> of {h.n} returned</span></>
+                          : <span className="bnl-sub">— too soon</span>}
+                      </span>
+                    );
+                  })}
+                  <span className="bnl-sub" style={{ marginLeft: 'auto' }}>
+                    {rt.returned_n
+                      ? <>{rt.returned_n} return{rt.returned_n === 1 ? '' : 's'} overall{rt.median_days_to_return != null && <> · median {fmtInt(rt.median_days_to_return)}d after housing</>}</>
+                      : 'no returns recorded'}
+                    {' '}· <b style={{ color: 'var(--accent)' }}>{detail.agg.housed}</b> of {rt.placed_n} ever-housed are housed today
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Members */}
           <div className="panel" style={{ marginTop: 16 }}>
             <div className="panel-h">
@@ -281,6 +343,14 @@ export default function CohortsView() {
                 if (r?.ok) { setSel(null); setDetail(null); loadList(); }
               }}>Delete cohort</button>
             </div>
+            {fStage && (
+              <div style={{ padding: '0 18px 10px' }}>
+                <button className="btn" onClick={() => setFStage('')}
+                  title="Showing members stuck on this CE leg (from the journey bar), longest-waiting first. Click to clear.">
+                  ⏳ Waiting at {MS_LABELS[fStage] ?? fStage} · {detail.members.filter((m) => m.ms_stage === fStage).length} member{detail.members.filter((m) => m.ms_stage === fStage).length === 1 ? '' : 's'} ✕
+                </button>
+              </div>
+            )}
             <div style={{ padding: '0 18px 12px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <textarea className="finput" rows={2} style={{ minWidth: 320, flex: 1 }}
                 placeholder="Paste hashed client IDs (one per line, or comma/space separated)…"
@@ -300,11 +370,15 @@ export default function CohortsView() {
                 <thead>
                   <tr>
                     <th>Client</th><th className="num">Age</th><th>Status</th><th>Project</th>
-                    <th className="num">Days homeless</th><th>Flags</th><th className="num"></th>
+                    <th className="num">Days homeless</th><th className="num">CE leg wait</th><th>Flags</th><th className="num"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {detail.members.map((m) => (
+                  {(fStage
+                    ? detail.members.filter((m) => m.ms_stage === fStage)
+                        .sort((a, b) => (b.ms_wait ?? 0) - (a.ms_wait ?? 0))
+                    : detail.members
+                  ).map((m) => (
                     /* row opens the shared client card; CopyId and the remove
                        button stop propagation so they stay independent */
                     <tr key={m.pid} onClick={() => openMember(m)} style={{ cursor: 'pointer' }}
@@ -317,6 +391,9 @@ export default function CohortsView() {
                       <td><span className={`bnl-chip bnl-${m.status}`}>{m.status}</span></td>
                       <td>{m.ptype && <span className="ty">{m.ptype}</span>} {m.project ?? '—'}{!m.enrolled && m.project ? <span className="bnl-sub"> (former)</span> : ''}</td>
                       <td className="num">{m.days_homeless != null ? fmtInt(m.days_homeless) : '—'}</td>
+                      <td className="num">{m.ms_wait != null
+                        ? <>{fmtInt(m.ms_wait)}d <span className="bnl-sub">· {MS_LABELS[m.ms_stage ?? ''] ?? m.ms_stage}</span></>
+                        : <span className="bnl-sub">—</span>}</td>
                       <td>
                         {m.chronic && <span className="bnl-fp bnl-fp-chr">CHRONIC</span>}
                         {m.returned && <span className="bnl-fp bnl-fp-ret">RETURNED</span>}
@@ -334,7 +411,11 @@ export default function CohortsView() {
                     </tr>
                   ))}
                   {detail.members.length === 0 && (
-                    <tr><td colSpan={7} className="empty">No members yet — paste IDs above.</td></tr>
+                    <tr><td colSpan={8} className="empty">No members yet — paste IDs above.</td></tr>
+                  )}
+                  {detail.members.length > 0 && fStage
+                    && detail.members.every((m) => m.ms_stage !== fStage) && (
+                    <tr><td colSpan={8} className="empty">No members are waiting at {MS_LABELS[fStage] ?? fStage} right now.</td></tr>
                   )}
                 </tbody>
               </table>
