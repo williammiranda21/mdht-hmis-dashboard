@@ -509,6 +509,7 @@ def build_bnl_clients(bnl: dict | None) -> list[dict]:
             "foster": r["foster"], "jj": r["jj"],
             "ref_type": r["ref_type"], "ref_status": r["ref_status"],
             "ref_date": r["ref_date"], "ref_prov": r["ref_prov"],
+            "referrals": r.get("referrals"),
             "risk_pts": r["risk_pts"], "risk_max": r["risk_max"],
             "risk_band": r.get("risk_band"), "risk_detail": r.get("risk_detail"),
             "milestones": r.get("milestones"),

@@ -160,20 +160,23 @@ export default function BnlView({
         </span>
       </div>
 
-      {/* CE journey — SYSTEM view (all populations, unaffected by the selector):
-          median days per milestone leg for the housed cohort, the longest leg
-          highlighted, plus where not-yet-housed clients are waiting right now.
-          Renders from ceMilestones.order so future milestones appear untouched. */}
+      {/* CE journey — follows the population selector (per-pop stats are
+          precomputed in bnl_core; the same POPS predicates drive the roster
+          query, so a clicked waiting number matches the filtered table under
+          every population). Falls back to the system view until a meta
+          payload carrying `pops` is loaded. */}
       {ceMilestones && (() => {
         const labels = Object.fromEntries(MILESTONES);
         const ord = ceMilestones.order;
-        const total = ceMilestones.housed[`${ord[0]}_${ord[ord.length - 1]}`];
+        const ms = ceMilestones.pops?.[pop] ?? ceMilestones;
+        const total = ms.housed[`${ord[0]}_${ord[ord.length - 1]}`];
         return (
           <div className="panel" style={{ marginTop: 16, padding: '12px 18px' }}>
             <div className="hc-sub" style={{ margin: '0 0 10px' }}>
               CE journey — median days between milestones
               <span className="bnl-sub" style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
-                clients housed in the last {ceMilestones.window_months} months · all populations
+                {pop === 'family' ? 'households' : 'clients'} housed in the last {ceMilestones.window_months} months
+                {' '}· {ceMilestones.pops?.[pop] ? POP_DEFS[pop].label : 'all populations'}
               </span>
             </div>
             {/* The bar itself is shared with the cohort dashboard — see
@@ -181,7 +184,7 @@ export default function BnlView({
                 worst-leg warn, live-wait line) live there. Clicking a waiting
                 number filters the roster below to that leg's worklist. */}
             <JourneyBar order={ord} labels={labels}
-                        housed={ceMilestones.housed} waiting={ceMilestones.waiting}
+                        housed={ms.housed} waiting={ms.waiting}
                         onLegClick={(k) => {
                           setFStage(k);
                           setSortKey('ms_wait');

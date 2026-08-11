@@ -1,0 +1,17 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Referral history on the client card (user request 2026-08-11)
+--
+-- The raw sources hold EVERY referral, but the roster carried only the single
+-- headline pick — so a same-day canceled+accepted pair showed only one side
+-- of the story. `referrals` = the client's full referral list, newest first
+-- (capped at 12): [{date, type, status, prov}] from Event.csv + the PSH
+-- referral side-car. The drawer's Housing-referral tile lists them under the
+-- headline. The headline pick itself is now live-first (accepted/pending
+-- outrank canceled/declined/rejected), and only a LIVE referral advances the
+-- CE journey's Referred milestone.
+--
+-- Run in the Supabase SQL editor. Idempotent — safe to re-run.
+-- Then reload: generate_bnl.py + upsert --only bnl_clients,bnl_flow,meta
+-- + prune_stale_bnl.py.
+-- ─────────────────────────────────────────────────────────────────────────────
+alter table bnl_clients add column if not exists referrals jsonb;

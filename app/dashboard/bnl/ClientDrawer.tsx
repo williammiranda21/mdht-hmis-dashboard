@@ -118,7 +118,22 @@ export default function ClientDrawer({ row, asOf, isAdmin = false, onClose }: {
           <div className="bnl-mg"><div className="k">Monthly income</div><div className="v num">{detail ? (detail.income != null ? `$${detail.income.toLocaleString()}` : '—') : '…'}</div><div className="bnl-sub">{detail?.income_date ? `as of ${detail.income_date}` : ''}</div></div>
           <div className="bnl-mg"><div className="k">DV</div><div className="v" style={{ fontSize: '.8rem' }}>{!detail ? '…' : detail.dv_fleeing ? <b style={{ color: 'var(--danger)' }}>Currently fleeing</b> : detail.dv_survivor ? 'Survivor' : detail.dv_survivor === false ? 'No' : '—'}</div></div>
           <div className="bnl-mg"><div className="k">Foster · Juv. justice</div><div className="v" style={{ fontSize: '.8rem' }}>{!detail ? '…' : <>{detail.foster == null ? 'unk' : detail.foster ? 'Yes' : 'No'} · {detail.jj == null ? 'unk' : detail.jj ? 'Yes' : 'No'}</>}</div></div>
-          <div className="bnl-mg"><div className="k">Housing referral</div><div className="v" style={{ fontSize: '.8rem' }}>{row.ref_type ? <>{row.ref_type} · {row.ref_status}{row.ref_date ? ` · ${row.ref_date}` : ''}{row.ref_prov && <div className="bnl-sub">{row.ref_prov}</div>}</> : '—'}</div></div>
+          <div className="bnl-mg"><div className="k">Housing referral</div><div className="v" style={{ fontSize: '.8rem' }}>
+            {row.ref_type ? <>{row.ref_type} · {row.ref_status}{row.ref_date ? ` · ${row.ref_date}` : ''}{row.ref_prov && <div className="bnl-sub">{row.ref_prov}</div>}</> : '—'}
+            {/* the rest of the history — the headline above is the live-first
+                pick, but a same-day canceled referral is part of the story */}
+            {(detail?.referrals?.length ?? 0) > 1 && (
+              <div className="bnl-sub" style={{ marginTop: 4, lineHeight: 1.5 }}>
+                {detail!.referrals!
+                  .filter((x) => !(x.date === row.ref_date && x.status === row.ref_status && x.prov === row.ref_prov))
+                  .slice(0, 3)
+                  .map((x, i) => (
+                    <div key={i}>also: {x.status ?? '?'} · {x.date ?? '—'}{x.prov ? ` · ${x.prov}` : ''}</div>
+                  ))}
+                {detail!.referrals!.length > 4 && <div>+ {detail!.referrals!.length - 4} earlier</div>}
+              </div>
+            )}
+          </div></div>
           {/* Household roster — every population, not just Family: who
               shares the current enrollment's household. HoH badged, ages
               in parens (minors read directly off the age). */}

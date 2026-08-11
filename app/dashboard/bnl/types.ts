@@ -98,6 +98,9 @@ export interface BnlDetail {
    *  then oldest-first). null/1 for solo or unknown-household clients. */
   hh_n: number | null;
   hh_members: { pid: string; name: string; age: number | null; hoh: boolean }[] | null;
+  /** full referral history, newest first (Event.csv + PSH side-car, capped 12).
+   *  The roster's ref_* fields are the live-first headline pick from this. */
+  referrals: { date: string | null; type: string | null; status: string | null; prov: string | null }[] | null;
   dq: string[];
   /** [label, points] per scored youth-risk factor; null/[] when nothing scored. */
   risk_detail: [string, number][] | null;
@@ -119,13 +122,21 @@ export const MILESTONES: [string, string][] = [
   ['movein', 'Moved in'],
 ];
 
-/** meta.ce_milestones — system-wide leg statistics (built in bnl_core.py). */
+/** meta.ce_milestones — journey-leg statistics (built in bnl_core.py).
+ *  Top level = all populations (the cohort dashboard's system benchmark);
+ *  `pops` carries the same shape per population so the BNL card can follow
+ *  the page's population selector. Optional for one refresh cycle: an older
+ *  meta payload without it falls back to the system view. */
 export interface CeMilestonesAgg {
   as_of?: string;
   order: string[];         // milestone keys in journey order (ETL registry)
   window_months: number;
   housed: Record<string, { n: number; median: number | null; mean: number | null }>;
   waiting: Record<string, { n: number; median: number | null; mean?: number | null }>;
+  pops?: Record<string, {
+    housed: Record<string, { n: number; median: number | null; mean: number | null }>;
+    waiting: Record<string, { n: number; median: number | null; mean?: number | null }>;
+  }>;
 }
 
 /**
