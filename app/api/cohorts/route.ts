@@ -62,17 +62,20 @@ export async function GET(req: Request) {
   if (!cRes.data) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
   const pids = ((mRes.data ?? []) as { pid: string }[]).map((m) => m.pid);
+  type Placed = { s: string; e: string; k: string; open: boolean; ret?: string | null };
   type Member = {
     pid: string; name: string | null; age: number | null; status: string;
     project: string | null; ptype: string | null; enrolled: boolean;
     days_homeless: number | null; chronic: boolean; returned: boolean;
     risk_band: string | null; milestones: Record<string, string | null> | null;
     as_of: string | null;
+    // server-side only (housed-curve reconstruction) — stripped before the response
+    hist3?: { placed?: Placed[] } | null;
   };
   const members: Member[] = [];
   for (let i = 0; i < pids.length; i += 200) {
     const r = await sb.from('bnl_clients')
-      .select('pid, name, age, status, project, ptype, enrolled, days_homeless, chronic, returned, risk_band, milestones, as_of')
+      .select('pid, name, age, status, project, ptype, enrolled, days_homeless, chronic, returned, risk_band, milestones, as_of, hist3')
       .in('pid', pids.slice(i, i + 200));
     if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
     members.push(...((r.data ?? []) as Member[]));
@@ -120,6 +123,41 @@ export async function GET(req: Request) {
     }
   }
 
+  // ── Housed % by EVENT date, not refresh date ────────────────────────────
+  // Reconstructed from each member's hist3 placements: housed from the actual
+  // placement start until its HUD-qualifying return (`ret`, same M2 test as
+  // the roster flag). A movein placement with no return ends at the project
+  // exit (left PH to a non-perm destination); exit->PH placements and open
+  // stays run to the data as_of. Weekly samples. The cohort_snapshots series
+  // stays alongside as the as-measured audit trail — if a snapshot dot and
+  // this line disagree for the same date, someone edited history after the
+  // fact (backdated move-ins, corrected exits).
+  const DAY = 86400000;
+  const D = (s: string) => +new Date(`${s}T00:00:00Z`);
+  const tEnd = asOf ? D(asOf) : Date.now();
+  const intervals = members.map((m) =>
+    (m.hist3?.placed ?? []).map((p) => {
+      const s = D(p.s);
+      const e = p.ret ? D(p.ret) : (p.k === 'exit' || p.open) ? tEnd : D(p.e);
+      return [s, Math.max(s, e)] as [number, number];
+    }));
+  const housedCurve: { d: string; pct: number; n: number }[] = [];
+  const starts = intervals.flat().map(([s]) => s);
+  if (starts.length && members.length) {
+    const t0 = Math.min(...starts);
+    for (let t = t0; ; t += 7 * DAY) {
+      const at = Math.min(t, tEnd);
+      const n = intervals.filter((iv) => iv.some(([s, e]) => s <= at && at <= e)).length;
+      housedCurve.push({
+        d: new Date(at).toISOString().slice(0, 10),
+        pct: (100 * n) / members.length,
+        n,
+      });
+      if (at >= tEnd) break;
+    }
+  }
+  for (const m of members) delete m.hist3;   // heavy + drawer fetches its own
+
   members.sort((a, b) =>
     ({ active: 0, housed: 1, inactive: 2 }[a.status] ?? 3) - ({ active: 0, housed: 1, inactive: 2 }[b.status] ?? 3)
     || (a.name ?? '').localeCompare(b.name ?? ''));
@@ -137,6 +175,7 @@ export async function GET(req: Request) {
       median_days_homeless: median(dh),
       legs: Object.fromEntries(Object.entries(legDays).map(([k, v]) => [k, { n: v.length, median: median(v), mean: mean(v) }])),
       waiting: Object.fromEntries(Object.entries(waitDays).map(([k, v]) => [k, { n: v.length, median: median(v), mean: mean(v) }])),
+      housed_curve: housedCurve,
     },
   });
 }

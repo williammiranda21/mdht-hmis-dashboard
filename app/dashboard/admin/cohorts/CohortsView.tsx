@@ -39,6 +39,8 @@ interface Detail {
     median_days_homeless: number | null;
     legs: Record<string, { n: number; median: number | null; mean: number | null }>;
     waiting: Record<string, { n: number; median: number | null; mean: number | null }>;
+    /** weekly housed % by ACTUAL event dates (placements/returns), not refresh dates */
+    housed_curve?: { d: string; pct: number; n: number }[];
   };
 }
 
@@ -193,8 +195,58 @@ export default function CohortsView() {
             )}
           </div>
 
-          {/* Trend — % housed per refresh capture */}
-          {detail.snapshots.length > 0 && (
+          {/* Trend — housed % by ACTUAL event dates (placements / HUD returns),
+              reconstructed retroactively; refresh snapshots overlay as dots.
+              A dot off the line = the data was edited after that capture
+              (backdated move-in, corrected exit) — that divergence is signal.
+              Falls back to the old snapshot bars when no placements exist. */}
+          {(detail.agg.housed_curve?.length ?? 0) > 1 ? (() => {
+            const pts = detail.agg.housed_curve!;
+            const W = 860, H = 130, PAD = 8, LBL = 14;
+            const t0 = +new Date(pts[0].d), t1 = +new Date(pts[pts.length - 1].d);
+            const maxP = Math.max(10, ...pts.map((p) => p.pct),
+              ...detail.snapshots.map((s) => s.counts.housed_pct ?? 0)) * 1.15;
+            const sx = (d: string) => PAD + ((+new Date(d) - t0) / Math.max(t1 - t0, 1)) * (W - 2 * PAD);
+            const sy = (p: number) => (H - LBL) - PAD - (p / maxP) * ((H - LBL) - 2 * PAD);
+            const line = pts.map((p) => `${sx(p.d).toFixed(1)},${sy(p.pct).toFixed(1)}`).join(' ');
+            const last = pts[pts.length - 1];
+            return (
+              <div className="panel" style={{ marginTop: 16, padding: '12px 18px' }}>
+                <div className="hc-sub" style={{ margin: '0 0 10px' }}>
+                  Housed % over time
+                  <span className="bnl-sub" style={{ marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>
+                    by actual housing / return dates · ● = refresh snapshots (as measured)
+                  </span>
+                </div>
+                <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 130, display: 'block' }} role="img"
+                  aria-label={`Cohort housed percentage over time, currently ${last.pct.toFixed(0)}%`}>
+                  {/* quarter gridlines */}
+                  {[0.25, 0.5, 0.75].map((f) => (
+                    <line key={f} x1={PAD} x2={W - PAD} y1={sy(maxP * f)} y2={sy(maxP * f)}
+                      stroke="var(--faint)" strokeWidth={0.5} opacity={0.5} />
+                  ))}
+                  <polyline points={line} fill="none" stroke="var(--accent)" strokeWidth={2}
+                    strokeLinejoin="round" strokeLinecap="round" />
+                  {detail.snapshots.map((s) => {
+                    const pct = s.counts.housed_pct ?? 0;
+                    return (
+                      <circle key={s.captured_on} cx={sx(s.captured_on)} cy={sy(pct)} r={3.5}
+                        fill="var(--primary)" stroke="var(--panel, #fff0)" strokeWidth={1}>
+                        <title>{`snapshot ${s.captured_on}: ${pct.toFixed(0)}% housed (n=${s.counts.n ?? '—'})`}</title>
+                      </circle>
+                    );
+                  })}
+                  <text x={Math.min(sx(last.d), W - PAD - 4)} y={Math.max(sy(last.pct) - 6, 10)}
+                    textAnchor="end" fontSize={11.5} fontWeight={700} fill="var(--strong)"
+                    style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {last.pct.toFixed(0)}%
+                  </text>
+                  <text x={PAD} y={H - 2} fontSize={9.5} fill="var(--muted)">{pts[0].d}</text>
+                  <text x={W - PAD} y={H - 2} textAnchor="end" fontSize={9.5} fill="var(--muted)">{last.d}</text>
+                </svg>
+              </div>
+            );
+          })() : detail.snapshots.length > 0 && (
             <div className="panel" style={{ marginTop: 16, padding: '12px 18px' }}>
               <div className="hc-sub" style={{ margin: '0 0 20px' }}>Housed % over time <span className="bnl-sub" style={{ textTransform: 'none', letterSpacing: 0 }}>one point per data refresh</span></div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: 84 }}>
