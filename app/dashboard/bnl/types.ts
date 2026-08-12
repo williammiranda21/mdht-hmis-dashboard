@@ -72,6 +72,10 @@ export interface BnlClient {
   ref_date: string | null;
   ref_prov: string | null;
   assessed: string | null;
+  /** latest HUD 4.02 TotalMonthlyIncome record (any enrollment) + its date.
+   *  0 is a real answer (no income) — only null means "no record". */
+  income: number | null;
+  income_date: string | null;
   dq_n: number;               // count only; full text arrives with BnlDetail
   chronic: boolean;
   is_new: boolean;

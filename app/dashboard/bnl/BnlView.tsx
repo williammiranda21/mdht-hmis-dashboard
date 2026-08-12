@@ -8,7 +8,7 @@ import {
 import JourneyBar from '../../../components/JourneyBar';
 import ClientDrawer, { Flags } from './ClientDrawer';
 
-type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'assessed' | 'ms_wait' | 'hh_n';
+type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'assessed' | 'ms_wait' | 'hh_n' | 'income';
 
 const COLS: Array<[SortKey | 'flags' | 'notes', string]> = [
   ['name', 'Client'],
@@ -21,6 +21,7 @@ const COLS: Array<[SortKey | 'flags' | 'notes', string]> = [
   ['sys_days3', 'In HMIS (3y)'],
   ['ms_wait', 'CE leg wait'],
   ['risk_pts', 'Risk'],
+  ['income', 'Income (mo)'],
   ['ref_status', 'Referral'],
   ['assessed', 'CE assessed'],
   ['notes', 'Last note'],
@@ -460,6 +461,10 @@ export default function BnlView({
                         title={`${r.risk_pts >= 8 ? 'High' : 'Low'} priority — ${r.risk_pts} of ${r.risk_max} points (Low 0–7 · High 8+ · HNA items pending)`}>
                         {r.risk_pts} pts{r.risk_pts >= 8 ? ' · High' : ''}</span>
                     )}</td>
+                    <td className="num">{r.income != null
+                      // $0 is a real answer (no income); only a missing record shows —
+                      ? <>${r.income.toLocaleString()}{r.income_date && <div className="bnl-sub" title="date of the latest income record">{r.income_date}</div>}</>
+                      : <span className="bnl-sub">—</span>}</td>
                     <td>{r.ref_type ? (
                       <><div>{r.ref_type} · <b>{r.ref_status}</b></div><div className="bnl-sub">{r.ref_date}{r.ref_prov ? ` · ${r.ref_prov}` : ''}</div></>
                     ) : <span className="bnl-sub">—</span>}</td>

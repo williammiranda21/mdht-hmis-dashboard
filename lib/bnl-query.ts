@@ -21,6 +21,7 @@ export const ROSTER_COLS =
   'days_homeless, sys_days3, episodes3, risk_pts, risk_max, risk_band, ' +
   'spdat_score, spdat_tool, spdat_date, ms_stage, ms_wait, ' +
   'ref_type, ref_status, ref_date, ref_prov, assessed, dq_n, ' +
+  'income, income_date, ' +
   'chronic, is_new, returned, veteran, family, parenting, unaccompanied, in_school';
 
 export const PAGE_SIZE = 200;
@@ -52,7 +53,7 @@ export interface RosterQuery {
 /** Sortable columns. Whitelisted — never interpolate a user string into order(). */
 const SORTABLE = new Set([
   'name', 'age', 'status', 'project', 'days_homeless', 'sys_days3',
-  'risk_pts', 'ref_status', 'assessed', 'ms_wait', 'hh_n',
+  'risk_pts', 'ref_status', 'assessed', 'ms_wait', 'hh_n', 'income',
 ]);
 
 const FLAG_COLS = new Set([
