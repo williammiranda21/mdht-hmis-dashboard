@@ -856,48 +856,68 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                             })()
                           : <span className="bnl-sub">—</span>}
                       </td>
-                      {/* Next steps — open-item count + the assigned people
-                          (monday-style avatar stack), click expands the checklist */}
+                      {/* Next steps — option-B chip (user-picked mockup 2026-08-12):
+                          a deliberate two-line card instead of the old one-liner that
+                          wrapped into a jumble in this narrow column. Line 1 = the
+                          assigned people with the open count at the right; line 2 =
+                          status. Amber = open work · green = all done · dashed =
+                          nothing yet. Expanded state shows as a primary border (the
+                          old caret went with the wrap). */}
                       <td onClick={(e) => e.stopPropagation()} data-tasks-ui="">
                         {detail.tasks === null
                           ? <span className="bnl-sub" title="Run supabase/cohort_tasks.sql to enable">—</span>
                           : (() => {
+                            // open work → the people on the OPEN items; all done →
+                            // everyone who worked the member (so the stack survives)
                             const people: { id: string; name: string | null }[] = [];
                             for (const t of mTasks) {
-                              if (t.status !== 'open') continue;
+                              if (openN > 0 && t.status !== 'open') continue;
                               for (const a of t.assignees ?? []) {
                                 if (!people.some((p) => p.id === a.id)) people.push(a);
                               }
                             }
+                            const state = openN ? 'open' : mTasks.length ? 'done' : 'empty';
+                            const col = state === 'open' ? 'var(--warn)' : state === 'done' ? 'var(--accent)' : 'var(--muted)';
+                            const line2 = state === 'open'
+                              ? (oldestOpen > 0 ? `open · oldest ${oldestOpen}d` : 'open · new')
+                              : state === 'done' ? 'all done' : 'add step';
                             return (
-                              <button className="btn" style={{ padding: '2px 8px', fontSize: 12,
-                                display: 'inline-flex', alignItems: 'center', gap: 6,
-                                ...(openN ? { borderColor: 'var(--warn)', color: 'var(--warn)' } : {}) }}
+                              <button className="btn" aria-expanded={expanded}
+                                style={{
+                                  display: 'inline-flex', flexDirection: 'column', alignItems: 'stretch',
+                                  gap: 3, padding: '5px 9px', minWidth: 88, fontSize: 12,
+                                  borderColor: expanded ? 'var(--primary)' : state === 'open' ? 'var(--warn)' : undefined,
+                                  borderStyle: state === 'empty' ? 'dashed' : undefined,
+                                }}
                                 title={expanded ? 'Collapse next steps'
                                   : people.length
-                                    ? `Open items assigned to ${people.map((p) => p.name).filter(Boolean).join(', ')}`
+                                    ? `${state === 'open' ? 'Open items assigned to' : 'Worked by'} ${people.map((p) => p.name).filter(Boolean).join(', ')} — click for the checklist`
                                     : 'Show next steps for this member'}
                                 onClick={() => {
                                   setOpenTasks(expanded ? null : m.pid); setTaskText(''); setTaskAssignees([]);
                                   // free cache lookup so a stored AI summary shows instantly on expand
                                   if (!expanded && !(m.pid in ai)) void aiFetch(m.pid, false);
                                 }}>
-                                {people.length > 0 && (
-                                  <span style={{ display: 'inline-flex' }}>
-                                    {people.slice(0, 3).map((p, i) => (
-                                      <span key={p.id} style={{ marginLeft: i ? -7 : 0, display: 'inline-flex',
-                                        borderRadius: '50%', border: '1.5px solid var(--card)' }}>
-                                        <Avatar name={p.name} id={p.id} size={20} />
-                                      </span>
-                                    ))}
-                                    {people.length > 3 && (
-                                      <span className="bnl-sub" style={{ marginLeft: 3, fontSize: 10.5, alignSelf: 'center' }}>
-                                        +{people.length - 3}
-                                      </span>
-                                    )}
-                                  </span>
-                                )}
-                                {openN ? `${openN} open · ${oldestOpen}d` : mTasks.length ? 'all done' : '+ add'} {expanded ? '▴' : '▾'}
+                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                  {people.length > 0 ? (
+                                    <span style={{ display: 'inline-flex' }}>
+                                      {people.slice(0, 3).map((p, i) => (
+                                        <span key={p.id} style={{ marginLeft: i ? -7 : 0, display: 'inline-flex',
+                                          borderRadius: '50%', border: '1.5px solid var(--card)' }}>
+                                          <Avatar name={p.name} id={p.id} size={20} />
+                                        </span>
+                                      ))}
+                                      {people.length > 3 && (
+                                        <span className="bnl-sub" style={{ marginLeft: 3, fontSize: 10.5, alignSelf: 'center' }}>
+                                          +{people.length - 3}
+                                        </span>
+                                      )}
+                                    </span>
+                                  ) : <AvatarEmpty size={20} />}
+                                  {state === 'open' && <span className="num" style={{ color: col, fontWeight: 700 }}>{openN}</span>}
+                                  {state === 'done' && <span style={{ color: col, fontWeight: 700 }}>✓</span>}
+                                </span>
+                                <span style={{ color: col, fontSize: 11, whiteSpace: 'nowrap', textAlign: 'left' }}>{line2}</span>
                               </button>
                             );
                           })()}
