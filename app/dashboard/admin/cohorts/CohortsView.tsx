@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fmtInt } from '../../../../lib/format';
 import CopyId from '../../../../components/CopyId';
 import JourneyBar from '../../../../components/JourneyBar';
@@ -26,6 +26,43 @@ const MS_LABELS = Object.fromEntries(MILESTONES);
 function noteAge(at: string): string {
   const d = Math.max(0, Math.floor((Date.now() - +new Date(`${at}T00:00:00`)) / 86400000));
   return d === 0 ? 'today' : d < 30 ? `${d}d` : d < 365 ? `${Math.round(d / 30)}mo` : `${Math.round(d / 365)}y`;
+}
+
+// ── monday-style people avatars ──────────────────────────────────────────────
+// Round initials chip, color picked deterministically from the person's id so
+// the same account is always the same color, everywhere on the page.
+const AV_COLORS = ['#7E67FE', '#00a37a', '#e8912d', '#d64c62', '#2f8ac9', '#9a5cc9', '#4c9f70', '#c0699f'];
+function avColor(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return AV_COLORS[h % AV_COLORS.length];
+}
+function initials(name: string | null | undefined): string {
+  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return ((parts[0][0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] ?? '' : '')).toUpperCase();
+}
+function Avatar({ name, id, size = 24 }: { name: string | null; id: string; size?: number }) {
+  return (
+    <span aria-hidden style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      background: avColor(id), color: '#fff',
+      fontSize: size * 0.42, fontWeight: 700, letterSpacing: '.02em',
+      lineHeight: 1, userSelect: 'none',
+    }}>{initials(name)}</span>
+  );
+}
+/** The "nobody yet" slot — dashed empty circle, monday-style. */
+function AvatarEmpty({ size = 24 }: { size?: number }) {
+  return (
+    <span aria-hidden style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      border: '1.5px dashed var(--muted)', color: 'var(--muted)',
+      fontSize: size * 0.55, fontWeight: 500, lineHeight: 1, userSelect: 'none',
+    }}>+</span>
+  );
 }
 
 interface CohortRow { id: number; name: string; description: string | null; created_by: string | null; created_at: string; members: number }
@@ -108,7 +145,30 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
   const [openTasks, setOpenTasks] = useState<string | null>(null);
   const [taskText, setTaskText] = useState('');
   const [taskAssignee, setTaskAssignee] = useState('');
-  useEffect(() => { setOpenTasks(null); setTaskText(''); setTaskAssignee(''); }, [sel]);
+  // monday-style people picker (fixed popover anchored to the avatar button —
+  // fixed so the .scroll-pin container can't clip it)
+  const [peoplePick, setPeoplePick] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => { setOpenTasks(null); setTaskText(''); setTaskAssignee(''); setPeoplePick(null); }, [sel]);
+  // Auto-collapse an idle Next-steps panel (user request): any activity inside
+  // it resets the clock; a non-empty draft or an open people picker counts as
+  // activity, so nothing in progress is ever swallowed. Refs (not state) so
+  // mousemoves don't re-render.
+  const TASKS_IDLE_MS = 20_000;
+  const tasksTouchRef = useRef(Date.now());
+  const draftRef = useRef(false);
+  useEffect(() => { draftRef.current = taskText.trim().length > 0 || peoplePick !== null; }, [taskText, peoplePick]);
+  const touchTasks = () => { tasksTouchRef.current = Date.now(); };
+  useEffect(() => {
+    if (!openTasks) return;
+    tasksTouchRef.current = Date.now();
+    const iv = setInterval(() => {
+      if (draftRef.current) { tasksTouchRef.current = Date.now(); return; }
+      if (Date.now() - tasksTouchRef.current >= TASKS_IDLE_MS) {
+        setOpenTasks(null); setPeoplePick(null);
+      }
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [openTasks]);
   // Access panel (admin): pick an account to grant.
   const [grantSel, setGrantSel] = useState('');
 
@@ -409,9 +469,12 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                       const nm = s?.display_name || s?.email || a.user_id.slice(0, 8);
                       const noBnl = s ? !s.is_admin && !s.bnl_access : false;
                       return (
-                        <span key={a.user_id} className="bnl-chip" title={noBnl
+                        <span key={a.user_id} className="bnl-chip"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                          title={noBnl
                           ? 'This account has no By-Name List access — they will see the cohort but not member names. Grant BNL access in the Users console.'
                           : undefined}>
+                          <Avatar name={nm} id={a.user_id} size={18} />
                           {nm}{noBnl && ' ⚠'}
                           <span role="button" style={{ cursor: 'pointer', marginLeft: 6, opacity: .7 }}
                             title="Revoke access"
@@ -570,7 +633,8 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                     </tr>
                     {expanded && detail.tasks !== null && (
                       <tr>
-                        <td colSpan={10} style={{ background: 'var(--card-top)', padding: '10px 18px 14px' }}>
+                        <td colSpan={10} style={{ background: 'var(--card-top)', padding: '10px 18px 14px' }}
+                          onMouseMove={touchTasks} onClick={touchTasks} onKeyDown={touchTasks}>
                           {mTasks.length === 0 && <div className="bnl-sub" style={{ marginBottom: 8 }}>No next steps yet.</div>}
                           {[...mTasks].sort((a, b) => (a.status === b.status ? 0 : a.status === 'open' ? -1 : 1))
                             .map((t) => (
@@ -586,8 +650,11 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                                 color: t.status === 'done' ? 'var(--muted)' : 'var(--text)' }}>
                                 {t.body}
                               </span>
-                              <span className="bnl-sub" style={{ flexShrink: 0 }}>
-                                {t.assignee_name ? <b style={{ color: 'var(--strong)', fontWeight: 600 }}>{t.assignee_name}</b> : 'unassigned'}
+                              <span className="bnl-sub" style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                {t.assignee_id
+                                  ? <><Avatar name={t.assignee_name} id={t.assignee_id} size={20} />
+                                      <b style={{ color: 'var(--strong)', fontWeight: 600 }}>{t.assignee_name}</b></>
+                                  : <><AvatarEmpty size={20} /> unassigned</>}
                                 {' '}· {t.created_at.slice(0, 10)}
                               </span>
                               {isAdmin && (
@@ -604,12 +671,21 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                             <input className="finput" style={{ flex: 1, minWidth: 240 }}
                               placeholder="New next step…" value={taskText}
                               onChange={(e) => setTaskText(e.target.value)} />
-                            <select className="fselect" value={taskAssignee} onChange={(e) => setTaskAssignee(e.target.value)}>
-                              <option value="">Unassigned</option>
-                              {(isAdmin ? detail.staff : detail.staff.filter((s) => s.id === viewerId)).map((s) => (
-                                <option key={s.id} value={s.id}>{s.display_name || s.email}</option>
-                              ))}
-                            </select>
+                            {(() => {
+                              const chosen = detail.staff.find((s) => s.id === taskAssignee) ?? null;
+                              return (
+                                <button className="btn" title={chosen ? `Assigned to ${chosen.display_name || chosen.email} — click to change` : 'Assign to…'}
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '3px 10px' }}
+                                  onClick={(e) => {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setPeoplePick(peoplePick ? null : { x: rect.left, y: rect.bottom + 6 });
+                                  }}>
+                                  {chosen
+                                    ? <><Avatar name={chosen.display_name || chosen.email} id={chosen.id} size={22} />{chosen.display_name || chosen.email}</>
+                                    : <><AvatarEmpty size={22} /><span className="bnl-sub">Assign</span></>}
+                                </button>
+                              );
+                            })()}
                             <button className="btn" disabled={busy || !taskText.trim()} onClick={async () => {
                               const r = await act({ action: 'add_task', id: sel, pid: m.pid, body: taskText, assignee_id: taskAssignee || null });
                               if (r?.ok) { setTaskText(''); setTaskAssignee(''); loadDetail(sel!); }
@@ -662,6 +738,32 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
           ))}
           <div className="bnl-sub" style={{ marginTop: 8 }}>open the client for the full thread</div>
         </div>
+      )}
+
+      {/* People picker — monday-style assignee menu (fixed popover + backdrop) */}
+      {peoplePick && detail && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 69 }} onClick={() => setPeoplePick(null)} />
+          <div className="panel" onMouseMove={touchTasks} style={{
+            position: 'fixed',
+            left: Math.min(peoplePick.x, Math.max((typeof window !== 'undefined' ? window.innerWidth : 1200) - 264, 12)),
+            top: Math.min(peoplePick.y, Math.max((typeof window !== 'undefined' ? window.innerHeight : 800) - 330, 12)),
+            width: 252, maxHeight: 320, overflowY: 'auto', zIndex: 70,
+            padding: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+          }}>
+            <div className="dd-opt" style={{ border: 'none' }}
+              onClick={() => { setTaskAssignee(''); setPeoplePick(null); }}>
+              <AvatarEmpty size={26} /><span className="dd-nm">Unassigned</span>
+            </div>
+            {(isAdmin ? detail.staff : detail.staff.filter((s) => s.id === viewerId)).map((s) => (
+              <div key={s.id} className={`dd-opt${taskAssignee === s.id ? ' on' : ''}`} style={{ border: 'none' }}
+                onClick={() => { setTaskAssignee(s.id); setPeoplePick(null); }}>
+                <Avatar name={s.display_name || s.email} id={s.id} size={26} />
+                <span className="dd-nm">{s.display_name || s.email}</span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* The SAME client card as the BNL; admin-only controls inside the
