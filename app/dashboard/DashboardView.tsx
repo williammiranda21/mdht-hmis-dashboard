@@ -55,8 +55,9 @@ export default function DashboardView({
 
   // Client-side (in-place) filters — no server round-trip.
   const [typeFilter, setTypeFilter] = useState('All');
-  const [query, setQuery] = useState('');
   // Multi-project filter (empty = all) — shared picker with the BNL/Returns.
+  // (The old "Search projects" text input was dropped when this arrived —
+  // the picker's own search covers find-by-name, and a selection persists.)
   // Totals, the KPI math, and the CSV all derive from `filtered`, so picking
   // a handful of projects turns the tfoot into a portfolio rollup.
   const [selProjects, setSelProjects] = useState<number[]>([]);
@@ -117,15 +118,13 @@ export default function DashboardView({
   [rows]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return rows.filter((r) => {
       if (selProjects.length && !selProjects.includes(r.project_id)) return false;
       if (typeFilter !== 'All' && r.type_name !== typeFilter) return false;
       if (activeOnly && !(r.clients_served && r.clients_served > 0)) return false;
-      if (q && !(r.project_name || '').toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [rows, selProjects, typeFilter, activeOnly, query]);
+  }, [rows, selProjects, typeFilter, activeOnly]);
 
   const sorted = useMemo(() => {
     const val = (r: ProjectMetric): number | string | null => {
@@ -254,10 +253,6 @@ export default function DashboardView({
             <ProjectPicker options={projectOpts} selected={selProjects}
               onChange={setSelProjects}
               title="Filter the table to one or more projects — totals become the selection's rollup" />
-          </div>
-          <div className="fgroup">
-            <span className="flabel">Search projects</span>
-            <input className="finput" placeholder="Filter by name…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
           <div className={`switch${activeOnly ? '' : ' off'}`} onClick={() => setActiveOnly((v) => !v)}>
             <span className="tk" />Active only

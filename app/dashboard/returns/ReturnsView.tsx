@@ -32,10 +32,10 @@ type SortKey = 'name' | 'type_name' | 'exits' | 'lt6' | 'rlt6' | 'r6' | 'rr6' | 
 export default function ReturnsView({ periods, granularity, period, household, subpopulation, rows, destAgg }: Props) {
   const router = useRouter();
   const [typeFilter, setTypeFilter] = useState('All');
-  const [query, setQuery] = useState('');
   // Multi-project filter (empty = all) — shared picker with the BNL/Project
   // Performance. The KPI band and the tfoot recompute from `filtered`, so a
-  // selection reads as that portfolio's return profile.
+  // selection reads as that portfolio's return profile. (The old "Search
+  // projects" input was dropped — the picker's own search covers it.)
   const [selProjects, setSelProjects] = useState<number[]>([]);
   /** Returns-mode project panel — same component as Project Performance, with
    *  returns KPIs, destination breakdown and return-rate benchmarking. */
@@ -70,13 +70,11 @@ export default function ReturnsView({ periods, granularity, period, household, s
   [rows]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return rows.filter((r) =>
       (!selProjects.length || selProjects.includes(r.project_id)) &&
-      (typeFilter === 'All' || r.type_name === typeFilter) &&
-      (!q || r.name.toLowerCase().includes(q)),
+      (typeFilter === 'All' || r.type_name === typeFilter),
     );
-  }, [rows, selProjects, typeFilter, query]);
+  }, [rows, selProjects, typeFilter]);
 
   const sorted = useMemo(() => {
     const val = (r: Row): number | string => {
@@ -187,10 +185,6 @@ export default function ReturnsView({ periods, granularity, period, household, s
             <ProjectPicker options={projectOpts} selected={selProjects}
               onChange={setSelProjects}
               title="Filter to one or more projects — the KPI band becomes the selection's return profile" />
-          </div>
-          <div className="fgroup">
-            <span className="flabel">Search projects</span>
-            <input className="finput" placeholder="Filter by name…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
         </div>
       </div>
