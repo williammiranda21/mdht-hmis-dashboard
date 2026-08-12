@@ -606,18 +606,46 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                             })()
                           : <span className="bnl-sub">—</span>}
                       </td>
-                      {/* Next steps — open-item count; click expands the checklist */}
+                      {/* Next steps — open-item count + the assigned people
+                          (monday-style avatar stack), click expands the checklist */}
                       <td onClick={(e) => e.stopPropagation()}>
                         {detail.tasks === null
                           ? <span className="bnl-sub" title="Run supabase/cohort_tasks.sql to enable">—</span>
-                          : (
-                            <button className="btn" style={{ padding: '0 8px', fontSize: 12,
-                              ...(openN ? { borderColor: 'var(--warn)', color: 'var(--warn)' } : {}) }}
-                              title={expanded ? 'Collapse next steps' : 'Show next steps for this member'}
-                              onClick={() => { setOpenTasks(expanded ? null : m.pid); setTaskText(''); setTaskAssignee(''); }}>
-                              {openN ? `${openN} open` : mTasks.length ? 'all done' : '+ add'} {expanded ? '▴' : '▾'}
-                            </button>
-                          )}
+                          : (() => {
+                            const people: { id: string; name: string | null }[] = [];
+                            for (const t of mTasks) {
+                              if (t.status === 'open' && t.assignee_id && !people.some((p) => p.id === t.assignee_id)) {
+                                people.push({ id: t.assignee_id, name: t.assignee_name });
+                              }
+                            }
+                            return (
+                              <button className="btn" style={{ padding: '2px 8px', fontSize: 12,
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                ...(openN ? { borderColor: 'var(--warn)', color: 'var(--warn)' } : {}) }}
+                                title={expanded ? 'Collapse next steps'
+                                  : people.length
+                                    ? `Open items assigned to ${people.map((p) => p.name).filter(Boolean).join(', ')}`
+                                    : 'Show next steps for this member'}
+                                onClick={() => { setOpenTasks(expanded ? null : m.pid); setTaskText(''); setTaskAssignee(''); }}>
+                                {people.length > 0 && (
+                                  <span style={{ display: 'inline-flex' }}>
+                                    {people.slice(0, 3).map((p, i) => (
+                                      <span key={p.id} style={{ marginLeft: i ? -7 : 0, display: 'inline-flex',
+                                        borderRadius: '50%', border: '1.5px solid var(--card)' }}>
+                                        <Avatar name={p.name} id={p.id} size={20} />
+                                      </span>
+                                    ))}
+                                    {people.length > 3 && (
+                                      <span className="bnl-sub" style={{ marginLeft: 3, fontSize: 10.5, alignSelf: 'center' }}>
+                                        +{people.length - 3}
+                                      </span>
+                                    )}
+                                  </span>
+                                )}
+                                {openN ? `${openN} open` : mTasks.length ? 'all done' : '+ add'} {expanded ? '▴' : '▾'}
+                              </button>
+                            );
+                          })()}
                       </td>
                       <td className="num">
                         {isAdmin && (
