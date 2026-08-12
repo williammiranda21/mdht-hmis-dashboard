@@ -152,8 +152,9 @@ export default function GlossaryPage() {
         <Term name="Assessed" rule="Most recent SPDAT completion date (VI/F/TAY, side-car reports).">
           The CE assessment on file.
         </Term>
-        <Term name="Referred" rule="Date of the client's current LIVE referral (accepted / pending / accepted-on-waitlist). Canceled, declined, or rejected referrals never advance the journey — the drawer lists them in referral history, but the client is back to waiting for a new referral.">
-          A referral that died is not progress.
+        <Term name="Referred" rule="Date of the client's current LIVE referral to HOUSING (TH / RRH / PSH / other PH / vouchers — shelter-bed referrals never count). Canceled, declined, or rejected referrals never advance the journey — the drawer lists them in referral history, but the client is back to waiting for a new referral.">
+          A referral that died is not progress, and a shelter-bed referral is not a housing
+          referral.
         </Term>
         <Term name="Accepted" rule="Entry date at the housing provider — but only an OPEN stay, or a closed stay that reached a move-in with no HUD-qualifying return after its exit, anchors the journey. A closed never-housed stay is a dead acceptance; a returned-after client is on a new journey.">
           The receiving program creating the enrollment is the acceptance.
