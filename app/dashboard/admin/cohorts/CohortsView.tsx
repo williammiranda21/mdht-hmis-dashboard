@@ -85,6 +85,8 @@ interface Member {
   /** CE journey dates (ident/assessed/referred/accepted/movein) — movein feeds
    *  the digest's "housed this period" line */
   milestones: Record<string, string | null> | null;
+  /** when this member was added to the cohort — anchor for per-client progress */
+  added_at?: string | null;
 }
 interface Task {
   id: number; pid: string; body: string;
@@ -828,6 +830,42 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                         <td colSpan={10} style={{ background: 'var(--card-top)', padding: '10px 18px 14px' }}
                           data-tasks-ui=""
                           onMouseMove={touchTasks} onClick={touchTasks} onKeyDown={touchTasks}>
+                          {/* Per-client progress — deterministic: milestone DATES vs the
+                              date they joined the cohort, step completion, note cadence. */}
+                          {(() => {
+                            const joined = m.added_at ? m.added_at.slice(0, 10) : null;
+                            const ms = m.milestones ?? {};
+                            const movedSince = joined
+                              ? MS_ORDER.filter((k) => ms[k] && String(ms[k]) >= joined)
+                              : [];
+                            const doneN = mTasks.filter((t) => t.status === 'done').length;
+                            const notes30 = (detail.noteDates?.[m.pid] ?? []).length;
+                            return (
+                              <div className="bnl-sub" style={{ marginBottom: 10, display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                                <span><b style={{ color: 'var(--strong)' }}>Progress</b>{joined ? ` since joining ${joined}` : ''}:</span>
+                                {ms['movein']
+                                  ? <span style={{ color: 'var(--accent)', fontWeight: 600 }}>✓ Moved in {ms['movein']}</span>
+                                  : movedSince.length
+                                    ? <span style={{ color: 'var(--accent)', fontWeight: 600 }}
+                                        title="CE milestones dated after this member joined the cohort">
+                                        journey +{movedSince.length}: {movedSince.map((k) => `${MS_LABELS[k] ?? k} ${ms[k]}`).join(' → ')}
+                                      </span>
+                                    : m.ms_stage
+                                      ? <span style={{ color: 'var(--warn)' }}
+                                          title="No CE milestone has landed since this member joined the cohort">
+                                          journey unchanged — {MS_LABELS[m.ms_stage] ?? m.ms_stage} for {m.ms_wait != null ? fmtInt(m.ms_wait) : '—'}d
+                                        </span>
+                                      : <span>journey: —</span>}
+                                {detail.tasks !== null && (
+                                  <span>next-steps <b className="num" style={{ color: doneN ? 'var(--accent)' : undefined }}>{doneN}</b>/<b className="num">{mTasks.length}</b> done</span>
+                                )}
+                                <span>
+                                  <b className="num">{notes30}</b> note{notes30 === 1 ? '' : 's'} in 30d
+                                  {m.notes2?.[0]?.at ? `, last ${noteAge(m.notes2[0].at)}` : ''}
+                                </span>
+                              </div>
+                            );
+                          })()}
                           {mTasks.length === 0 && <div className="bnl-sub" style={{ marginBottom: 8 }}>No next steps yet.</div>}
                           {[...mTasks].sort((a, b) => (a.status === b.status ? 0 : a.status === 'open' ? -1 : 1))
                             .map((t) => {

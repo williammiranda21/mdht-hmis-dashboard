@@ -153,6 +153,14 @@ export async function GET(req: Request) {
   const found = new Set(members.map((m) => m.pid));
   const missing = pids.filter((p) => !found.has(p));   // left the roster since being added
 
+  // When each member joined the cohort — the anchor for per-client progress
+  // ("which milestones landed AFTER we started working this person").
+  const addedAt = new Map(((mRes.data ?? []) as { pid: string; added_at: string }[])
+    .map((m) => [m.pid, m.added_at]));
+  for (const m of members) {
+    (m as Member & { added_at?: string | null }).added_at = addedAt.get(m.pid) ?? null;
+  }
+
   // Last-notes column, same enrichment as the BNL roster (notes2, cap 5 per
   // client). bnl_notes rides on can_see_bnl(); for a viewer without BNL access
   // it simply returns nothing — notes2 stays null, no error.
