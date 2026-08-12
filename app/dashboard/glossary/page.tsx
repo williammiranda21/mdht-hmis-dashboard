@@ -156,8 +156,9 @@ export default function GlossaryPage() {
           A referral that died is not progress, and a shelter-bed referral is not a housing
           referral.
         </Term>
-        <Term name="Accepted" rule="Entry date at the housing provider — but only an OPEN stay, or a closed stay that reached a move-in with no HUD-qualifying return after its exit, anchors the journey. A closed never-housed stay is a dead acceptance; a returned-after client is on a new journey.">
-          The receiving program creating the enrollment is the acceptance.
+        <Term name="Accepted" rule="Entry date at the housing provider — but only an OPEN stay, or a closed stay that reached a move-in with no HUD-qualifying return after its exit, anchors the journey. A closed never-housed stay is a dead acceptance; a returned-after client is on a new journey. Services-only RRH (SSO subtype) is not a housing program: its enrollment never counts as Accepted — only a recorded move-in there enters the journey.">
+          The receiving program creating the enrollment is the acceptance — but only when the
+          program actually houses people.
         </Term>
         <Term name="Moved in" rule="HUD move-in date; or, when a client exits any non-PH program directly to a permanent destination with no program move-in, that exit is the terminal (shown as 'Housed (exit)'). An RRH/PSH graduation keeps its move-in as the housing event.">
           The journey&apos;s finish line.
