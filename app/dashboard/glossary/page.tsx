@@ -144,7 +144,7 @@ export default function GlossaryPage() {
       </Section>
 
       <Section id="journey" title="CE journey milestones">
-        <Term name="Identified" rule="Earliest Street Outreach or Coordinated Entry enrollment entry within 24 months before the journey's anchor (or before today if un-anchored).">
+        <Term name="Identified" rule="Earliest Street Outreach or Coordinated Entry enrollment entry within 24 months before the journey's anchor (or before today if un-anchored) — and never before the end of a previous housed journey: after a HUD-qualifying return, the journey restarts.">
           When the system first found this person for the current journey. The 24-month cap keeps
           old episodes from inflating it; it measures when the data saw them, not when homelessness
           began.
@@ -152,7 +152,7 @@ export default function GlossaryPage() {
         <Term name="Assessed" rule="Most recent SPDAT completion date (VI/F/TAY, side-car reports).">
           The CE assessment on file.
         </Term>
-        <Term name="Referred" rule="Date of the client's current LIVE referral to HOUSING (TH / RRH / PSH / other PH / vouchers — shelter-bed referrals never count). Canceled, declined, or rejected referrals never advance the journey — the drawer lists them in referral history, but the client is back to waiting for a new referral.">
+        <Term name="Referred" rule="Date of the client's current LIVE referral to HOUSING (TH / RRH / PSH / other PH / vouchers — shelter-bed referrals never count). Canceled, declined, or rejected referrals never advance the journey — the drawer lists them in referral history, but the client is back to waiting for a new referral. A referral consumed by a previous housed journey (before a HUD return) never carries into the new one.">
           A referral that died is not progress, and a shelter-bed referral is not a housing
           referral.
         </Term>
