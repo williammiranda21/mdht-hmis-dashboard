@@ -43,10 +43,16 @@ type SortKey =
   | 'name' | 'type_name' | 'clients_served' | 'leavers' | 'exits_ph'
   | 'ph_exit_rate' | 'mom' | 'unsub_rate' | 'avg_los' | string;
 
+/** PH-exit-rate change vs the PRIOR PERIOD OF THE SAME GRANULARITY. The ETL
+ *  diffs each frame within itself (apr_monthly_report.py DELTA_PAIRS), so the
+ *  jsonb field is named MoM_* but holds QoQ on quarterly rows and YoY on
+ *  fiscal rows — only the display label should say MoM/QoQ/YoY. */
 const mom = (r: ProjectMetric): number | null => {
   const v = r.data?.['MoM_PHExitRate_pp'];
   return typeof v === 'number' ? v : null;
 };
+
+const POP_LABEL: Record<string, string> = { monthly: 'MoM', quarterly: 'QoQ', fiscal: 'YoY' };
 
 export default function DashboardView({
   rows, periods, granularity, period, household, subpopulation, targetFlags = {}, partialPeriod = null,
@@ -184,7 +190,7 @@ export default function DashboardView({
   }
 
   function exportCsv() {
-    const headers = ['Project', 'Type', 'Clients', 'Leavers', 'ExitsToPH', 'PHExitRate', 'MoM_pp', 'ExitsToUnsub', 'UnsubRate', 'AvgLOS',
+    const headers = ['Project', 'Type', 'Clients', 'Leavers', 'ExitsToPH', 'PHExitRate', `${POP_LABEL[granularity] ?? 'MoM'}_pp`, 'ExitsToUnsub', 'UnsubRate', 'AvgLOS',
       ...extraCols];
     const lines = [headers.join(',')];
     sorted.forEach((r) => {
@@ -323,7 +329,7 @@ export default function DashboardView({
                 <th className={thCls('leavers', true)} onClick={() => toggleSort('leavers')}>Leavers {sortCar('leavers')}</th>
                 <th className={thCls('exits_ph', true)} onClick={() => toggleSort('exits_ph')}>→ PH {sortCar('exits_ph')}</th>
                 <th className={thCls('ph_exit_rate', true)} onClick={() => toggleSort('ph_exit_rate')}>PH Rate {sortCar('ph_exit_rate')}</th>
-                <th className={thCls('mom', true)} onClick={() => toggleSort('mom')}>MoM Δ {sortCar('mom')}</th>
+                <th className={thCls('mom', true)} onClick={() => toggleSort('mom')}>{POP_LABEL[granularity] ?? 'MoM'} Δ {sortCar('mom')}</th>
                 <th className={thCls('exits_unsub', true)} onClick={() => toggleSort('exits_unsub')}
                   title="Exits to unsubsidized permanent housing (own lease, destinations 410/411) — the count behind Unsub Rate">→ Unsub {sortCar('exits_unsub')}</th>
                 <th className={thCls('unsub_rate', true)} onClick={() => toggleSort('unsub_rate')}>Unsub Rate {sortCar('unsub_rate')}</th>
