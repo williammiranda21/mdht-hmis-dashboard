@@ -140,6 +140,9 @@ export default function ProjectPanel({
   const [surv, setSurv] = useState<{ project: SurvivalRow | null; type: SurvivalRow | null } | null>(null);
   const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
   const [destProfile, setDestProfile] = useState<Record<string, number> | null>(null);
+  /** which month the profile describes — differs from `period` when the API
+   *  fell back to the latest complete month (partial month / quarterly view) */
+  const [destPeriod, setDestPeriod] = useState<string | null>(null);
   const [targets, setTargets] = useState<TargetsData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const isRet = mode === 'returns';
@@ -147,6 +150,7 @@ export default function ProjectPanel({
   useEffect(() => {
     let live = true;
     setProj(null); setHistory(null); setErr(null); setDest(null); setSurv(null); setDiagnosis(null);
+    setDestProfile(null); setDestPeriod(null);
     const qs = new URLSearchParams({
       project_id: String(projectId), granularity, period, household, subpopulation, mode,
     });
@@ -156,7 +160,8 @@ export default function ProjectPanel({
         if (!live) return;
         setProj(j.project); setHistory(j.history); setPeers(j.peers ?? []); setDest(j.dest ?? null);
         setSurv(j.survival ?? null); setDiagnosis(j.diagnosis ?? null);
-        setDestProfile(j.destProfile ?? null); setTargets(j.targets ?? null);
+        setDestProfile(j.destProfile ?? null); setDestPeriod(j.destPeriod ?? null);
+        setTargets(j.targets ?? null);
       })
       .catch(() => { if (live) { setErr('Could not load this project.'); setHistory([]); } });
     return () => { live = false; };
@@ -257,8 +262,13 @@ export default function ProjectPanel({
                 returns mode reads "do exits stick" on the Returns panel */}
             <PerformanceDiagnosis diagnosis={diagnosis} />
 
-            {/* Where do clients go — ALL exits by destination (Pillar 3), snapshot only */}
-            {!isRet && <DestProfile profile={destProfile} periodLabel={periodLabel(period)} />}
+            {/* Where do clients go — ALL exits by destination (Pillar 3), snapshot only.
+                Falls back to the latest complete month when the selected period
+                has no dest_profile row — the label says which month it shows. */}
+            {!isRet && <DestProfile profile={destProfile}
+              periodLabel={destPeriod && destPeriod !== period
+                ? `${periodLabel(destPeriod)} — latest complete month`
+                : periodLabel(period)} />}
 
             {/* Targets & progress (Pillar 3-4) — mounted only once data exists so
                 the section's initial state is seeded correctly */}

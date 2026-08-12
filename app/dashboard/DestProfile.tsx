@@ -29,9 +29,18 @@ const LABELS: Record<string, string> = {
 export default function DestProfile({ profile, periodLabel }: {
   profile: Record<string, number> | null; periodLabel: string;
 }) {
-  if (!profile) return null;
+  // Never vanish silently (user report 2026-08-12: "the card does not provide
+  // destination types" — the section was hidden because the selected period
+  // had no row). With the API's latest-complete-month fallback, a null here
+  // means the project truly has no exits in the loader's trailing window.
+  if (!profile || !(profile['_n'] ?? 0)) {
+    return (
+      <div className="hc-sub">
+        Where do clients go — no exits recorded in the trailing 3 years
+      </div>
+    );
+  }
   const total = profile['_n'] ?? 0;
-  if (!total) return null;
 
   const entries = Object.entries(profile).filter(([k]) => k !== '_n');
   const tierOf = (code: string): string => {

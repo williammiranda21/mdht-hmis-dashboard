@@ -123,15 +123,27 @@ export async function GET(req: Request) {
     survival = { project: selfRes.data ?? null, type: typeRes.data ?? null };
   }
 
-  // ── Destination profile (Pillar 3) — snapshot mode, monthly periods only ─────
+  // ── Destination profile (Pillar 3) — snapshot mode ──────────────────────────
   // ALL exits by destination code for this project+month (returns_by_dest covers
-  // PH exits only). Loaded by pipeline/recompute_dest.py; an absent row means no
-  // exits that month (or a period outside the loader's trailing window).
+  // PH exits only). Loaded by pipeline/recompute_dest.py — MONTHLY, COMPLETE
+  // months only. When the selected period has no row (the in-progress month —
+  // the default view! — or a quarterly/fiscal period), fall back to the
+  // project's latest complete month rather than silently hiding the section
+  // (user report 2026-08-12); destPeriod tells the UI which month it shows.
   let destProfile: Record<string, number> | null = null;
-  if (mode === 'snapshot' && /^\d{4}-\d{2}$/.test(period)) {
-    const { data: dp } = await sb.from('dest_profile').select('data')
-      .eq('period', period).eq('project_id', projectId).maybeSingle();
-    destProfile = (dp?.data as Record<string, number>) ?? null;
+  let destPeriod: string | null = null;
+  if (mode === 'snapshot') {
+    if (/^\d{4}-\d{2}$/.test(period)) {
+      const { data: dp } = await sb.from('dest_profile').select('data')
+        .eq('period', period).eq('project_id', projectId).maybeSingle();
+      if (dp?.data) { destProfile = dp.data as Record<string, number>; destPeriod = period; }
+    }
+    if (!destProfile) {
+      const { data: dl } = await sb.from('dest_profile').select('period, data')
+        .eq('project_id', projectId).order('period', { ascending: false })
+        .limit(1).maybeSingle();
+      if (dl?.data) { destProfile = dl.data as Record<string, number>; destPeriod = String(dl.period); }
+    }
   }
 
   // ── Performance diagnosis (Pillar 2) ─────────────────────────────────────────
@@ -215,5 +227,5 @@ export async function GET(req: Request) {
     };
   }
 
-  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers, dest, survival, diagnosis, destProfile, targets });
+  return NextResponse.json({ project: proj, history: historyRes.data ?? [], peers, dest, survival, diagnosis, destProfile, destPeriod, targets });
 }

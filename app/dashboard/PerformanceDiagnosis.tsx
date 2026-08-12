@@ -23,10 +23,12 @@ export default function PerformanceDiagnosis({ diagnosis: d }: { diagnosis: Diag
       padding: '14px 16px', background: 'var(--card)',
     }}>
       <div className="hc-sub" style={{ marginTop: 0 }}>Performance diagnosis</div>
-      <p style={{ margin: '4px 0 0', fontWeight: 600 }}>{d.headline}</p>
+      {/* 13px/12.5px — the inherited panel size read oversized next to the
+          surrounding 12px content (user report 2026-08-12) */}
+      <p style={{ margin: '4px 0 0', fontWeight: 600, fontSize: 13 }}>{d.headline}</p>
 
       {d.insights.length > 0 && (
-        <ul style={{ margin: '10px 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: 10 }}>
+        <ul style={{ margin: '10px 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: 8, fontSize: 12.5, lineHeight: 1.55 }}>
           {d.insights.map((ins, i) => {
             const k = KIND[ins.kind];
             return (
