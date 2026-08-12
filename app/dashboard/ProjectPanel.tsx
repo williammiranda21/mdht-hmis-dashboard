@@ -127,6 +127,29 @@ const LOS_BANDS = [
   { key: 'LOS_365plus', label: '365+ days', color: 'var(--danger)' },
 ];
 
+/**
+ * Period-over-period change chip for a KPI tile. Reuses the SPM cards'
+ * .pc-delta styling. unit '' = a count — absolute change, neutral coloring
+ * (clients served / PH exits have no good direction, same call as the
+ * Deep Dive grid); '%' = percentage-POINT change, shown as "pts" so it can't
+ * be read as the rate itself; 'd' = days.
+ */
+function Delta({ cur, prev, vs, unit, lowerBetter, neutral }: {
+  cur: number | null | undefined; prev: number | null | undefined; vs: string;
+  unit: '' | '%' | 'd'; lowerBetter?: boolean; neutral?: boolean;
+}) {
+  if (cur == null || prev == null || !vs) return null;
+  const d = Number((cur - prev).toFixed(unit === '' ? 0 : 1));
+  const mag = unit === '' ? Math.abs(d).toLocaleString() : String(Math.abs(d));
+  const u = unit === '%' ? ' pts' : unit;
+  const cls = d === 0 || neutral ? 'neu' : (lowerBetter ? d < 0 : d > 0) ? 'good' : 'bad';
+  return (
+    <div className={`pc-delta ${cls}`} style={{ marginTop: 5 }}>
+      {d === 0 ? `±0${u}` : `${d < 0 ? '▼' : '▲'} ${mag}${u}`} <span className="mut">vs {vs}</span>
+    </div>
+  );
+}
+
 export default function ProjectPanel({
   projectId, granularity, period, household, subpopulation, onClose, mode = 'snapshot',
 }: {
@@ -171,6 +194,16 @@ export default function ProjectPanel({
     () => history?.find((h) => h.period === period) ?? history?.[history.length - 1] ?? null,
     [history, period],
   );
+
+  /** Row immediately before `latest` in the history array. History arrives at
+   *  the panel's granularity, so this is month-over-month on the monthly view,
+   *  quarter-over-quarter on quarterly, FY-over-FY on fiscal — no date math. */
+  const prevRow = useMemo(() => {
+    if (!history || !latest) return null;
+    const i = history.findIndex((h) => h.period === latest.period);
+    return i > 0 ? history[i - 1] : null;
+  }, [history, latest]);
+  const vsLabel = prevRow ? periodLabel(prevRow.period) : '';
 
   /**
    * Trend series. Leading periods with no rate are dropped: a project can carry
@@ -227,10 +260,15 @@ export default function ProjectPanel({
                   <div className="hc-t">
                     <div className="k">PH exits (2yr window)</div>
                     <div className="v">{fmtInt(latest?.total_ph_exits ?? 0)}</div>
+                    <Delta cur={latest?.total_ph_exits} prev={prevRow?.total_ph_exits}
+                      vs={vsLabel} unit="" neutral />
                   </div>
                   <div className="hc-t">
                     <div className="k">Returns &lt;6 mo</div>
                     <div className="v">{pctOrDash(rate(latest?.returns_lt6mo, latest?.total_ph_exits))}</div>
+                    <Delta cur={rate(latest?.returns_lt6mo, latest?.total_ph_exits)}
+                      prev={rate(prevRow?.returns_lt6mo, prevRow?.total_ph_exits)}
+                      vs={vsLabel} unit="%" lowerBetter />
                   </div>
                   <div className="hc-t">
                     <div className="k">2-year return rate</div>
@@ -238,6 +276,9 @@ export default function ProjectPanel({
                     <div className="v" style={ret2Flagged(latest) ? { color: 'var(--danger)' } : undefined}>
                       {pctOrDash(rate(latest?.returns_2yr, latest?.total_ph_exits))}
                     </div>
+                    <Delta cur={rate(latest?.returns_2yr, latest?.total_ph_exits)}
+                      prev={rate(prevRow?.returns_2yr, prevRow?.total_ph_exits)}
+                      vs={vsLabel} unit="%" lowerBetter />
                   </div>
                 </>
               ) : (
@@ -245,14 +286,20 @@ export default function ProjectPanel({
                   <div className="hc-t">
                     <div className="k">Clients ({periodLabel(period)})</div>
                     <div className="v">{fmtInt(latest?.clients_served ?? 0)}</div>
+                    <Delta cur={latest?.clients_served} prev={prevRow?.clients_served}
+                      vs={vsLabel} unit="" neutral />
                   </div>
                   <div className="hc-t">
                     <div className="k">PH exit rate</div>
                     <div className="v">{latest?.ph_exit_rate != null ? `${latest.ph_exit_rate}%` : '—'}</div>
+                    <Delta cur={latest?.ph_exit_rate} prev={prevRow?.ph_exit_rate}
+                      vs={vsLabel} unit="%" />
                   </div>
                   <div className="hc-t">
                     <div className="k">Avg LOS</div>
                     <div className="v">{latest?.avg_los != null ? `${latest.avg_los}d` : '—'}</div>
+                    <Delta cur={latest?.avg_los} prev={prevRow?.avg_los}
+                      vs={vsLabel} unit="d" lowerBetter />
                   </div>
                 </>
               )}
