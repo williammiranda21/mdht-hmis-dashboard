@@ -27,7 +27,7 @@ export async function enrichRoster(sb: SupabaseClient, rows: BnlClient[]): Promi
   type NoteRow = { pid: string; body: string; author_name: string | null; author_email: string | null; created_at: string };
   for (const n of (notesRes.data ?? []) as NoteRow[]) {
     const l = byPid.get(n.pid) ?? [];
-    if (l.length < 2) {
+    if (l.length < 5) {
       l.push({
         body: n.body,
         author: n.author_name ?? n.author_email ?? null,

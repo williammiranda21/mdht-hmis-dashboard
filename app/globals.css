@@ -48,6 +48,10 @@ a{color:inherit;text-decoration:none}
 .hdr .sub{font-size:11px;color:var(--faint);margin-top:1px}
 .hdr .sp{flex:1}
 .wrap{max-width:1340px;margin:0 auto;padding:22px 26px 70px}
+/* The By-Name List opts out of the width cap — 13 roster columns incl. the
+   notes column need the full viewport. The page renders the .bnl-wide marker;
+   every other tab keeps the standard 1340px. */
+.wrap:has(.bnl-wide){max-width:none}
 
 .tabnav{display:flex;flex-direction:column;background:transparent;border:0;border-radius:0;box-shadow:none;padding:8px 0;margin:0;overflow:visible}
 .tab{border:0;background:transparent;font:inherit;font-size:13px;font-weight:500;color:#9AA7BA;padding:10px 20px;border-radius:0;border-left:3px solid transparent;cursor:pointer;white-space:nowrap;text-align:left}

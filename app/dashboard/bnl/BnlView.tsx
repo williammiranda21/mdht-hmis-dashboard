@@ -23,8 +23,14 @@ const COLS: Array<[SortKey | 'flags' | 'notes', string]> = [
   ['risk_pts', 'Risk'],
   ['ref_status', 'Referral'],
   ['assessed', 'CE assessed'],
-  ['notes', 'Latest notes'],
+  ['notes', 'Last note'],
 ];
+
+/** '2026-08-05' → 'today' / '3d' / '2mo' — freshness for the notes column. */
+function noteAge(at: string): string {
+  const d = Math.max(0, Math.floor((Date.now() - +new Date(`${at}T00:00:00`)) / 86400000));
+  return d === 0 ? 'today' : d < 30 ? `${d}d` : d < 365 ? `${Math.round(d / 30)}mo` : `${Math.round(d / 365)}y`;
+}
 
 /** milestone key → label, for the CE-leg-wait cells and the stage filter chip */
 const MS_LABELS = Object.fromEntries(MILESTONES);
@@ -51,9 +57,11 @@ export default function BnlView({
   const [fRef, setFRef] = useState('');
   // Milestone worklist — set by clicking a waiting number on the journey bar.
   const [fStage, setFStage] = useState('');
-  // Multi-project filter (1..n projects; empty = all).
+  // Multi-project filter (1..n projects; empty = all). The picker is a FIXED
+  // popover anchored to its button — the panel it sits in clips overflow, and
+  // the old in-flow version shoved the whole table down (user disliked it).
   const [selProjects, setSelProjects] = useState<number[]>([]);
-  const [projOpen, setProjOpen] = useState(false);
+  const [projAnchor, setProjAnchor] = useState<{ x: number; y: number } | null>(null);
   const [projQ, setProjQ] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('days_homeless');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -159,15 +167,21 @@ export default function BnlView({
 
   const kpis: Array<[string, number | string, string, string]> = useMemo(() => {
     const c = pa.counts;
+    // On the Family tab every row IS a family household, so the generic
+    // "N veterans · N in families" note degenerates into the count repeating
+    // itself ("721 · 721 in families") — speak household language instead.
+    const activeNote = pop === 'family'
+      ? 'households — one row per family'
+      : `${c.vet.toLocaleString()} veterans · ${c.fam.toLocaleString()} in families`;
     return [
-      ['Actively homeless', c.active, `${c.vet.toLocaleString()} veterans · ${c.fam.toLocaleString()} in families`, 'var(--danger)'],
-      ['Newly identified (30d)', c.new30, 'first HMIS contact', 'var(--warn)'],
-      ['Housed', c.housed, 'moved in / exited to PH', 'var(--accent)'],
+      ['Actively homeless', c.active, activeNote, 'var(--danger)'],
+      ['Newly identified (30d)', c.new30, pop === 'family' ? 'households first seen' : 'first HMIS contact', 'var(--warn)'],
+      ['Housed', c.housed, pop === 'family' ? 'households moved in / exited to PH' : 'moved in / exited to PH', 'var(--accent)'],
       ['Inactive (90d+)', c.inactive, 'no recent contact', 'var(--faint)'],
       ['Chronically homeless', c.chronic, 'HUD definition (approx.)', '#7E22CE'],
       ['CE assessed', c.active ? `${Math.round((100 * c.assessed) / c.active)}%` : '—', 'of actively homeless', 'var(--secondary)'],
     ];
-  }, [pa]);
+  }, [pa, pop]);
 
   // Bar scale comes from the population aggregate, not the loaded page — using
   // the page max would rescale every bar each time more rows arrived.
@@ -176,7 +190,7 @@ export default function BnlView({
 
   return (
     <>
-      <div className="bnl-banner">
+      <div className="bnl-banner bnl-wide">
         🔒 Confidential — contains client names. Data as of <b>{agg.as_of}</b>.
         <a className="btn" href={exportHref} style={{ marginLeft: 'auto' }}>⬇ CSV</a>
       </div>
@@ -360,13 +374,17 @@ export default function BnlView({
             </div>
             <div className="fgroup">
               <span className="flabel">Projects</span>
-              <button className="btn" onClick={() => setProjOpen((o) => !o)}
-                title="Filter the roster to one or more projects">
-                {selProjects.length ? `${selProjects.length} selected` : 'All'} {projOpen ? '▴' : '▾'}
+              <button className="btn" title="Filter the roster to one or more projects"
+                style={selProjects.length ? { color: 'var(--primary)', fontWeight: 700 } : undefined}
+                onClick={(e) => {
+                  if (projAnchor) { setProjAnchor(null); return; }
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setProjAnchor({ x: rect.left, y: rect.bottom });
+                }}>
+                {selProjects.length === 1
+                  ? (projectOpts.find((o) => o.id === selProjects[0])?.name ?? '1 selected').slice(0, 26)
+                  : selProjects.length ? `${selProjects.length} projects` : 'All'} {projAnchor ? '▴' : '▾'}
               </button>
-              {selProjects.length > 0 && (
-                <button className="btn" onClick={() => setSelProjects([])} title="Clear project filter">✕</button>
-              )}
             </div>
             <div className="fgroup">
               <span className="flabel">CE assessed</span>
@@ -386,30 +404,11 @@ export default function BnlView({
               </div>
             )}
           </div>
-          {/* Multi-project picker — same option chips as Deep Dive's. */}
-          {projOpen && (
-            <div style={{ marginTop: 8 }}>
-              <input className="finput" placeholder="Filter projects…" value={projQ}
-                onChange={(e) => setProjQ(e.target.value)} style={{ minWidth: 220, marginBottom: 8 }} />
-              <div className="dd-opts">
-                {projectOpts
-                  .filter((o) => !projQ || o.name.toLowerCase().includes(projQ.toLowerCase()))
-                  .map((o) => (
-                    <label key={o.id} className={`dd-opt${selProjects.includes(o.id) ? ' on' : ''}`}
-                      title={o.type ? `${o.name} · ${o.type}` : o.name}>
-                      <input type="checkbox" checked={selProjects.includes(o.id)}
-                        onChange={() => setSelProjects((s) =>
-                          s.includes(o.id) ? s.filter((x) => x !== o.id) : [...s, o.id])} />
-                      <span className="dd-nm">{o.name}</span>
-                      {o.type && <span className="ty">{o.type}</span>}
-                    </label>
-                  ))}
-              </div>
-            </div>
-          )}
         </div>
 
-        <div className="scroll" style={loading ? { opacity: 0.55, transition: 'opacity .15s' } : undefined}>
+        {/* scroll-pin: only the LIST scrolls (viewport-bounded, sticky header)
+            — the filters and journey card above stay put, same as the DQ tab. */}
+        <div className="scroll scroll-pin" style={loading ? { opacity: 0.55, transition: 'opacity .15s' } : undefined}>
           <table className="bnl-table">
             <thead>
               <tr>
@@ -443,7 +442,7 @@ export default function BnlView({
                       : <span className="bnl-sub">1</span>}</td>
                     <td><span className={`bnl-chip bnl-${r.status}`}>{r.status === 'active' ? 'Active' : r.status === 'housed' ? 'Housed' : 'Inactive'}</span></td>
                     <td><Flags r={r} /></td>
-                    <td>{r.project ? <><span className="ty">{r.ptype ?? '?'}</span> {r.project}{r.enrolled ? null : <span className="bnl-sub" title="not a current enrollment — last known project"> (former)</span>}</> : <span className="bnl-sub">—</span>}</td>
+                    <td style={{ minWidth: 220 }}>{r.project ? <><span className="ty">{r.ptype ?? '?'}</span> {r.project}{r.enrolled ? null : <span className="bnl-sub" title="not a current enrollment — last known project"> (former)</span>}</> : <span className="bnl-sub">—</span>}</td>
                     <td>
                       <div className="bnl-dh">
                         <div className="bnl-dh-tr"><div className="bnl-dh-fl" style={{ width: `${Math.min(100, (100 * r.days_homeless) / maxDays)}%`, background: col }} /></div>
@@ -477,12 +476,27 @@ export default function BnlView({
                       }}
                       onMouseLeave={() => setNotePop(null)}>
                       {(r.notes2?.length ?? 0)
-                        ? r.notes2!.map((n, i) => (
-                            <div key={i} className="bnl-sub"
-                              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>
-                              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{n.at}</span> · {n.body}
-                            </div>
-                          ))
+                        ? (() => {
+                            const latest = r.notes2![0];
+                            const age = noteAge(latest.at);
+                            const fresh = age === 'today' || age.endsWith('d');
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, maxWidth: 220 }}>
+                                {r.notes2!.length > 1 && (
+                                  <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+                                    border: '1px solid rgba(148,163,184,0.35)', borderRadius: 8, padding: '0 5px' }}>
+                                    {r.notes2!.length}{r.notes2!.length === 5 ? '+' : ''}
+                                  </span>
+                                )}
+                                <span style={{ flexShrink: 0, fontSize: 11, fontVariantNumeric: 'tabular-nums',
+                                  fontWeight: fresh ? 700 : 400,
+                                  color: fresh ? 'var(--strong)' : 'var(--muted)' }}>{age}</span>
+                                <span className="bnl-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {latest.body}
+                                </span>
+                              </div>
+                            );
+                          })()
                         : <span className="bnl-sub">—</span>}
                     </td>
                   </tr>
@@ -531,6 +545,69 @@ export default function BnlView({
         </p>
       </div>
 
+      {/* Project picker popover — fixed + anchored to its button (the panel
+          clips overflow), transparent backdrop closes it. Single column so
+          names breathe; selected first, then active projects, (INACTIVE)
+          last instead of alphabetically first. */}
+      {projAnchor && (() => {
+        const norm = projQ.trim().toLowerCase();
+        const isInactive = (n: string) => /^\s*\(\s*INACTIVE/i.test(n);
+        const opts = projectOpts
+          .filter((o) => !norm || o.name.toLowerCase().includes(norm))
+          .sort((a, b) => {
+            const sa = selProjects.includes(a.id) ? 0 : 1;
+            const sb = selProjects.includes(b.id) ? 0 : 1;
+            if (sa !== sb) return sa - sb;
+            const ia = isInactive(a.name) ? 1 : 0, ib = isInactive(b.name) ? 1 : 0;
+            if (ia !== ib) return ia - ib;
+            return a.name.localeCompare(b.name);
+          });
+        return (
+          <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 49 }} onClick={() => setProjAnchor(null)} />
+            <div className="panel" style={{
+              position: 'fixed', zIndex: 50,
+              left: Math.min(projAnchor.x, Math.max(window.innerWidth - 480, 8)),
+              top: projAnchor.y + 6,
+              width: 460, maxWidth: '92vw',
+              boxShadow: '0 12px 32px rgba(0,0,0,0.4)',
+            }}>
+              <div style={{ padding: '10px 12px 8px' }}>
+                <input className="finput" autoFocus placeholder="Search projects…" value={projQ}
+                  onChange={(e) => setProjQ(e.target.value)} style={{ width: '100%' }} />
+              </div>
+              <div style={{ maxHeight: 320, overflowY: 'auto', padding: '0 6px' }}>
+                {opts.map((o) => (
+                  <label key={o.id}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
+                      borderRadius: 6, cursor: 'pointer',
+                      background: selProjects.includes(o.id) ? 'var(--primary-soft)' : undefined }}
+                    title={o.type ? `${o.name} · ${o.type}` : o.name}>
+                    <input type="checkbox" checked={selProjects.includes(o.id)}
+                      onChange={() => setSelProjects((s) =>
+                        s.includes(o.id) ? s.filter((x) => x !== o.id) : [...s, o.id])} />
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap', fontSize: 13,
+                      color: isInactive(o.name) ? 'var(--muted)' : undefined }}>{o.name}</span>
+                    {o.type && <span className="ty" style={{ marginLeft: 0, flexShrink: 0 }}>{o.type}</span>}
+                  </label>
+                ))}
+                {!opts.length && <div className="hc-none">No projects match that search.</div>}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                borderTop: '1px solid rgba(148,163,184,0.2)' }}>
+                <span className="bnl-sub">{selProjects.length ? `${selProjects.length} selected` : 'showing all projects'}</span>
+                <span style={{ flex: 1 }} />
+                {selProjects.length > 0 && (
+                  <button className="btn" onClick={() => setSelProjects([])}>Clear</button>
+                )}
+                <button className="btn" onClick={() => setProjAnchor(null)}>Done</button>
+              </div>
+            </div>
+          </>
+        );
+      })()}
+
       {/* Notes hover card — fixed so the table's scroll area can't clip it;
           opens leftward from the rightmost column, clamped to the viewport. */}
       {notePop && (
@@ -538,12 +615,12 @@ export default function BnlView({
           position: 'fixed',
           right: Math.max(window.innerWidth - notePop.x + 10, 12),
           top: Math.min(notePop.y, Math.max(window.innerHeight - 320, 12)),
-          width: 380, maxWidth: '60vw', maxHeight: 300, overflow: 'hidden',
+          width: 380, maxWidth: '60vw', maxHeight: 420, overflow: 'hidden',
           zIndex: 60, pointerEvents: 'none',
           padding: '12px 14px', boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
         }}>
           <div style={{ fontWeight: 700, fontSize: '.85rem', marginBottom: 6 }}>
-            {notePop.name} <span className="bnl-sub">· latest notes</span>
+            {notePop.name} <span className="bnl-sub">· last {notePop.notes.length} note{notePop.notes.length === 1 ? '' : 's'}</span>
           </div>
           {notePop.notes.map((n, i) => (
             <div key={i} style={{ marginBottom: i < notePop.notes.length - 1 ? 10 : 0 }}>
