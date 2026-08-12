@@ -169,6 +169,19 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
     }, 1000);
     return () => clearInterval(iv);
   }, [openTasks]);
+  // Click-away close (user request): any mousedown OUTSIDE the tasks UI —
+  // the chip cell, the expanded panel, or the people menu, all marked with
+  // data-tasks-ui — collapses the panel. mousedown (not click) so it fires
+  // before the chip's own toggle and doesn't fight it.
+  useEffect(() => {
+    if (!openTasks) return;
+    const onDown = (e: MouseEvent) => {
+      if ((e.target as Element | null)?.closest?.('[data-tasks-ui]')) return;
+      setOpenTasks(null); setPeoplePick(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [openTasks]);
   // Access panel (admin): pick an account to grant.
   const [grantSel, setGrantSel] = useState('');
 
@@ -608,7 +621,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                       </td>
                       {/* Next steps — open-item count + the assigned people
                           (monday-style avatar stack), click expands the checklist */}
-                      <td onClick={(e) => e.stopPropagation()}>
+                      <td onClick={(e) => e.stopPropagation()} data-tasks-ui="">
                         {detail.tasks === null
                           ? <span className="bnl-sub" title="Run supabase/cohort_tasks.sql to enable">—</span>
                           : (() => {
@@ -662,6 +675,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                     {expanded && detail.tasks !== null && (
                       <tr>
                         <td colSpan={10} style={{ background: 'var(--card-top)', padding: '10px 18px 14px' }}
+                          data-tasks-ui=""
                           onMouseMove={touchTasks} onClick={touchTasks} onKeyDown={touchTasks}>
                           {mTasks.length === 0 && <div className="bnl-sub" style={{ marginBottom: 8 }}>No next steps yet.</div>}
                           {[...mTasks].sort((a, b) => (a.status === b.status ? 0 : a.status === 'open' ? -1 : 1))
@@ -772,7 +786,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
       {peoplePick && detail && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 69 }} onClick={() => setPeoplePick(null)} />
-          <div className="panel" onMouseMove={touchTasks} style={{
+          <div className="panel" onMouseMove={touchTasks} data-tasks-ui="" style={{
             position: 'fixed',
             left: Math.min(peoplePick.x, Math.max((typeof window !== 'undefined' ? window.innerWidth : 1200) - 264, 12)),
             top: Math.min(peoplePick.y, Math.max((typeof window !== 'undefined' ? window.innerHeight : 800) - 330, 12)),
