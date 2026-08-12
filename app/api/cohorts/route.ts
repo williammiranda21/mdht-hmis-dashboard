@@ -336,11 +336,32 @@ export async function POST(req: Request) {
         ? { status: 'done', done_at: new Date().toISOString(), done_by: viewer.email ?? null }
         : { status: 'open', done_at: null, done_by: null })
       .eq('id', taskId)
-      .select('id');
+      .select('id, pid, body, cohort_id');
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     // RLS silently matches nothing when the viewer lacks a grant — say so.
     if (!data?.length) return NextResponse.json({ error: 'task not found or no access' }, { status: 404 });
-    return NextResponse.json({ ok: true });
+    // Auto-note on completion (user request 2026-08-12): the client's
+    // narrative thread records the outcome without anyone typing it, in the
+    // SAME append-only bnl_notes thread every other surface reads. Attributed
+    // to whoever clicked Complete (RLS pins author_id to the caller).
+    // Best-effort: a cohort grantee WITHOUT BNL access cannot write bnl_notes
+    // — the completion itself still stands, the note is just skipped.
+    // Reopening deliberately writes nothing (notes are append-only history;
+    // the task's own state already says it was reopened).
+    let noted = false;
+    if (done) {
+      const t = data[0] as { pid: string; body: string; cohort_id: number };
+      const c = await sb.from('cohorts').select('name').eq('id', t.cohort_id).maybeSingle();
+      const ins = await sb.from('bnl_notes').insert({
+        pid: t.pid,
+        body: `✓ Next step completed — ${t.body}${c.data?.name ? ` (${c.data.name})` : ''}`,
+        author_id: viewer.id,
+        author_name: viewer.displayName ?? null,
+        author_email: viewer.email ?? null,
+      });
+      noted = !ins.error;
+    }
+    return NextResponse.json({ ok: true, noted });
   }
 
   if (body.action === 'delete_task') {
