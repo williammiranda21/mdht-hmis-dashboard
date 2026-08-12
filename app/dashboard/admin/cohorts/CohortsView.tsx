@@ -174,7 +174,9 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
   // Journey-bar worklist: clicking "N waiting" filters the member table to
   // that leg, longest-waiting first (same behavior as the BNL page).
   const [fStage, setFStage] = useState('');
-  useEffect(() => setFStage(''), [sel]);   // a stage filter never outlives its cohort
+  // Member status filter (active/housed/inactive) — header select, user request
+  const [fMStatus, setFMStatus] = useState('');
+  useEffect(() => { setFStage(''); setFMStatus(''); }, [sel]);   // filters never outlive their cohort
   // Layer-1 activity digest window (days)
   const [digestWin, setDigestWin] = useState(7);
   // Notes hover card (same fixed-panel pattern as the BNL roster).
@@ -672,6 +674,10 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
 
           {/* Members */}
           <div className="panel" style={{ marginTop: 16 }}>
+            {/* EVERYTHING on one header line (user call 2026-08-12): title +
+                description left; Access chips, Share, Add-clients toggle and
+                Delete on the right. The paste box still only renders when
+                toggled open below. */}
             <div className="panel-h">
               <div>
                 <h3>{detail.cohort.name} — members</h3>
@@ -680,68 +686,67 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                   {detail.missing.length > 0 && ` · ⚠ ${detail.missing.length} member(s) no longer on the roster`}
                 </div>
               </div>
-              {isAdmin && (
-                <button className="btn" disabled={busy} onClick={async () => {
-                  if (!window.confirm(`Delete cohort “${detail.cohort.name}”? Members are not affected — only the grouping is removed.`)) return;
-                  const r = await act({ action: 'delete', id: sel });
-                  if (r?.ok) { setSel(null); setDetail(null); loadList(); }
-                }}>Delete cohort</button>
-              )}
-            </div>
-
-            {/* ONE compact toolbar row (user report 2026-08-12: the stacked
-                Access row + always-open paste textarea stole ~90px from the
-                member list). Access chips + Share on the left, the Add-clients
-                TOGGLE at the right — the paste box itself only renders when
-                toggled open below. */}
-            {isAdmin && (
-              <div style={{ padding: '0 18px 12px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <span className="flabel" style={{ margin: 0 }}>Access</span>
-                {detail.access === null ? (
-                  <span className="bnl-sub">run <code>supabase/cohort_tasks.sql</code> to enable sharing &amp; tasks</span>
-                ) : (
-                  <>
-                    {detail.access.map((a) => {
-                      const s = detail.staff.find((st) => st.id === a.user_id);
-                      const nm = s?.display_name || s?.email || a.user_id.slice(0, 8);
-                      const noBnl = s ? !s.is_admin && !s.bnl_access : false;
-                      return (
-                        <span key={a.user_id} className="bnl-chip"
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                          title={noBnl
-                          ? 'This account has no By-Name List access — they will see the cohort but not member names. Grant BNL access in the Users console.'
-                          : undefined}>
-                          <Avatar name={nm} id={a.user_id} size={18} />
-                          {nm}{noBnl && ' ⚠'}
-                          <span role="button" style={{ cursor: 'pointer', marginLeft: 6, opacity: .7 }}
-                            title="Revoke access"
-                            onClick={async () => {
-                              const r = await act({ action: 'revoke_access', id: sel, user_id: a.user_id });
-                              if (r?.ok) void refreshLite();
-                            }}>✕</span>
-                        </span>
-                      );
-                    })}
-                    <button className="btn" data-tasks-ui=""
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                      title="Share this cohort — click people in the list to grant or revoke, several in a row"
-                      onClick={(e) => {
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        setPeoplePick(peoplePick?.mode === 'access' ? null : { x: rect.left, y: rect.bottom + 6, mode: 'access' });
-                      }}>
-                      + Share
-                    </button>
-                  </>
-                )}
-                <button className="btn" aria-expanded={addOpen}
-                  style={{ marginLeft: 'auto',
-                    ...(addOpen ? { borderColor: 'var(--primary)', color: 'var(--primary)' } : {}) }}
-                  title="Paste hashed client IDs to add members (every ID in the app is click-to-copy)"
-                  onClick={() => setAddOpen((v) => !v)}>
-                  + Add clients {addOpen ? '▴' : '▾'}
-                </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
+                <select className="fselect" value={fMStatus} onChange={(e) => setFMStatus(e.target.value)}
+                  title="Filter the member list by status">
+                  <option value="">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="housed">Housed</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+                {isAdmin && (<>
+                  <span className="flabel" style={{ margin: 0 }}>Access</span>
+                  {detail.access === null ? (
+                    <span className="bnl-sub">run <code>supabase/cohort_tasks.sql</code> to enable sharing &amp; tasks</span>
+                  ) : (
+                    <>
+                      {detail.access.map((a) => {
+                        const s = detail.staff.find((st) => st.id === a.user_id);
+                        const nm = s?.display_name || s?.email || a.user_id.slice(0, 8);
+                        const noBnl = s ? !s.is_admin && !s.bnl_access : false;
+                        return (
+                          <span key={a.user_id} className="bnl-chip"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                            title={noBnl
+                            ? 'This account has no By-Name List access — they will see the cohort but not member names. Grant BNL access in the Users console.'
+                            : undefined}>
+                            <Avatar name={nm} id={a.user_id} size={18} />
+                            {nm}{noBnl && ' ⚠'}
+                            <span role="button" style={{ cursor: 'pointer', marginLeft: 6, opacity: .7 }}
+                              title="Revoke access"
+                              onClick={async () => {
+                                if (!window.confirm(`Remove ${nm}'s access to “${detail.cohort.name}”?`)) return;
+                                const r = await act({ action: 'revoke_access', id: sel, user_id: a.user_id });
+                                if (r?.ok) void refreshLite();
+                              }}>✕</span>
+                          </span>
+                        );
+                      })}
+                      <button className="btn" data-tasks-ui=""
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                        title="Share this cohort — click people in the list to grant or revoke, several in a row"
+                        onClick={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setPeoplePick(peoplePick?.mode === 'access' ? null : { x: rect.left, y: rect.bottom + 6, mode: 'access' });
+                        }}>
+                        + Share
+                      </button>
+                    </>
+                  )}
+                  <button className="btn" aria-expanded={addOpen}
+                    style={addOpen ? { borderColor: 'var(--primary)', color: 'var(--primary)' } : undefined}
+                    title="Paste hashed client IDs to add members (every ID in the app is click-to-copy)"
+                    onClick={() => setAddOpen((v) => !v)}>
+                    + Add clients {addOpen ? '▴' : '▾'}
+                  </button>
+                  <button className="btn" disabled={busy} onClick={async () => {
+                    if (!window.confirm(`Delete cohort “${detail.cohort.name}”? Members are not affected — only the grouping is removed.`)) return;
+                    const r = await act({ action: 'delete', id: sel });
+                    if (r?.ok) { setSel(null); setDetail(null); loadList(); }
+                  }}>Delete cohort</button>
+                </>)}
               </div>
-            )}
+            </div>
             {detail.restricted && (
               <div style={{ padding: '0 18px 10px' }} className="bnl-sub">
                 You have access to this cohort, but member details require By-Name List access —
@@ -784,11 +789,13 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                   </tr>
                 </thead>
                 <tbody>
-                  {(fStage
-                    ? detail.members.filter((m) => m.ms_stage === fStage)
-                        .sort((a, b) => (b.ms_wait ?? 0) - (a.ms_wait ?? 0))
-                    : detail.members
-                  ).map((m) => {
+                  {(() => {
+                    const base = fMStatus ? detail.members.filter((m) => m.status === fMStatus) : detail.members;
+                    return fStage
+                      ? base.filter((m) => m.ms_stage === fStage)
+                          .sort((a, b) => (b.ms_wait ?? 0) - (a.ms_wait ?? 0))
+                      : base;
+                  })().map((m) => {
                     const mTasks = (detail.tasks ?? []).filter((t) => t.pid === m.pid);
                     const openN = mTasks.filter((t) => t.status === 'open').length;
                     const expanded = openTasks === m.pid;
@@ -942,6 +949,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                             disabled={busy}
                             onClick={async (e) => {
                               e.stopPropagation();
+                              if (!window.confirm(`Remove ${m.name ?? m.pid} from “${detail.cohort.name}”? Notes and next-step history stay on the client record — only the cohort membership is removed.`)) return;
                               const r = await act({ action: 'remove_member', id: sel, pid: m.pid });
                               if (r?.ok) { loadDetail(sel!); loadList(); }
                             }}>✕</button>
@@ -1120,6 +1128,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                                 <span role="button" className="bnl-sub" style={{ cursor: 'pointer', flexShrink: 0 }}
                                   title="Delete this item"
                                   onClick={async () => {
+                                    if (!window.confirm(`Delete this next step permanently?\n\n“${t.body}”`)) return;
                                     const r = await act({ action: 'delete_task', task_id: t.id });
                                     if (r?.ok) void refreshLite();
                                   }}>✕</span>
@@ -1176,6 +1185,10 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                   {detail.members.length > 0 && fStage
                     && detail.members.every((m) => m.ms_stage !== fStage) && (
                     <tr><td colSpan={10} className="empty">No members are waiting at {MS_LABELS[fStage] ?? fStage} right now.</td></tr>
+                  )}
+                  {detail.members.length > 0 && !fStage && fMStatus
+                    && detail.members.every((m) => m.status !== fMStatus) && (
+                    <tr><td colSpan={10} className="empty">No {fMStatus} members in this cohort.</td></tr>
                   )}
                 </tbody>
               </table>
