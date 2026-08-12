@@ -35,6 +35,8 @@ export default function AdminUsers({
   const [openFor, setOpenFor] = useState<string | null>(null);
   const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  // Search over the All-accounts list (name / email / agency, case-insensitive).
+  const [q, setQ] = useState('');
 
   async function resetPassword(r: AdminProfile) {
     if (!confirm(`Reset the password for ${r.email}?\n\nTheir current password stops working immediately. You'll get a temporary one to pass along.`)) return;
@@ -57,6 +59,13 @@ export default function AdminUsers({
 
   const pending = rows.filter((r) => r.status === 'pending');
   const others = rows.filter((r) => r.status !== 'pending');
+  const t = q.trim().toLowerCase();
+  const shown = t
+    ? others.filter((r) =>
+        (r.displayName ?? '').toLowerCase().includes(t)
+        || (r.email ?? '').toLowerCase().includes(t)
+        || (r.agency ?? '').toLowerCase().includes(t))
+    : others;
 
   async function run(id: string, fn: () => Promise<{ error: unknown }>) {
     setBusy(id); setError(null);
@@ -226,8 +235,14 @@ export default function AdminUsers({
         <div className="panel-h">
           <div>
             <h3>All accounts</h3>
-            <div className="meta">{fmtInt(rows.length)} total · admins see every project</div>
+            <div className="meta">
+              {t ? `${fmtInt(shown.length)} of ${fmtInt(others.length)} shown` : `${fmtInt(rows.length)} total`}
+              {' '}· admins see every project
+            </div>
           </div>
+          <input className="finput" placeholder="Search name, email, or agency…"
+            value={q} onChange={(e) => setQ(e.target.value)}
+            style={{ minWidth: 240 }} aria-label="Search accounts" />
         </div>
         <div className="scroll">
           <table>
@@ -235,8 +250,11 @@ export default function AdminUsers({
               <tr><th>User</th><th>Agency</th><th>Status</th><th className="num">Scope</th><th className="num">Actions</th></tr>
             </thead>
             <tbody>
-              {others.map((r) => <Row key={r.id} r={r} />)}
+              {shown.map((r) => <Row key={r.id} r={r} />)}
               {!others.length && <tr><td colSpan={5} className="empty">No approved accounts yet.</td></tr>}
+              {others.length > 0 && !shown.length && (
+                <tr><td colSpan={5} className="empty">No accounts match “{q.trim()}”.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
