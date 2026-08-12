@@ -117,6 +117,21 @@ interface Task {
   created_by: string | null; created_at: string;
   done_at: string | null; done_by: string | null;
 }
+/** AI Layer-2 pilot — shapes returned by /api/ai/summary. Proposals are
+ *  SUGGESTIONS only; they become cohort_tasks exclusively through the same
+ *  add_task path as the manual form, when a human clicks + Add. */
+interface AiProposal { body: string; rationale: string; source_date: string | null }
+interface AiResult {
+  summary: string | null;
+  proposals: AiProposal[];
+  model?: string;
+  created_at?: string;
+  /** false = the thread changed since this summary was written */
+  current: boolean;
+  cached: boolean;
+  /** false = ai_summaries.sql not run yet — summaries won't persist */
+  cacheOk?: boolean;
+}
 /** `bnl_access` is only meaningful for NON-admins — can_see_bnl() is
  *  is_admin() OR (approved AND bnl_access), so an admin with the flag off
  *  still sees everything. Always check is_admin before warning on it. */
@@ -191,6 +206,58 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
   // existing task (admin) · 'access' = sharing the cohort (instant grant/revoke)
   const [peoplePick, setPeoplePick] = useState<{ x: number; y: number; mode: 'draft' | 'task' | 'access'; taskId?: number } | null>(null);
   useEffect(() => { setOpenTasks(null); setTaskText(''); setTaskAssignees([]); setPeoplePick(null); }, [sel]);
+  // ── AI Layer-2 pilot (per-member summary card in the expanded panel) ──────
+  const [ai, setAi] = useState<Record<string, AiResult>>({});
+  const [aiBusy, setAiBusy] = useState<string | null>(null);
+  const [aiErr, setAiErr] = useState<Record<string, string>>({});
+  // proposals already accepted this session, keyed `${pid}|${index}`
+  const [aiAdded, setAiAdded] = useState<Record<string, boolean>>({});
+  // admin audit view: the exact de-identified payload that would be sent
+  const [aiPeek, setAiPeek] = useState<{ pid: string; json: string } | null>(null);
+  useEffect(() => { setAi({}); setAiErr({}); setAiAdded({}); setAiPeek(null); }, [sel]);
+
+  /** generate:false = cache lookup only (free, no API call) — used on expand.
+   *  generate:true = the Generate/Refresh button; one Claude call, cached by
+   *  input hash server-side so an unchanged thread is never re-billed. */
+  const aiFetch = async (pid: string, generate: boolean) => {
+    if (generate) { setAiBusy(pid); setAiErr((e) => ({ ...e, [pid]: '' })); }
+    try {
+      const r = await fetch('/api/ai/summary', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid, generate }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (generate) setAiErr((e) => ({ ...e, [pid]: String(j?.error ?? `Failed (${r.status}).`) }));
+        else setAi((a) => ({ ...a, [pid]: { summary: null, proposals: [], current: false, cached: false } }));
+        return;
+      }
+      setAi((a) => ({
+        ...a,
+        [pid]: {
+          summary: j.summary ?? null, proposals: j.proposals ?? [],
+          model: j.model, created_at: j.created_at,
+          current: !!j.current, cached: !!j.cached, cacheOk: j.cacheOk,
+        },
+      }));
+    } catch {
+      if (generate) setAiErr((e) => ({ ...e, [pid]: 'Could not reach the AI service.' }));
+    } finally {
+      if (generate) setAiBusy((b) => (b === pid ? null : b));
+    }
+  };
+
+  const aiPreview = async (pid: string) => {
+    if (aiPeek?.pid === pid) { setAiPeek(null); return; }
+    try {
+      const r = await fetch('/api/ai/summary', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid, preview: true }),
+      });
+      const j = await r.json();
+      if (r.ok) setAiPeek({ pid, json: JSON.stringify(j.payload, null, 2) });
+    } catch { /* audit view is best-effort */ }
+  };
   // Auto-collapse an idle Next-steps panel (user request): any activity inside
   // it resets the clock; a non-empty draft or an open people picker counts as
   // activity, so nothing in progress is ever swallowed. Refs (not state) so
@@ -199,8 +266,13 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
   const tasksTouchRef = useRef(Date.now());
   const draftRef = useRef(false);
   useEffect(() => {
-    draftRef.current = taskText.trim().length > 0 || taskAssignees.length > 0 || peoplePick !== null;
-  }, [taskText, taskAssignees, peoplePick]);
+    // An in-flight AI generation counts as activity too — the 20s idle
+    // collapse must never swallow the panel under a "Generating…" spinner
+    // (caught in verification: the Claude call runs 10-15s, close to the
+    // idle threshold).
+    draftRef.current = taskText.trim().length > 0 || taskAssignees.length > 0
+      || peoplePick !== null || aiBusy !== null;
+  }, [taskText, taskAssignees, peoplePick, aiBusy]);
   const touchTasks = () => { tasksTouchRef.current = Date.now(); };
   useEffect(() => {
     if (!openTasks) return;
@@ -817,7 +889,11 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                                   : people.length
                                     ? `Open items assigned to ${people.map((p) => p.name).filter(Boolean).join(', ')}`
                                     : 'Show next steps for this member'}
-                                onClick={() => { setOpenTasks(expanded ? null : m.pid); setTaskText(''); setTaskAssignees([]); }}>
+                                onClick={() => {
+                                  setOpenTasks(expanded ? null : m.pid); setTaskText(''); setTaskAssignees([]);
+                                  // free cache lookup so a stored AI summary shows instantly on expand
+                                  if (!expanded && !(m.pid in ai)) void aiFetch(m.pid, false);
+                                }}>
                                 {people.length > 0 && (
                                   <span style={{ display: 'inline-flex' }}>
                                     {people.slice(0, 3).map((p, i) => (
@@ -904,6 +980,100 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                                     title="Where the client stands right now">
                                     now: {MS_LABELS[m.ms_stage] ?? m.ms_stage}{m.ms_wait != null ? ` ${fmtInt(m.ms_wait)}d` : ''}
                                   </span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                          {/* AI case summary (Layer 2) — Claude reads the DE-IDENTIFIED
+                              thread (lib/ai/deidentify strips names/SSN/phone/email/DOB
+                              server-side before any API call; hashed pid is the only
+                              identifier sent). Cached by input hash, so an unchanged
+                              thread never re-bills. AI PROPOSES, HUMAN CONFIRMS: the
+                              suggestions below only become real next-steps through
+                              their + Add button (the same add_task path as the manual
+                              form). The real thread stays one click away — the notes
+                              hover and the client card. */}
+                          {(() => {
+                            const a = ai[m.pid];
+                            const generating = aiBusy === m.pid;
+                            const err = aiErr[m.pid];
+                            return (
+                              <div style={{ margin: '0 0 12px', padding: '9px 12px 10px', borderRadius: 8,
+                                border: '1px solid rgba(126,103,254,0.35)', background: 'rgba(126,103,254,0.05)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                  <b style={{ fontSize: '.76rem', color: 'var(--primary)', letterSpacing: '.03em' }}>✦ AI CASE SUMMARY</b>
+                                  <span className="bnl-sub" style={{ fontSize: '.72rem' }}>
+                                    AI-generated — verify against the notes · de-identified before sending
+                                  </span>
+                                  {a?.summary && (
+                                    <span className="bnl-sub" style={{ fontSize: '.72rem' }}>
+                                      {a.created_at?.slice(0, 10)}{a.current ? '' : ' · thread has changed since'}
+                                    </span>
+                                  )}
+                                  <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                                    {isAdmin && (
+                                      <button className="tbtn" style={{ fontSize: '.72rem' }}
+                                        title="Audit view: the exact de-identified payload that leaves the server for the Claude API — no API call is made"
+                                        onClick={() => void aiPreview(m.pid)}>
+                                        {aiPeek?.pid === m.pid ? 'hide sent data' : 'view sent data'}
+                                      </button>
+                                    )}
+                                    <button className="btn" style={{ padding: '1px 9px', fontSize: 12 }}
+                                      disabled={generating || busy}
+                                      title="Send the de-identified thread to Claude (~1-2¢); the result is cached until the thread changes"
+                                      onClick={() => void aiFetch(m.pid, true)}>
+                                      {generating ? 'Generating…'
+                                        : a?.summary ? (a.current ? '↻ Regenerate' : '↻ Update — thread changed') : '✦ Generate'}
+                                    </button>
+                                  </span>
+                                </div>
+                                {err ? <div className="bnl-dq" style={{ marginTop: 6 }}>{err}</div> : null}
+                                {a?.cacheOk === false && (
+                                  <div className="bnl-sub" style={{ marginTop: 4, fontSize: '.72rem' }}>
+                                    ⚠ cache table missing — run <code>supabase/ai_summaries.sql</code> so summaries persist between visits
+                                  </div>
+                                )}
+                                {a?.summary && (
+                                  <div style={{ marginTop: 6, fontSize: '.84rem', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                                    {a.summary}
+                                  </div>
+                                )}
+                                {(a?.proposals?.length ?? 0) > 0 && (
+                                  <div style={{ marginTop: 8 }}>
+                                    <div className="bnl-sub" style={{ fontSize: '.72rem', marginBottom: 4 }}>
+                                      Suggested next steps — nothing is added until you click
+                                    </div>
+                                    {a!.proposals.map((p, i) => {
+                                      const k = `${m.pid}|${i}`;
+                                      const already = aiAdded[k]
+                                        || mTasks.some((t) => t.body.trim().toLowerCase() === p.body.trim().toLowerCase());
+                                      return (
+                                        <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                                          <button className="btn" disabled={busy || already}
+                                            style={{ padding: '0 9px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}
+                                            title={`${p.rationale}${p.source_date ? ` (from note ${p.source_date})` : ''}`}
+                                            onClick={async () => {
+                                              const r = await act({ action: 'add_task', id: sel, pid: m.pid, body: p.body, assignee_ids: [] });
+                                              if (r?.ok) { setAiAdded((s) => ({ ...s, [k]: true })); void refreshLite(); }
+                                            }}>
+                                            {already ? '✓ Added' : '+ Add'}
+                                          </button>
+                                          <span style={{ fontSize: '.82rem' }}>{p.body}</span>
+                                          {p.source_date && <span className="bnl-sub" style={{ flexShrink: 0 }}>note {p.source_date}</span>}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {a && !a.summary && !err && !generating && (
+                                  <div className="bnl-sub" style={{ marginTop: 4, fontSize: '.78rem' }}>
+                                    No summary yet — Generate reads the whole thread and writes one.
+                                  </div>
+                                )}
+                                {aiPeek?.pid === m.pid && (
+                                  <pre style={{ marginTop: 8, maxHeight: 260, overflow: 'auto', fontSize: '.7rem',
+                                    background: 'var(--card)', border: '1px solid var(--faint)', borderRadius: 6,
+                                    padding: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{aiPeek.json}</pre>
                                 )}
                               </div>
                             );
