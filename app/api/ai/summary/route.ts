@@ -33,18 +33,27 @@ export const maxDuration = 60;
 
 const MODEL = 'claude-opus-5';
 
+/** Bump on ANY change to SYSTEM or OUTPUT_SCHEMA. It participates in the
+ *  input hash, so a prompt revision marks every cached summary stale and the
+ *  UI offers "Update" instead of silently serving the old framing. */
+const PROMPT_VERSION = 2;
+
+// v2 (user direction 2026-08-12): accomplishments-first — the summary REPLACED
+// the deterministic "Since first note" ledger on the cohort page, so it must
+// carry that job: what has actually been achieved since the case started,
+// then where things stand.
 const SYSTEM = `You are a case-summary assistant inside an HMIS (Homeless Management Information System) dashboard used by a county coordinated-entry team. Each request carries de-identified data for ONE person experiencing homelessness: coordinated-entry journey dates, case notes written over time by staff, and a staffing checklist of "next steps". All names and identifiers were removed before sending; refer to the person only as "the client".
 
 Audience: a case manager preparing for a cohort staffing meeting. Two outputs:
 
-summary — a tight narrative (under 120 words, plain prose, no headers or preamble) of the case since the first note: what has been accomplished, what is blocking housing, and where the case stands right now (use the journey data for the current wait). State only what the notes and data support; if activity is thin or the case has gone quiet, say so plainly — never pad or invent.
+summary — an ACCOMPLISHMENTS-FIRST case narrative (under 120 words, plain prose, no headers, no preamble). Lead with what has actually been ACHIEVED since the case started, in roughly chronological order: milestones reached, documents obtained, benefits secured, referrals made or accepted, placements — each anchored to what the notes record. Then close with one or two sentences on where the case stands right now and the main thing blocking housing (use the journey data for the current wait). State only what the notes and data support; if little or nothing has been accomplished, or the case has gone quiet, say exactly that — never pad, never invent, never soften.
 
 proposals — 0 to 4 concrete NEW next steps, each grounded in a specific note (source_date = that note's date, YYYY-MM-DD, or null). Match the terse imperative style of the existing next-step items. Never repeat or rephrase a step that is already open, and never propose something the completed steps show is done. An empty array is the correct answer when the notes surface nothing actionable.`;
 
 const OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
-    summary: { type: 'string', description: 'Narrative case summary, under 120 words, plain prose.' },
+    summary: { type: 'string', description: 'Accomplishments-first case narrative, under 120 words, plain prose: what was achieved since the case started, then current standing.' },
     proposals: {
       type: 'array',
       description: 'At most 4 NEW next-step suggestions grounded in the notes; empty when nothing actionable.',
@@ -110,6 +119,7 @@ export async function POST(req: Request) {
   // can toggle, so their state participates; journey state rides along so a
   // new milestone also invalidates.
   const inputHash = createHash('sha256').update(JSON.stringify({
+    v: PROMPT_VERSION,
     n: notes.map((x) => x.id),
     t: tasks.map((x) => [x.id, x.status, x.body, x.done_at]),
     c: [cRes.data.status, cRes.data.ms_stage, cRes.data.ms_wait, cRes.data.milestones],

@@ -49,26 +49,9 @@ function initials(name: string | null | undefined): string {
   if (!parts.length) return '?';
   return ((parts[0][0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] ?? '' : '')).toUpperCase();
 }
-/** Deterministic accomplishment tagger — first matching rule labels the text
- *  (vocabulary from the county's own cohort-meeting sheets). Transparent and
- *  tunable, same philosophy as lib/diagnosis.ts: rules you can read, not a
- *  model. Applied only to COMPLETED next-steps, where the text plus the
- *  completion is unambiguous — free-text notes stay untagged ("needs docs"
- *  vs "got docs" needs understanding, not keywords). */
-const TAG_RULES: [RegExp, string][] = [
-  [/marchman|baker act|conservator|court|attorney|legal|immigration|jail|jdp/i, 'legal'],
-  [/ssi\b|ssn\b|tpqy|benefit|social security|ss office|cash assistance|income/i, 'benefits'],
-  [/docs?\b|document|birth certificate|passport|identification|\bid\b/i, 'documents'],
-  [/hous|placement|\balf\b|\bilf\b|unit|lease|apartment|residential|shelter/i, 'housing'],
-  [/spdat|assess/i, 'assessment'],
-  [/medical|doctor|hospital|treatment|detox|meds|psych|health/i, 'health'],
-  [/refer/i, 'referral'],
-  [/contact|located|outreach|\butl\b/i, 'contact'],
-];
-function tagOf(text: string): string | null {
-  for (const [re, label] of TAG_RULES) if (re.test(text)) return label;
-  return null;
-}
+// (The TAG_RULES keyword tagger that labeled completed next-steps lived here
+// until 2026-08-12 — it served the deterministic "Since first note" ledger,
+// which the AI case summary replaced. Recover from git history if needed.)
 
 function Avatar({ name, id, size = 24 }: { name: string | null; id: string; size?: number }) {
   return (
@@ -262,9 +245,14 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
   // it resets the clock; a non-empty draft or an open people picker counts as
   // activity, so nothing in progress is ever swallowed. Refs (not state) so
   // mousemoves don't re-render.
-  const TASKS_IDLE_MS = 20_000;
+  // 60s (was 20s): the panel now carries an AI summary worth READING, and
+  // reading emits no DOM events — 20s closed it mid-sentence (user report
+  // 2026-08-12). Additionally, a pointer parked anywhere over the panel
+  // holds it open indefinitely (panelHoverRef below).
+  const TASKS_IDLE_MS = 60_000;
   const tasksTouchRef = useRef(Date.now());
   const draftRef = useRef(false);
+  const panelHoverRef = useRef(false);
   useEffect(() => {
     // An in-flight AI generation counts as activity too — the 20s idle
     // collapse must never swallow the panel under a "Generating…" spinner
@@ -278,7 +266,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
     if (!openTasks) return;
     tasksTouchRef.current = Date.now();
     const iv = setInterval(() => {
-      if (draftRef.current) { tasksTouchRef.current = Date.now(); return; }
+      if (draftRef.current || panelHoverRef.current) { tasksTouchRef.current = Date.now(); return; }
       if (Date.now() - tasksTouchRef.current >= TASKS_IDLE_MS) {
         setOpenTasks(null); setPeoplePick(null);
       }
@@ -930,78 +918,42 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                       <tr>
                         <td colSpan={10} style={{ background: 'var(--card-top)', padding: '10px 18px 14px' }}
                           data-tasks-ui=""
+                          onMouseEnter={() => { panelHoverRef.current = true; }}
+                          onMouseLeave={() => { panelHoverRef.current = false; touchTasks(); }}
                           onMouseMove={touchTasks} onClick={touchTasks} onKeyDown={touchTasks}>
-                          {/* Case summary — what has been ACCOMPLISHED since the case
-                              started (first note ever, or cohort join if earlier).
-                              Deterministic ledger: milestone dates + completed
-                              next-steps (keyword-tagged), amber tail = where they
-                              stand today. */}
+                          {/* AI case summary (Layer 2) — REPLACES the old deterministic
+                              "Since first note" ledger (user call 2026-08-12): the
+                              narrative IS the accomplishments-since-start view now; the
+                              deterministic start-date anchor stays in the header. Claude
+                              reads the DE-IDENTIFIED thread (lib/ai/deidentify strips
+                              names/SSN/phone/email/DOB server-side before any API call;
+                              hashed pid is the only identifier sent). Cached by input
+                              hash, so an unchanged thread never re-bills. AI PROPOSES,
+                              HUMAN CONFIRMS: the suggestions below only become real
+                              next-steps through their + Add button (the same add_task
+                              path as the manual form). The real thread stays one click
+                              away — the notes hover and the client card. */}
                           {(() => {
+                            const a = ai[m.pid];
+                            const generating = aiBusy === m.pid;
+                            const err = aiErr[m.pid];
+                            // Case-start anchor (first note ever, or cohort join if
+                            // earlier) — deterministic, shown even before generation.
                             const first = detail.firstNote?.[m.pid]?.slice(0, 10) ?? null;
                             const joined = m.added_at?.slice(0, 10) ?? null;
                             const start = first && joined ? (first < joined ? first : joined) : (first ?? joined);
                             const startLabel = start ? (start === first ? `first note ${start}` : `added ${start}`) : null;
                             const days = start ? Math.max(0, Math.floor((Date.now() - +new Date(`${start}T00:00:00`)) / DAY_MS)) : null;
-                            const ms = m.milestones ?? {};
-                            const msHits = MS_ORDER.filter((k) => ms[k] && (!start || String(ms[k]) >= start));
-                            const doneTasks = mTasks.filter((t) => t.status === 'done')
-                              .sort((a, b) => (a.done_at ?? '').localeCompare(b.done_at ?? ''));
-                            const shown = doneTasks.slice(-3);
-                            return (
-                              <div style={{ marginBottom: 10, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'baseline', fontSize: '.8rem' }}>
-                                <span className="bnl-sub">
-                                  <b style={{ color: 'var(--strong)' }}>Since {startLabel ?? 'the start'}</b>
-                                  {days != null ? ` · ${fmtInt(days)}d` : ''}:
-                                </span>
-                                {msHits.map((k) => (
-                                  <span key={k} style={{ color: 'var(--accent)', fontWeight: 600 }}
-                                    title={`CE milestone reached ${ms[k]}`}>
-                                    ✓ {MS_LABELS[k] ?? k} {ms[k]}
-                                  </span>
-                                ))}
-                                {shown.map((t) => {
-                                  const tag = tagOf(t.body);
-                                  const b = t.body.length > 46 ? `${t.body.slice(0, 46)}…` : t.body;
-                                  return (
-                                    <span key={t.id} style={{ color: 'var(--accent)' }}
-                                      title={`${t.body} — completed ${t.done_at?.slice(0, 10) ?? ''} by ${t.done_by ?? '—'}`}>
-                                      ✓ {b}{tag && <span className="bnl-sub"> · {tag}</span>}
-                                    </span>
-                                  );
-                                })}
-                                {doneTasks.length > shown.length && (
-                                  <span className="bnl-sub">+{doneTasks.length - shown.length} more done</span>
-                                )}
-                                {!msHits.length && !doneTasks.length && (
-                                  <span className="bnl-sub">nothing recorded yet</span>
-                                )}
-                                {!ms['movein'] && m.ms_stage && (
-                                  <span style={{ color: 'var(--warn)' }}
-                                    title="Where the client stands right now">
-                                    now: {MS_LABELS[m.ms_stage] ?? m.ms_stage}{m.ms_wait != null ? ` ${fmtInt(m.ms_wait)}d` : ''}
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })()}
-                          {/* AI case summary (Layer 2) — Claude reads the DE-IDENTIFIED
-                              thread (lib/ai/deidentify strips names/SSN/phone/email/DOB
-                              server-side before any API call; hashed pid is the only
-                              identifier sent). Cached by input hash, so an unchanged
-                              thread never re-bills. AI PROPOSES, HUMAN CONFIRMS: the
-                              suggestions below only become real next-steps through
-                              their + Add button (the same add_task path as the manual
-                              form). The real thread stays one click away — the notes
-                              hover and the client card. */}
-                          {(() => {
-                            const a = ai[m.pid];
-                            const generating = aiBusy === m.pid;
-                            const err = aiErr[m.pid];
                             return (
                               <div style={{ margin: '0 0 12px', padding: '9px 12px 10px', borderRadius: 8,
                                 border: '1px solid rgba(126,103,254,0.35)', background: 'rgba(126,103,254,0.05)' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                                   <b style={{ fontSize: '.76rem', color: 'var(--primary)', letterSpacing: '.03em' }}>✦ AI CASE SUMMARY</b>
+                                  {startLabel && (
+                                    <span className="bnl-sub" style={{ fontSize: '.72rem' }}>
+                                      <b style={{ color: 'var(--strong)' }}>since {startLabel}</b>{days != null ? ` · ${fmtInt(days)}d` : ''}
+                                    </span>
+                                  )}
                                   <span className="bnl-sub" style={{ fontSize: '.72rem' }}>
                                     AI-generated — verify against the notes · de-identified before sending
                                   </span>
@@ -1067,7 +1019,8 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                                 )}
                                 {a && !a.summary && !err && !generating && (
                                   <div className="bnl-sub" style={{ marginTop: 4, fontSize: '.78rem' }}>
-                                    No summary yet — Generate reads the whole thread and writes one.
+                                    No summary yet — Generate reads the whole thread and writes what has been
+                                    accomplished since the case started, and where it stands now.
                                   </div>
                                 )}
                                 {aiPeek?.pid === m.pid && (
