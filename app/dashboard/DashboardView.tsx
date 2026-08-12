@@ -65,7 +65,10 @@ export default function DashboardView({
   const [sortKey, setSortKey] = useState<SortKey>('ph_exit_rate');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
   const [extraCols, setExtraCols] = useState<string[]>([]);
-  const [colMenuOpen, setColMenuOpen] = useState(false);
+  // ⚙ Columns menu anchor — FIXED popover like every other picker. The old
+  // absolute-in-panel version was clipped by the panel, so a short table
+  // (e.g. 2 selected projects) cut the list off (user report 2026-08-12).
+  const [colMenu, setColMenu] = useState<{ x: number; y: number } | null>(null);
 
   // ── Client drill-down ──────────────────────────────────────────────────────
   // Opens the hashed PersonalIDs behind one cell. RLS (`scoped read drill`)
@@ -131,7 +134,7 @@ export default function DashboardView({
       if (sortKey === 'name') return r.project_name || '';
       if (sortKey === 'type_name') return r.type_name || '';
       if (sortKey === 'mom') return mom(r);
-      if (['clients_served', 'leavers', 'exits_ph', 'ph_exit_rate', 'unsub_rate', 'avg_los'].includes(sortKey))
+      if (['clients_served', 'leavers', 'exits_ph', 'ph_exit_rate', 'exits_unsub', 'unsub_rate', 'avg_los'].includes(sortKey))
         return (r as any)[sortKey];
       const v = r.data?.[sortKey];
       return typeof v === 'number' ? v : null;
@@ -181,13 +184,13 @@ export default function DashboardView({
   }
 
   function exportCsv() {
-    const headers = ['Project', 'Type', 'Clients', 'Leavers', 'ExitsToPH', 'PHExitRate', 'MoM_pp', 'UnsubRate', 'AvgLOS',
+    const headers = ['Project', 'Type', 'Clients', 'Leavers', 'ExitsToPH', 'PHExitRate', 'MoM_pp', 'ExitsToUnsub', 'UnsubRate', 'AvgLOS',
       ...extraCols];
     const lines = [headers.join(',')];
     sorted.forEach((r) => {
       const base = [
         csv(r.project_name), r.type_name ?? '', r.clients_served ?? '', r.leavers ?? '',
-        r.exits_ph ?? '', r.ph_exit_rate ?? '', mom(r) ?? '', r.unsub_rate ?? '', r.avg_los ?? '',
+        r.exits_ph ?? '', r.ph_exit_rate ?? '', mom(r) ?? '', r.exits_unsub ?? '', r.unsub_rate ?? '', r.avg_los ?? '',
         ...extraCols.map((k) => r.data?.[k] ?? ''),
       ];
       lines.push(base.join(','));
@@ -277,24 +280,35 @@ export default function DashboardView({
           <div className="tools">
             <button className="tbtn" onClick={exportCsv}>⬇ CSV</button>
             <div className="colpick">
-              <button className="tbtn" onClick={() => setColMenuOpen((v) => !v)}>⚙ Columns</button>
-              {colMenuOpen && (
-                <div className="colmenu" onMouseLeave={() => setColMenuOpen(false)}>
-                  {EXTRA_COLUMNS.map((c) => (
-                    <label key={c.key}>
-                      <input
-                        type="checkbox"
-                        checked={extraCols.includes(c.key)}
-                        onChange={(e) =>
-                          setExtraCols((prev) =>
-                            e.target.checked ? [...prev, c.key] : prev.filter((k) => k !== c.key),
-                          )
-                        }
-                      />
-                      {c.label}
-                    </label>
-                  ))}
-                </div>
+              <button className="tbtn" onClick={(e) => {
+                if (colMenu) { setColMenu(null); return; }
+                const rect = e.currentTarget.getBoundingClientRect();
+                setColMenu({ x: rect.right, y: rect.bottom });
+              }}>⚙ Columns</button>
+              {colMenu && (
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 29 }} onClick={() => setColMenu(null)} />
+                  <div className="colmenu" style={{
+                    position: 'fixed', right: 'auto',
+                    left: Math.max(8, Math.min(colMenu.x - 240, window.innerWidth - 248)),
+                    top: Math.min(colMenu.y + 6, Math.max(window.innerHeight - 360, 8)),
+                  }}>
+                    {EXTRA_COLUMNS.map((c) => (
+                      <label key={c.key}>
+                        <input
+                          type="checkbox"
+                          checked={extraCols.includes(c.key)}
+                          onChange={(e) =>
+                            setExtraCols((prev) =>
+                              e.target.checked ? [...prev, c.key] : prev.filter((k) => k !== c.key),
+                            )
+                          }
+                        />
+                        {c.label}
+                      </label>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -310,6 +324,8 @@ export default function DashboardView({
                 <th className={thCls('exits_ph', true)} onClick={() => toggleSort('exits_ph')}>→ PH {sortCar('exits_ph')}</th>
                 <th className={thCls('ph_exit_rate', true)} onClick={() => toggleSort('ph_exit_rate')}>PH Rate {sortCar('ph_exit_rate')}</th>
                 <th className={thCls('mom', true)} onClick={() => toggleSort('mom')}>MoM Δ {sortCar('mom')}</th>
+                <th className={thCls('exits_unsub', true)} onClick={() => toggleSort('exits_unsub')}
+                  title="Exits to unsubsidized permanent housing (own lease, destinations 410/411) — the count behind Unsub Rate">→ Unsub {sortCar('exits_unsub')}</th>
                 <th className={thCls('unsub_rate', true)} onClick={() => toggleSort('unsub_rate')}>Unsub Rate {sortCar('unsub_rate')}</th>
                 <th className={thCls('avg_los', true)} onClick={() => toggleSort('avg_los')}>Avg LOS {sortCar('avg_los')}</th>
                 {extraCols.map((k) => {
@@ -392,6 +408,16 @@ export default function DashboardView({
                         : <span className="mom flat">—</span>}
                     </td>
                     <td className="num">
+                      {canDrill && r.exits_unsub ? (
+                        <span className="drill" role="button" tabIndex={0}
+                          title="Show the clients behind this number"
+                          onClick={() => openDrill(r, 'exits_unsub', 'Exits to unsubsidized housing', r.exits_unsub!)}
+                          onKeyDown={(e) => e.key === 'Enter' && openDrill(r, 'exits_unsub', 'Exits to unsubsidized housing', r.exits_unsub!)}>
+                          {fmtInt(r.exits_unsub)}
+                        </span>
+                      ) : fmtInt(r.exits_unsub)}
+                    </td>
+                    <td className="num">
                       {r.unsub_rate == null ? '—'
                         : <span className={`pill ${r.unsub_rate >= 20 ? 'good' : r.unsub_rate >= 10 ? 'warn' : 'bad'}`}>{r.unsub_rate.toFixed(0)}%</span>}
                     </td>
@@ -409,7 +435,7 @@ export default function DashboardView({
                 );
               })}
               {sorted.length === 0 && (
-                <tr><td colSpan={9 + extraCols.length} className="empty">No projects match these filters.</td></tr>
+                <tr><td colSpan={10 + extraCols.length} className="empty">No projects match these filters.</td></tr>
               )}
             </tbody>
             {sorted.length > 0 && (
@@ -422,6 +448,7 @@ export default function DashboardView({
                   <td className="num">{fmtInt(totals.exitsPh)}</td>
                   <td className="num">{totals.phRate == null ? '—' : `${totals.phRate.toFixed(0)}%`}</td>
                   <td />
+                  <td className="num">{fmtInt(totals.exitsUnsub)}</td>
                   <td className="num">{totals.unsubRate == null ? '—' : `${totals.unsubRate.toFixed(0)}%`}</td>
                   <td />
                   {extraCols.map((k) => <td key={k} />)}
