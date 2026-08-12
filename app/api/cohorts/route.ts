@@ -82,13 +82,16 @@ export async function GET(req: Request) {
     ]);
     const noteDates: Record<string, string[]> = {};
     const notes2: Record<string, { body: string; author: string | null; at: string }[]> = {};
+    const firstNote: Record<string, string> = {};
     if (litePids.length) {
       const since = new Date(Date.now() - 30 * 86400000).toISOString();
-      const [nd, nn] = await Promise.all([
+      const [nd, nn, nf] = await Promise.all([
         sb.from('bnl_notes').select('pid, created_at').in('pid', litePids)
           .gte('created_at', since).limit(5000),
         sb.from('bnl_notes').select('pid, body, author_name, author_email, created_at')
           .in('pid', litePids).order('created_at', { ascending: false }).limit(1000),
+        sb.from('bnl_notes').select('pid, created_at').in('pid', litePids)
+          .order('created_at', { ascending: true }).limit(5000),
       ]);
       for (const n of (nd.data ?? []) as { pid: string; created_at: string }[]) {
         (noteDates[n.pid] ??= []).push(String(n.created_at));
@@ -99,11 +102,14 @@ export async function GET(req: Request) {
           l.push({ body: n.body, author: n.author_name ?? n.author_email ?? null, at: String(n.created_at).slice(0, 10) });
         }
       }
+      for (const n of (nf.data ?? []) as { pid: string; created_at: string }[]) {
+        if (!(n.pid in firstNote)) firstNote[n.pid] = String(n.created_at);
+      }
     }
     return NextResponse.json({
       tasks: tRes2.error ? null : (tRes2.data ?? []),
       access: aRes2.error ? null : (aRes2.data ?? []),
-      noteDates, notes2,
+      noteDates, notes2, firstNote,
     });
   }
 
@@ -170,13 +176,24 @@ export async function GET(req: Request) {
   // days, per member — the client computes the "since last meeting" digest
   // (7/14/30-day windows) from these. Same RLS as the notes themselves.
   const noteDates: Record<string, string[]> = {};
+  const firstNote: Record<string, string> = {};
   if (pids.length) {
     const since = new Date(Date.now() - 30 * 86400000).toISOString();
-    const nRes = await sb.from('bnl_notes')
-      .select('pid, created_at').in('pid', pids)
-      .gte('created_at', since).limit(5000);
+    const [nRes, fRes] = await Promise.all([
+      sb.from('bnl_notes')
+        .select('pid, created_at').in('pid', pids)
+        .gte('created_at', since).limit(5000),
+      // Oldest-first: the first row seen per pid is the case's first note —
+      // the anchor for the "accomplished since the start" summary.
+      sb.from('bnl_notes')
+        .select('pid, created_at').in('pid', pids)
+        .order('created_at', { ascending: true }).limit(5000),
+    ]);
     for (const n of (nRes.data ?? []) as { pid: string; created_at: string }[]) {
       (noteDates[n.pid] ??= []).push(String(n.created_at));
+    }
+    for (const n of (fRes.data ?? []) as { pid: string; created_at: string }[]) {
+      if (!(n.pid in firstNote)) firstNote[n.pid] = String(n.created_at);
     }
   }
 
@@ -287,6 +304,7 @@ export async function GET(req: Request) {
     // null = cohort_tasks.sql not run yet (missing table) → UI shows setup hint
     tasks: tRes.error ? null : (tRes.data ?? []),
     noteDates,
+    firstNote,
     access: aRes.error ? null : (aRes.data ?? []),
     staff: stRes.data ?? [],
     manage: viewer.isAdmin,

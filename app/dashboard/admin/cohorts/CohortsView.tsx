@@ -49,6 +49,27 @@ function initials(name: string | null | undefined): string {
   if (!parts.length) return '?';
   return ((parts[0][0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] ?? '' : '')).toUpperCase();
 }
+/** Deterministic accomplishment tagger — first matching rule labels the text
+ *  (vocabulary from the county's own cohort-meeting sheets). Transparent and
+ *  tunable, same philosophy as lib/diagnosis.ts: rules you can read, not a
+ *  model. Applied only to COMPLETED next-steps, where the text plus the
+ *  completion is unambiguous — free-text notes stay untagged ("needs docs"
+ *  vs "got docs" needs understanding, not keywords). */
+const TAG_RULES: [RegExp, string][] = [
+  [/marchman|baker act|conservator|court|attorney|legal|immigration|jail|jdp/i, 'legal'],
+  [/ssi\b|ssn\b|tpqy|benefit|social security|ss office|cash assistance|income/i, 'benefits'],
+  [/docs?\b|document|birth certificate|passport|identification|\bid\b/i, 'documents'],
+  [/hous|placement|\balf\b|\bilf\b|unit|lease|apartment|residential|shelter/i, 'housing'],
+  [/spdat|assess/i, 'assessment'],
+  [/medical|doctor|hospital|treatment|detox|meds|psych|health/i, 'health'],
+  [/refer/i, 'referral'],
+  [/contact|located|outreach|\butl\b/i, 'contact'],
+];
+function tagOf(text: string): string | null {
+  for (const [re, label] of TAG_RULES) if (re.test(text)) return label;
+  return null;
+}
+
 function Avatar({ name, id, size = 24 }: { name: string | null; id: string; size?: number }) {
   return (
     <span aria-hidden style={{
@@ -108,6 +129,8 @@ interface Detail {
   tasks: Task[] | null;
   /** per-member note timestamps from the last 30 days (Layer-1 digest input) */
   noteDates: Record<string, string[]>;
+  /** per-member FIRST note timestamp ever — the case-start anchor */
+  firstNote: Record<string, string>;
   access: { user_id: string; granted_at: string }[] | null;
   staff: Staff[];
   manage: boolean;
@@ -249,12 +272,14 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
         access: { user_id: string; granted_at: string }[] | null;
         noteDates: Record<string, string[]>;
         notes2: Record<string, NonNullable<Member['notes2']>>;
+        firstNote: Record<string, string>;
       };
       setDetail((d) => d ? {
         ...d,
         tasks: j.tasks,
         access: j.access,
         noteDates: j.noteDates ?? d.noteDates,
+        firstNote: j.firstNote ?? d.firstNote,
         members: d.members.map((m) => ({ ...m, notes2: j.notes2?.[m.pid] ?? m.notes2 ?? null })),
       } : d);
     } catch { /* keep the current view — next full load reconciles */ }
@@ -830,39 +855,56 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                         <td colSpan={10} style={{ background: 'var(--card-top)', padding: '10px 18px 14px' }}
                           data-tasks-ui=""
                           onMouseMove={touchTasks} onClick={touchTasks} onKeyDown={touchTasks}>
-                          {/* Per-client progress — deterministic: milestone DATES vs the
-                              date they joined the cohort, step completion, note cadence. */}
+                          {/* Case summary — what has been ACCOMPLISHED since the case
+                              started (first note ever, or cohort join if earlier).
+                              Deterministic ledger: milestone dates + completed
+                              next-steps (keyword-tagged), amber tail = where they
+                              stand today. */}
                           {(() => {
-                            const joined = m.added_at ? m.added_at.slice(0, 10) : null;
+                            const first = detail.firstNote?.[m.pid]?.slice(0, 10) ?? null;
+                            const joined = m.added_at?.slice(0, 10) ?? null;
+                            const start = first && joined ? (first < joined ? first : joined) : (first ?? joined);
+                            const startLabel = start ? (start === first ? `first note ${start}` : `added ${start}`) : null;
+                            const days = start ? Math.max(0, Math.floor((Date.now() - +new Date(`${start}T00:00:00`)) / DAY_MS)) : null;
                             const ms = m.milestones ?? {};
-                            const movedSince = joined
-                              ? MS_ORDER.filter((k) => ms[k] && String(ms[k]) >= joined)
-                              : [];
-                            const doneN = mTasks.filter((t) => t.status === 'done').length;
-                            const notes30 = (detail.noteDates?.[m.pid] ?? []).length;
+                            const msHits = MS_ORDER.filter((k) => ms[k] && (!start || String(ms[k]) >= start));
+                            const doneTasks = mTasks.filter((t) => t.status === 'done')
+                              .sort((a, b) => (a.done_at ?? '').localeCompare(b.done_at ?? ''));
+                            const shown = doneTasks.slice(-3);
                             return (
-                              <div className="bnl-sub" style={{ marginBottom: 10, display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'baseline' }}>
-                                <span><b style={{ color: 'var(--strong)' }}>Progress</b>{joined ? ` since joining ${joined}` : ''}:</span>
-                                {ms['movein']
-                                  ? <span style={{ color: 'var(--accent)', fontWeight: 600 }}>✓ Moved in {ms['movein']}</span>
-                                  : movedSince.length
-                                    ? <span style={{ color: 'var(--accent)', fontWeight: 600 }}
-                                        title="CE milestones dated after this member joined the cohort">
-                                        journey +{movedSince.length}: {movedSince.map((k) => `${MS_LABELS[k] ?? k} ${ms[k]}`).join(' → ')}
-                                      </span>
-                                    : m.ms_stage
-                                      ? <span style={{ color: 'var(--warn)' }}
-                                          title="No CE milestone has landed since this member joined the cohort">
-                                          journey unchanged — {MS_LABELS[m.ms_stage] ?? m.ms_stage} for {m.ms_wait != null ? fmtInt(m.ms_wait) : '—'}d
-                                        </span>
-                                      : <span>journey: —</span>}
-                                {detail.tasks !== null && (
-                                  <span>next-steps <b className="num" style={{ color: doneN ? 'var(--accent)' : undefined }}>{doneN}</b>/<b className="num">{mTasks.length}</b> done</span>
-                                )}
-                                <span>
-                                  <b className="num">{notes30}</b> note{notes30 === 1 ? '' : 's'} in 30d
-                                  {m.notes2?.[0]?.at ? `, last ${noteAge(m.notes2[0].at)}` : ''}
+                              <div style={{ marginBottom: 10, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'baseline', fontSize: '.8rem' }}>
+                                <span className="bnl-sub">
+                                  <b style={{ color: 'var(--strong)' }}>Since {startLabel ?? 'the start'}</b>
+                                  {days != null ? ` · ${fmtInt(days)}d` : ''}:
                                 </span>
+                                {msHits.map((k) => (
+                                  <span key={k} style={{ color: 'var(--accent)', fontWeight: 600 }}
+                                    title={`CE milestone reached ${ms[k]}`}>
+                                    ✓ {MS_LABELS[k] ?? k} {ms[k]}
+                                  </span>
+                                ))}
+                                {shown.map((t) => {
+                                  const tag = tagOf(t.body);
+                                  const b = t.body.length > 46 ? `${t.body.slice(0, 46)}…` : t.body;
+                                  return (
+                                    <span key={t.id} style={{ color: 'var(--accent)' }}
+                                      title={`${t.body} — completed ${t.done_at?.slice(0, 10) ?? ''} by ${t.done_by ?? '—'}`}>
+                                      ✓ {b}{tag && <span className="bnl-sub"> · {tag}</span>}
+                                    </span>
+                                  );
+                                })}
+                                {doneTasks.length > shown.length && (
+                                  <span className="bnl-sub">+{doneTasks.length - shown.length} more done</span>
+                                )}
+                                {!msHits.length && !doneTasks.length && (
+                                  <span className="bnl-sub">nothing recorded yet</span>
+                                )}
+                                {!ms['movein'] && m.ms_stage && (
+                                  <span style={{ color: 'var(--warn)' }}
+                                    title="Where the client stands right now">
+                                    now: {MS_LABELS[m.ms_stage] ?? m.ms_stage}{m.ms_wait != null ? ` ${fmtInt(m.ms_wait)}d` : ''}
+                                  </span>
+                                )}
                               </div>
                             );
                           })()}
