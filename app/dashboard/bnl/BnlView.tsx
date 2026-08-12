@@ -6,6 +6,7 @@ import {
   type BnlAgg, type BnlClient, type CeMilestonesAgg, type PopKey,
 } from './types';
 import JourneyBar from '../../../components/JourneyBar';
+import ProjectPicker from '../../../components/ProjectPicker';
 import ClientDrawer, { Flags } from './ClientDrawer';
 
 type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'assessed' | 'ms_wait' | 'hh_n' | 'income';
@@ -58,12 +59,10 @@ export default function BnlView({
   const [fRef, setFRef] = useState('');
   // Milestone worklist — set by clicking a waiting number on the journey bar.
   const [fStage, setFStage] = useState('');
-  // Multi-project filter (1..n projects; empty = all). The picker is a FIXED
-  // popover anchored to its button — the panel it sits in clips overflow, and
-  // the old in-flow version shoved the whole table down (user disliked it).
+  // Multi-project filter (1..n projects; empty = all). The picker itself is
+  // the shared components/ProjectPicker (extracted from here 2026-08-12, now
+  // also on Project Performance and Returns).
   const [selProjects, setSelProjects] = useState<number[]>([]);
-  const [projAnchor, setProjAnchor] = useState<{ x: number; y: number } | null>(null);
-  const [projQ, setProjQ] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('days_homeless');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -382,17 +381,9 @@ export default function BnlView({
             </div>
             <div className="fgroup">
               <span className="flabel">Projects</span>
-              <button className="btn" title="Filter the roster to one or more projects"
-                style={selProjects.length ? { color: 'var(--primary)', fontWeight: 700 } : undefined}
-                onClick={(e) => {
-                  if (projAnchor) { setProjAnchor(null); return; }
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  setProjAnchor({ x: rect.left, y: rect.bottom });
-                }}>
-                {selProjects.length === 1
-                  ? (projectOpts.find((o) => o.id === selProjects[0])?.name ?? '1 selected').slice(0, 26)
-                  : selProjects.length ? `${selProjects.length} projects` : 'All'} {projAnchor ? '▴' : '▾'}
-              </button>
+              <ProjectPicker options={projectOpts} selected={selProjects}
+                onChange={setSelProjects}
+                title="Filter the roster to one or more projects" />
             </div>
             <div className="fgroup">
               <span className="flabel">CE assessed</span>
@@ -563,69 +554,6 @@ export default function BnlView({
           12+ continuous months or 4+ occasions totaling 12+ months. Confirm statuses in case conferencing.
         </p>
       </div>
-
-      {/* Project picker popover — fixed + anchored to its button (the panel
-          clips overflow), transparent backdrop closes it. Single column so
-          names breathe; selected first, then active projects, (INACTIVE)
-          last instead of alphabetically first. */}
-      {projAnchor && (() => {
-        const norm = projQ.trim().toLowerCase();
-        const isInactive = (n: string) => /^\s*\(\s*INACTIVE/i.test(n);
-        const opts = projectOpts
-          .filter((o) => !norm || o.name.toLowerCase().includes(norm))
-          .sort((a, b) => {
-            const sa = selProjects.includes(a.id) ? 0 : 1;
-            const sb = selProjects.includes(b.id) ? 0 : 1;
-            if (sa !== sb) return sa - sb;
-            const ia = isInactive(a.name) ? 1 : 0, ib = isInactive(b.name) ? 1 : 0;
-            if (ia !== ib) return ia - ib;
-            return a.name.localeCompare(b.name);
-          });
-        return (
-          <>
-            <div style={{ position: 'fixed', inset: 0, zIndex: 49 }} onClick={() => setProjAnchor(null)} />
-            <div className="panel" style={{
-              position: 'fixed', zIndex: 50,
-              left: Math.min(projAnchor.x, Math.max(window.innerWidth - 480, 8)),
-              top: projAnchor.y + 6,
-              width: 460, maxWidth: '92vw',
-              boxShadow: '0 12px 32px rgba(0,0,0,0.4)',
-            }}>
-              <div style={{ padding: '10px 12px 8px' }}>
-                <input className="finput" autoFocus placeholder="Search projects…" value={projQ}
-                  onChange={(e) => setProjQ(e.target.value)} style={{ width: '100%' }} />
-              </div>
-              <div style={{ maxHeight: 320, overflowY: 'auto', padding: '0 6px' }}>
-                {opts.map((o) => (
-                  <label key={o.id}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
-                      borderRadius: 6, cursor: 'pointer',
-                      background: selProjects.includes(o.id) ? 'var(--primary-soft)' : undefined }}
-                    title={o.type ? `${o.name} · ${o.type}` : o.name}>
-                    <input type="checkbox" checked={selProjects.includes(o.id)}
-                      onChange={() => setSelProjects((s) =>
-                        s.includes(o.id) ? s.filter((x) => x !== o.id) : [...s, o.id])} />
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap', fontSize: 13,
-                      color: isInactive(o.name) ? 'var(--muted)' : undefined }}>{o.name}</span>
-                    {o.type && <span className="ty" style={{ marginLeft: 0, flexShrink: 0 }}>{o.type}</span>}
-                  </label>
-                ))}
-                {!opts.length && <div className="hc-none">No projects match that search.</div>}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
-                borderTop: '1px solid rgba(148,163,184,0.2)' }}>
-                <span className="bnl-sub">{selProjects.length ? `${selProjects.length} selected` : 'showing all projects'}</span>
-                <span style={{ flex: 1 }} />
-                {selProjects.length > 0 && (
-                  <button className="btn" onClick={() => setSelProjects([])}>Clear</button>
-                )}
-                <button className="btn" onClick={() => setProjAnchor(null)}>Done</button>
-              </div>
-            </div>
-          </>
-        );
-      })()}
 
       {/* Notes hover card — fixed so the table's scroll area can't clip it;
           opens leftward from the rightmost column, clamped to the viewport. */}

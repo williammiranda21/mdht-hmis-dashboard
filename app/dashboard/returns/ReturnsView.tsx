@@ -13,6 +13,7 @@ import type { Granularity } from '../../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../../lib/types';
 import { periodLabel, lookbackLabel, fmtInt, DEST_LABELS } from '../../../lib/format';
 import ProjectPanel from '../ProjectPanel';
+import ProjectPicker from '../../../components/ProjectPicker';
 import { useClientDrill, DrillModal } from '../../../components/ClientDrill';
 
 type Row = {
@@ -32,6 +33,10 @@ export default function ReturnsView({ periods, granularity, period, household, s
   const router = useRouter();
   const [typeFilter, setTypeFilter] = useState('All');
   const [query, setQuery] = useState('');
+  // Multi-project filter (empty = all) — shared picker with the BNL/Project
+  // Performance. The KPI band and the tfoot recompute from `filtered`, so a
+  // selection reads as that portfolio's return profile.
+  const [selProjects, setSelProjects] = useState<number[]>([]);
   /** Returns-mode project panel — same component as Project Performance, with
    *  returns KPIs, destination breakdown and return-rate benchmarking. */
   const [panelProject, setPanelProject] = useState<number | null>(null);
@@ -59,13 +64,19 @@ export default function ReturnsView({ periods, granularity, period, household, s
     return ['All', ...Array.from(s).sort()];
   }, [rows]);
 
+  const projectOpts = useMemo(() =>
+    rows.map((r) => ({ id: r.project_id, name: r.name, type: r.type_name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  [rows]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((r) =>
+      (!selProjects.length || selProjects.includes(r.project_id)) &&
       (typeFilter === 'All' || r.type_name === typeFilter) &&
       (!q || r.name.toLowerCase().includes(q)),
     );
-  }, [rows, typeFilter, query]);
+  }, [rows, selProjects, typeFilter, query]);
 
   const sorted = useMemo(() => {
     const val = (r: Row): number | string => {
@@ -170,6 +181,12 @@ export default function ReturnsView({ periods, granularity, period, household, s
             <select className="fselect" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
               {typeOptions.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : t}</option>)}
             </select>
+          </div>
+          <div className="fgroup">
+            <span className="flabel">Projects</span>
+            <ProjectPicker options={projectOpts} selected={selProjects}
+              onChange={setSelProjects}
+              title="Filter to one or more projects — the KPI band becomes the selection's return profile" />
           </div>
           <div className="fgroup">
             <span className="flabel">Search projects</span>

@@ -9,6 +9,7 @@ import { fmtTarget } from '../../lib/target-metrics';
 import type { TargetMiss } from '../../lib/target-flags';
 import ProjectPanel from './ProjectPanel';
 import CopyId from '../../components/CopyId';
+import ProjectPicker from '../../components/ProjectPicker';
 
 type Props = {
   rows: ProjectMetric[];
@@ -55,6 +56,10 @@ export default function DashboardView({
   // Client-side (in-place) filters — no server round-trip.
   const [typeFilter, setTypeFilter] = useState('All');
   const [query, setQuery] = useState('');
+  // Multi-project filter (empty = all) — shared picker with the BNL/Returns.
+  // Totals, the KPI math, and the CSV all derive from `filtered`, so picking
+  // a handful of projects turns the tfoot into a portfolio rollup.
+  const [selProjects, setSelProjects] = useState<number[]>([]);
   const [activeOnly, setActiveOnly] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>('ph_exit_rate');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
@@ -103,15 +108,24 @@ export default function DashboardView({
     return ['All', ...Array.from(s).sort()];
   }, [rows]);
 
+  // Options for the multi-project picker — every row this viewer can see in
+  // the current period (deliberately NOT gated by activeOnly/type, so a
+  // selection survives toggling the other filters).
+  const projectOpts = useMemo(() =>
+    rows.map((r) => ({ id: r.project_id, name: r.project_name ?? String(r.project_id), type: r.type_name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  [rows]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
+      if (selProjects.length && !selProjects.includes(r.project_id)) return false;
       if (typeFilter !== 'All' && r.type_name !== typeFilter) return false;
       if (activeOnly && !(r.clients_served && r.clients_served > 0)) return false;
       if (q && !(r.project_name || '').toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [rows, typeFilter, activeOnly, query]);
+  }, [rows, selProjects, typeFilter, activeOnly, query]);
 
   const sorted = useMemo(() => {
     const val = (r: ProjectMetric): number | string | null => {
@@ -234,6 +248,12 @@ export default function DashboardView({
             <select className="fselect" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
               {typeOptions.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : t}</option>)}
             </select>
+          </div>
+          <div className="fgroup">
+            <span className="flabel">Projects</span>
+            <ProjectPicker options={projectOpts} selected={selProjects}
+              onChange={setSelProjects}
+              title="Filter the table to one or more projects — totals become the selection's rollup" />
           </div>
           <div className="fgroup">
             <span className="flabel">Search projects</span>
