@@ -82,7 +82,7 @@ export async function GET(req: Request) {
       .select('id, pid, body, assignee_id, assignee_name, status, created_by, created_at, done_at, done_by')
       .eq('cohort_id', cohortId).order('created_at'),
     sb.from('cohort_access').select('user_id, granted_at').eq('cohort_id', cohortId),
-    sb.from('profiles').select('id, display_name, email, bnl_access').eq('status', 'approved').order('display_name'),
+    sb.from('profiles').select('id, display_name, email, bnl_access, is_admin').eq('status', 'approved').order('display_name'),
   ]);
   if (cRes.error) return NextResponse.json({ error: cRes.error.message }, { status: 500 });
   if (!cRes.data) return NextResponse.json({ error: 'not found' }, { status: 404 });

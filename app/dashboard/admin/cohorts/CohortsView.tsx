@@ -46,7 +46,10 @@ interface Task {
   created_by: string | null; created_at: string;
   done_at: string | null; done_by: string | null;
 }
-interface Staff { id: string; display_name: string | null; email: string | null; bnl_access: boolean }
+/** `bnl_access` is only meaningful for NON-admins — can_see_bnl() is
+ *  is_admin() OR (approved AND bnl_access), so an admin with the flag off
+ *  still sees everything. Always check is_admin before warning on it. */
+interface Staff { id: string; display_name: string | null; email: string | null; bnl_access: boolean; is_admin: boolean }
 interface Detail {
   cohort: { id: number; name: string; description: string | null; created_by: string | null; created_at: string };
   members: Member[];
@@ -404,11 +407,12 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                     {detail.access.map((a) => {
                       const s = detail.staff.find((st) => st.id === a.user_id);
                       const nm = s?.display_name || s?.email || a.user_id.slice(0, 8);
+                      const noBnl = s ? !s.is_admin && !s.bnl_access : false;
                       return (
-                        <span key={a.user_id} className="bnl-chip" title={s?.bnl_access === false
+                        <span key={a.user_id} className="bnl-chip" title={noBnl
                           ? 'This account has no By-Name List access — they will see the cohort but not member names. Grant BNL access in the Users console.'
                           : undefined}>
-                          {nm}{s?.bnl_access === false && ' ⚠'}
+                          {nm}{noBnl && ' ⚠'}
                           <span role="button" style={{ cursor: 'pointer', marginLeft: 6, opacity: .7 }}
                             title="Revoke access"
                             onClick={async () => {
@@ -421,10 +425,11 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                     <select className="fselect" value={grantSel} onChange={(e) => setGrantSel(e.target.value)}>
                       <option value="">Grant access to…</option>
                       {detail.staff
-                        .filter((s) => !detail.access!.some((a) => a.user_id === s.id))
+                        // Admins already see every cohort — a grant would be a no-op.
+                        .filter((s) => !s.is_admin && !detail.access!.some((a) => a.user_id === s.id))
                         .map((s) => (
                           <option key={s.id} value={s.id}>
-                            {s.display_name || s.email}{s.bnl_access === false ? ' (no BNL access)' : ''}
+                            {s.display_name || s.email}{!s.bnl_access ? ' (no BNL access)' : ''}
                           </option>
                         ))}
                     </select>
