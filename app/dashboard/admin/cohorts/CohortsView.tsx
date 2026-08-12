@@ -21,6 +21,13 @@ import { MILESTONES, type BnlClient } from '../../bnl/types';
 const MS_ORDER = MILESTONES.map(([k]) => k);
 const MS_LABELS = Object.fromEntries(MILESTONES);
 
+const DAY_MS = 86400000;
+/** Layer-1 stall thresholds (days) — arithmetic, not judgment: a member is
+ *  QUIET after this many days without a note; an open next-step is stale
+ *  after this many days. */
+const NOTE_STALL_D = 14;
+const STEP_STALL_D = 14;
+
 /** '2026-08-05' → 'today' / '3d' / '2mo' — freshness for the notes column
  *  (same helper as the BNL roster). */
 function noteAge(at: string): string {
@@ -75,6 +82,9 @@ interface Member {
   ms_stage: string | null; ms_wait: number | null;
   /** last notes (bnl_notes enrichment, cap 5) — same shape as the BNL roster */
   notes2?: { body: string; author: string | null; at: string }[] | null;
+  /** CE journey dates (ident/assessed/referred/accepted/movein) — movein feeds
+   *  the digest's "housed this period" line */
+  milestones: Record<string, string | null> | null;
 }
 interface Task {
   id: number; pid: string; body: string;
@@ -94,6 +104,8 @@ interface Detail {
   missing: string[];
   /** null → cohort_tasks.sql not run yet (setup hint) */
   tasks: Task[] | null;
+  /** per-member note timestamps from the last 30 days (Layer-1 digest input) */
+  noteDates: Record<string, string[]>;
   access: { user_id: string; granted_at: string }[] | null;
   staff: Staff[];
   manage: boolean;
@@ -137,6 +149,8 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
   // that leg, longest-waiting first (same behavior as the BNL page).
   const [fStage, setFStage] = useState('');
   useEffect(() => setFStage(''), [sel]);   // a stage filter never outlives its cohort
+  // Layer-1 activity digest window (days)
+  const [digestWin, setDigestWin] = useState(7);
   // Notes hover card (same fixed-panel pattern as the BNL roster).
   const [notePop, setNotePop] = useState<{
     x: number; y: number; name: string;
@@ -159,7 +173,9 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
   const TASKS_IDLE_MS = 20_000;
   const tasksTouchRef = useRef(Date.now());
   const draftRef = useRef(false);
-  useEffect(() => { draftRef.current = taskText.trim().length > 0 || peoplePick !== null; }, [taskText, peoplePick]);
+  useEffect(() => {
+    draftRef.current = taskText.trim().length > 0 || taskAssignees.length > 0 || peoplePick !== null;
+  }, [taskText, taskAssignees, peoplePick]);
   const touchTasks = () => { tasksTouchRef.current = Date.now(); };
   useEffect(() => {
     if (!openTasks) return;
@@ -180,6 +196,9 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
     if (!openTasks) return;
     const onDown = (e: MouseEvent) => {
       if ((e.target as Element | null)?.closest?.('[data-tasks-ui]')) return;
+      // An in-progress draft (typed text, picked assignees, or an open people
+      // menu) is never swallowed by click-away — same guard as the idle timer.
+      if (draftRef.current) return;
       setOpenTasks(null); setPeoplePick(null);
     };
     document.addEventListener('mousedown', onDown);
@@ -449,6 +468,93 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
             );
           })()}
 
+          {/* Layer-1 deterministic activity digest — every number is arithmetic
+              over timestamps already on this page (notes, task stamps, journey
+              move-ins). Nothing inferred, everything defensible in a meeting. */}
+          {(() => {
+            const winStart = Date.now() - digestWin * DAY_MS;
+            const tasks = detail.tasks ?? [];
+            const notedMembers = new Set<string>();
+            let noteCount = 0;
+            for (const m of detail.members) {
+              const n = (detail.noteDates?.[m.pid] ?? []).filter((d) => +new Date(d) >= winStart).length;
+              if (n) { noteCount += n; notedMembers.add(m.pid); }
+            }
+            const doneWin = tasks.filter((t) => t.done_at && +new Date(t.done_at) >= winStart).length;
+            const newWin = tasks.filter((t) => +new Date(t.created_at) >= winStart).length;
+            const openStale = tasks.filter((t) => t.status === 'open'
+              && Date.now() - +new Date(t.created_at) >= STEP_STALL_D * DAY_MS).length;
+            const taskActive = new Set(tasks
+              .filter((t) => +new Date(t.created_at) >= winStart || (t.done_at && +new Date(t.done_at) >= winStart))
+              .map((t) => t.pid));
+            const quiet = detail.members.filter((m) => m.status === 'active'
+              && !notedMembers.has(m.pid) && !taskActive.has(m.pid));
+            const housed = detail.members.filter((m) => {
+              const mi = m.milestones?.movein;
+              return mi && +new Date(`${mi}T00:00:00`) >= winStart;
+            }).length;
+            const byAssignee = new Map<string, { name: string | null; n: number; oldest: number }>();
+            for (const t of tasks) {
+              if (t.status !== 'open') continue;
+              const age = Math.floor((Date.now() - +new Date(t.created_at)) / DAY_MS);
+              for (const a of t.assignees ?? []) {
+                const e = byAssignee.get(a.id) ?? { name: a.name, n: 0, oldest: 0 };
+                e.n += 1; e.oldest = Math.max(e.oldest, age);
+                byAssignee.set(a.id, e);
+              }
+            }
+            return (
+              <div className="panel" style={{ marginTop: 16, padding: '12px 18px' }}>
+                <div className="hc-sub" style={{ margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  Activity — last {digestWin} days
+                  <span style={{ display: 'inline-flex', gap: 2 }}>
+                    {[7, 14, 30].map((w) => (
+                      <button key={w} className="tbtn" aria-pressed={digestWin === w}
+                        style={digestWin === w ? { color: 'var(--primary)', fontWeight: 700 } : undefined}
+                        onClick={() => setDigestWin(w)}>{w}d</button>
+                    ))}
+                  </span>
+                  <span className="bnl-sub" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>
+                    computed from note, next-step, and move-in timestamps — nothing inferred
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 13, alignItems: 'baseline' }}>
+                  <span>
+                    <b className="num">{noteCount}</b> note{noteCount === 1 ? '' : 's'} on{' '}
+                    <b className="num">{notedMembers.size}</b> member{notedMembers.size === 1 ? '' : 's'}
+                  </span>
+                  {detail.tasks !== null && (
+                    <span>
+                      <b className="num" style={{ color: 'var(--accent)' }}>{doneWin}</b> next-step{doneWin === 1 ? '' : 's'} completed
+                      {' '}· <b className="num">{newWin}</b> created
+                      {openStale > 0 && <> · <b className="num" style={{ color: 'var(--warn)' }}>{openStale}</b> open &gt;{STEP_STALL_D}d</>}
+                    </span>
+                  )}
+                  {housed > 0 && (
+                    <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                      <b className="num">{housed}</b> moved into housing
+                    </span>
+                  )}
+                  <span title={quiet.length ? quiet.map((m) => m.name ?? m.pid).join(', ') : undefined}
+                    style={quiet.length ? { color: 'var(--warn)' } : undefined}>
+                    <b className="num">{quiet.length}</b> active member{quiet.length === 1 ? '' : 's'} with no activity at all
+                  </span>
+                </div>
+                {byAssignee.size > 0 && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                    {[...byAssignee.entries()].sort((a, b) => b[1].n - a[1].n).map(([id, e]) => (
+                      <span key={id} className="bnl-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                        title={`${e.name ?? 'Unknown'} — ${e.n} open next-step${e.n === 1 ? '' : 's'}, oldest ${e.oldest}d`}>
+                        <Avatar name={e.name} id={id} size={18} />
+                        {(e.name ?? '?').split(' ')[0]} · {e.n} open{e.oldest >= STEP_STALL_D ? ` · ${e.oldest}d` : ''}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Members */}
           <div className="panel" style={{ marginTop: 16 }}>
             <div className="panel-h">
@@ -560,6 +666,15 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                     const mTasks = (detail.tasks ?? []).filter((t) => t.pid === m.pid);
                     const openN = mTasks.filter((t) => t.status === 'open').length;
                     const expanded = openTasks === m.pid;
+                    // Layer-1 stall arithmetic: days since the newest note, and
+                    // the age of the oldest still-open next-step.
+                    const lastNoteAt = m.notes2?.[0]?.at ?? null;
+                    const noteDays = lastNoteAt
+                      ? Math.max(0, Math.floor((Date.now() - +new Date(`${lastNoteAt}T00:00:00`)) / DAY_MS))
+                      : null;
+                    const quietFlag = m.status === 'active' && (noteDays === null || noteDays > NOTE_STALL_D);
+                    const oldestOpen = mTasks.reduce((mx, t) => t.status === 'open'
+                      ? Math.max(mx, Math.floor((Date.now() - +new Date(t.created_at)) / DAY_MS)) : mx, 0);
                     return (
                     /* row opens the shared client card; CopyId, the notes cell,
                        the tasks cell and the remove button stop propagation */
@@ -581,6 +696,21 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                         {m.chronic && <span className="bnl-fp bnl-fp-chr">CHRONIC</span>}
                         {m.returned && <span className="bnl-fp bnl-fp-ret">RETURNED</span>}
                         {m.risk_band === 'High' && <span className="bnl-fp bnl-fp-dq">HIGH RISK</span>}
+                        {/* Layer-1 stall flags — each is a sentence with a number */}
+                        {quietFlag && (
+                          <span className="bnl-fp" style={{ background: 'rgba(234,179,8,0.14)', color: 'var(--warn)' }}
+                            title={noteDays === null
+                              ? 'No notes on file for this member'
+                              : `No note in ${noteDays} days — the case has gone quiet`}>
+                            {noteDays === null ? 'NO NOTES' : `QUIET ${noteDays}d`}
+                          </span>
+                        )}
+                        {oldestOpen > STEP_STALL_D && (
+                          <span className="bnl-fp" style={{ background: 'rgba(234,179,8,0.14)', color: 'var(--warn)' }}
+                            title={`Oldest open next-step is ${oldestOpen} days old — assigned work nobody has closed`}>
+                            STEP {oldestOpen}d
+                          </span>
+                        )}
                       </td>
                       {/* Last note — same treatment as the BNL roster column */}
                       <td style={{ maxWidth: 200 }}
@@ -651,7 +781,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                                     )}
                                   </span>
                                 )}
-                                {openN ? `${openN} open` : mTasks.length ? 'all done' : '+ add'} {expanded ? '▴' : '▾'}
+                                {openN ? `${openN} open · ${oldestOpen}d` : mTasks.length ? 'all done' : '+ add'} {expanded ? '▴' : '▾'}
                               </button>
                             );
                           })()}
@@ -824,7 +954,11 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
       {/* People picker — monday-style assignee menu (fixed popover + backdrop) */}
       {peoplePick && detail && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 69 }} onClick={() => setPeoplePick(null)} />
+          {/* Backdrop closes the MENU only — marked as task UI so the panel's
+              click-away never fires through it (a click here used to collapse
+              the whole panel and lose the draft). */}
+          <div style={{ position: 'fixed', inset: 0, zIndex: 69 }} data-tasks-ui=""
+            onMouseDown={() => setPeoplePick(null)} />
           <div className="panel" onMouseMove={touchTasks} data-tasks-ui="" style={{
             position: 'fixed',
             left: Math.min(peoplePick.x, Math.max((typeof window !== 'undefined' ? window.innerWidth : 1200) - 264, 12)),

@@ -115,6 +115,20 @@ export async function GET(req: Request) {
   // it simply returns nothing — notes2 stays null, no error.
   await enrichRoster(sb, members as unknown as BnlClient[]);
 
+  // Layer-1 deterministic tracking: every note timestamp from the last 30
+  // days, per member — the client computes the "since last meeting" digest
+  // (7/14/30-day windows) from these. Same RLS as the notes themselves.
+  const noteDates: Record<string, string[]> = {};
+  if (pids.length) {
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const nRes = await sb.from('bnl_notes')
+      .select('pid, created_at').in('pid', pids)
+      .gte('created_at', since).limit(5000);
+    for (const n of (nRes.data ?? []) as { pid: string; created_at: string }[]) {
+      (noteDates[n.pid] ??= []).push(String(n.created_at));
+    }
+  }
+
   // ── aggregates ──────────────────────────────────────────────────────────
   const by = { active: 0, housed: 0, inactive: 0 };
   let returned = 0, chronic = 0, highRisk = 0;
@@ -221,6 +235,7 @@ export async function GET(req: Request) {
     snapshots: sRes.data ?? [],
     // null = cohort_tasks.sql not run yet (missing table) → UI shows setup hint
     tasks: tRes.error ? null : (tRes.data ?? []),
+    noteDates,
     access: aRes.error ? null : (aRes.data ?? []),
     staff: stRes.data ?? [],
     manage: viewer.isAdmin,
