@@ -43,7 +43,9 @@ export async function GET(req: Request) {
   if (!viewer.isApproved) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const sb = supabaseServer();
-  const id = new URL(req.url).searchParams.get('id');
+  const sp = new URL(req.url).searchParams;
+  const id = sp.get('id');
+  const scope = sp.get('scope');
 
   if (!id) {
     const [cRes, mRes] = await Promise.all([
@@ -64,6 +66,47 @@ export async function GET(req: Request) {
   }
 
   const cohortId = Number(id);
+
+  // Lightweight refresh after a task/note/access mutation: only the pieces
+  // those mutations can change — tasks, access grants, note timestamps, and
+  // the last-notes preview. Skips the expensive bnl_clients join and every
+  // aggregate, so the page patches in place instead of flashing "Loading…".
+  if (scope === 'tasks') {
+    const mres = await sb.from('cohort_members').select('pid').eq('cohort_id', cohortId);
+    const litePids = ((mres.data ?? []) as { pid: string }[]).map((m) => m.pid);
+    const [tRes2, aRes2] = await Promise.all([
+      sb.from('cohort_tasks')
+        .select('id, pid, body, assignees, status, created_by, created_at, done_at, done_by')
+        .eq('cohort_id', cohortId).order('created_at'),
+      sb.from('cohort_access').select('user_id, granted_at').eq('cohort_id', cohortId),
+    ]);
+    const noteDates: Record<string, string[]> = {};
+    const notes2: Record<string, { body: string; author: string | null; at: string }[]> = {};
+    if (litePids.length) {
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      const [nd, nn] = await Promise.all([
+        sb.from('bnl_notes').select('pid, created_at').in('pid', litePids)
+          .gte('created_at', since).limit(5000),
+        sb.from('bnl_notes').select('pid, body, author_name, author_email, created_at')
+          .in('pid', litePids).order('created_at', { ascending: false }).limit(1000),
+      ]);
+      for (const n of (nd.data ?? []) as { pid: string; created_at: string }[]) {
+        (noteDates[n.pid] ??= []).push(String(n.created_at));
+      }
+      for (const n of (nn.data ?? []) as { pid: string; body: string; author_name: string | null; author_email: string | null; created_at: string }[]) {
+        const l = (notes2[n.pid] ??= []);
+        if (l.length < 5) {
+          l.push({ body: n.body, author: n.author_name ?? n.author_email ?? null, at: String(n.created_at).slice(0, 10) });
+        }
+      }
+    }
+    return NextResponse.json({
+      tasks: tRes2.error ? null : (tRes2.data ?? []),
+      access: aRes2.error ? null : (aRes2.data ?? []),
+      noteDates, notes2,
+    });
+  }
+
   const [cRes, mRes, sRes, msRes] = await Promise.all([
     sb.from('cohorts').select('id, name, description, created_by, created_at').eq('id', cohortId).maybeSingle(),
     sb.from('cohort_members').select('pid, added_at').eq('cohort_id', cohortId),

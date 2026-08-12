@@ -233,6 +233,31 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
       .catch(() => setMsg('Could not load this cohort.'));
   };
 
+  // In-place refresh after task/note/access mutations — patches only what
+  // those can change (tasks, access, note timestamps, last-note previews)
+  // into the existing detail. No setDetail(null), so the page never flashes
+  // "Loading…" just because a checkbox-sized thing changed (user report).
+  const refreshLite = async () => {
+    if (sel == null) return;
+    try {
+      const r = await fetch(`/api/cohorts?id=${sel}&scope=tasks`);
+      if (!r.ok) return;
+      const j = await r.json() as {
+        tasks: Task[] | null;
+        access: { user_id: string; granted_at: string }[] | null;
+        noteDates: Record<string, string[]>;
+        notes2: Record<string, NonNullable<Member['notes2']>>;
+      };
+      setDetail((d) => d ? {
+        ...d,
+        tasks: j.tasks,
+        access: j.access,
+        noteDates: j.noteDates ?? d.noteDates,
+        members: d.members.map((m) => ({ ...m, notes2: j.notes2?.[m.pid] ?? m.notes2 ?? null })),
+      } : d);
+    } catch { /* keep the current view — next full load reconciles */ }
+  };
+
   const act = async (body: Record<string, unknown>): Promise<Record<string, unknown> | null> => {
     setBusy(true); setMsg(null);
     const r = await fetch('/api/cohorts', {
@@ -600,7 +625,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                             title="Revoke access"
                             onClick={async () => {
                               const r = await act({ action: 'revoke_access', id: sel, user_id: a.user_id });
-                              if (r?.ok) loadDetail(sel!);
+                              if (r?.ok) void refreshLite();
                             }}>✕</span>
                         </span>
                       );
@@ -821,7 +846,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                                   : 'Mark completed'}
                                 onClick={async () => {
                                   const r = await act({ action: 'toggle_task', task_id: t.id, done: !done });
-                                  if (r?.ok) loadDetail(sel!);
+                                  if (r?.ok) void refreshLite();
                                 }}>
                                 {done ? '✓ Completed' : 'Complete'}
                               </button>
@@ -859,7 +884,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                                   title="Delete this item"
                                   onClick={async () => {
                                     const r = await act({ action: 'delete_task', task_id: t.id });
-                                    if (r?.ok) loadDetail(sel!);
+                                    if (r?.ok) void refreshLite();
                                   }}>✕</span>
                               )}
                             </div>
@@ -899,7 +924,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                             })()}
                             <button className="btn" disabled={busy || !taskText.trim()} onClick={async () => {
                               const r = await act({ action: 'add_task', id: sel, pid: m.pid, body: taskText, assignee_ids: taskAssignees });
-                              if (r?.ok) { setTaskText(''); setTaskAssignees([]); loadDetail(sel!); }
+                              if (r?.ok) { setTaskText(''); setTaskAssignees([]); void refreshLite(); }
                             }}>+ Add</button>
                           </div>
                         </td>
@@ -984,11 +1009,11 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                 if (peoplePick.mode === 'draft') { setTaskAssignees(next); return; }
                 if (peoplePick.mode === 'task') {
                   const r = await act({ action: 'set_assignees', task_id: peoplePick.taskId, assignee_ids: next });
-                  if (r?.ok) loadDetail(sel!);
+                  if (r?.ok) void refreshLite();
                   return;
                 }
                 const r = await act({ action: nowOn ? 'grant_access' : 'revoke_access', id: sel, user_id: toggledId });
-                if (r?.ok) loadDetail(sel!);
+                if (r?.ok) void refreshLite();
               };
               return (
                 <>
