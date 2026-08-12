@@ -81,6 +81,13 @@ export default function BnlView({
     x: number; y: number; name: string;
     notes: NonNullable<BnlClient['notes2']>;
   } | null>(null);
+  // Hover card for the HH column — household members + ages (same fixed-panel
+  // pattern as the notes card, but anchored to the RIGHT of the cell since the
+  // HH column sits at the left edge of the table).
+  const [hhPop, setHhPop] = useState<{
+    x: number; y: number; name: string; selfPid: string;
+    members: NonNullable<BnlClient['hh_members']>;
+  } | null>(null);
 
   // Debounced copy of the search box — only this triggers a fetch.
   const [qDebounced, setQDebounced] = useState('');
@@ -438,9 +445,16 @@ export default function BnlView({
                       <div className="bnl-sub">{r.detail}</div>
                     </td>
                     <td className="num">{r.age ?? '—'}</td>
-                    <td className="num">{(r.hh_n ?? 1) > 1
-                      ? <span title={`${r.hh_n} people in this household — open the client for the member list`}>{r.hh_n}</span>
-                      : <span className="bnl-sub">1</span>}</td>
+                    <td className="num"
+                      onMouseEnter={(e) => {
+                        if ((r.hh_n ?? 1) <= 1 || !r.hh_members?.length) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setHhPop({ x: rect.right, y: rect.top, name: r.name, selfPid: r.pid, members: r.hh_members });
+                      }}
+                      onMouseLeave={() => setHhPop(null)}>
+                      {(r.hh_n ?? 1) > 1
+                        ? <span style={{ textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>{r.hh_n}</span>
+                        : <span className="bnl-sub">1</span>}</td>
                     <td><span className={`bnl-chip bnl-${r.status}`}>{r.status === 'active' ? 'Active' : r.status === 'housed' ? 'Housed' : 'Inactive'}</span></td>
                     <td><Flags r={r} /></td>
                     <td style={{ minWidth: 220 }}>{r.project ? <><span className="ty">{r.ptype ?? '?'}</span> {r.project}{r.enrolled ? null : <span className="bnl-sub" title="not a current enrollment — last known project"> (former)</span>}</> : <span className="bnl-sub">—</span>}</td>
@@ -638,6 +652,39 @@ export default function BnlView({
             </div>
           ))}
           <div className="bnl-sub" style={{ marginTop: 8 }}>open the client for the full thread</div>
+        </div>
+      )}
+
+      {/* HH hover card — household members + ages. Opens rightward (the HH
+          column sits near the table's left edge), clamped to the viewport. */}
+      {hhPop && (
+        <div className="panel" style={{
+          position: 'fixed',
+          left: Math.min(hhPop.x + 10, Math.max(window.innerWidth - 300, 12)),
+          top: Math.min(hhPop.y, Math.max(window.innerHeight - 280, 12)),
+          width: 280, maxWidth: '60vw', maxHeight: 260, overflow: 'hidden',
+          zIndex: 60, pointerEvents: 'none',
+          padding: '12px 14px', boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+        }}>
+          <div style={{ fontWeight: 700, fontSize: '.85rem', marginBottom: 6 }}>
+            Household <span className="bnl-sub">· {hhPop.members.length} member{hhPop.members.length === 1 ? '' : 's'}</span>
+          </div>
+          {hhPop.members.map((m) => (
+            <div key={m.pid} style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: '.82rem', fontWeight: m.pid === hhPop.selfPid ? 700 : 400,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {m.name}
+              </span>
+              {m.hoh && (
+                <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+                  border: '1px solid rgba(148,163,184,0.35)', borderRadius: 8, padding: '0 5px' }}>HoH</span>
+              )}
+              <span className="bnl-sub num" style={{ flexShrink: 0, marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>
+                {m.age != null ? m.age : '—'}
+              </span>
+            </div>
+          ))}
+          <div className="bnl-sub" style={{ marginTop: 8 }}>ages at last refresh · open the client for the household card</div>
         </div>
       )}
 

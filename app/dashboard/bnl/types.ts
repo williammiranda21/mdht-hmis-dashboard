@@ -63,6 +63,10 @@ export interface BnlClient {
   ms_wait: number | null;
   /** household size on the current enrollment (1 = solo/unknown) */
   hh_n: number | null;
+  /** household roster (HoH first, then oldest→youngest) — feeds the HH-cell
+   *  hover card; null for solo/unknown households, so it costs nothing on
+   *  most rows. */
+  hh_members: { pid: string; name: string; age: number | null; hoh: boolean }[] | null;
   /** enrichment (lib/bnl-enrich.ts, page-scoped): last 2 notes + focus mark.
    *  Optional — absent on rows that skipped enrichment (e.g. CSV export). */
   notes2?: { body: string; author: string | null; at: string }[] | null;

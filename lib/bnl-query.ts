@@ -21,7 +21,7 @@ export const ROSTER_COLS =
   'days_homeless, sys_days3, episodes3, risk_pts, risk_max, risk_band, ' +
   'spdat_score, spdat_tool, spdat_date, ms_stage, ms_wait, ' +
   'ref_type, ref_status, ref_date, ref_prov, assessed, dq_n, ' +
-  'income, income_date, ' +
+  'income, income_date, hh_members, ' +
   'chronic, is_new, returned, veteran, family, parenting, unaccompanied, in_school';
 
 export const PAGE_SIZE = 200;
