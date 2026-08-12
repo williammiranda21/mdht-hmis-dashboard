@@ -78,7 +78,8 @@ interface Member {
 }
 interface Task {
   id: number; pid: string; body: string;
-  assignee_id: string | null; assignee_name: string | null;
+  /** [{id, name}] account snapshots — several assignees allowed */
+  assignees: { id: string; name: string | null }[];
   status: 'open' | 'done';
   created_by: string | null; created_at: string;
   done_at: string | null; done_by: string | null;
@@ -144,11 +145,13 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
   // Next-steps panel: which member's task list is expanded, + the add form.
   const [openTasks, setOpenTasks] = useState<string | null>(null);
   const [taskText, setTaskText] = useState('');
-  const [taskAssignee, setTaskAssignee] = useState('');
-  // monday-style people picker (fixed popover anchored to the avatar button —
-  // fixed so the .scroll-pin container can't clip it)
-  const [peoplePick, setPeoplePick] = useState<{ x: number; y: number } | null>(null);
-  useEffect(() => { setOpenTasks(null); setTaskText(''); setTaskAssignee(''); setPeoplePick(null); }, [sel]);
+  // draft assignees for the add form — several allowed (user request)
+  const [taskAssignees, setTaskAssignees] = useState<string[]>([]);
+  // monday-style people picker (fixed popover; fixed so .scroll-pin can't clip
+  // it). mode 'draft' = picking for the add form · 'task' = reassigning an
+  // existing task (admin) · 'access' = sharing the cohort (instant grant/revoke)
+  const [peoplePick, setPeoplePick] = useState<{ x: number; y: number; mode: 'draft' | 'task' | 'access'; taskId?: number } | null>(null);
+  useEffect(() => { setOpenTasks(null); setTaskText(''); setTaskAssignees([]); setPeoplePick(null); }, [sel]);
   // Auto-collapse an idle Next-steps panel (user request): any activity inside
   // it resets the clock; a non-empty draft or an open people picker counts as
   // activity, so nothing in progress is ever swallowed. Refs (not state) so
@@ -182,8 +185,6 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [openTasks]);
-  // Access panel (admin): pick an account to grant.
-  const [grantSel, setGrantSel] = useState('');
 
   async function openMember(m: Member) {
     try {
@@ -498,21 +499,15 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                         </span>
                       );
                     })}
-                    <select className="fselect" value={grantSel} onChange={(e) => setGrantSel(e.target.value)}>
-                      <option value="">Grant access to…</option>
-                      {detail.staff
-                        // Admins already see every cohort — a grant would be a no-op.
-                        .filter((s) => !s.is_admin && !detail.access!.some((a) => a.user_id === s.id))
-                        .map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.display_name || s.email}{!s.bnl_access ? ' (no BNL access)' : ''}
-                          </option>
-                        ))}
-                    </select>
-                    <button className="btn" disabled={busy || !grantSel} onClick={async () => {
-                      const r = await act({ action: 'grant_access', id: sel, user_id: grantSel });
-                      if (r?.ok) { setGrantSel(''); loadDetail(sel!); }
-                    }}>Share</button>
+                    <button className="btn" data-tasks-ui=""
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                      title="Share this cohort — click people in the list to grant or revoke, several in a row"
+                      onClick={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setPeoplePick(peoplePick?.mode === 'access' ? null : { x: rect.left, y: rect.bottom + 6, mode: 'access' });
+                      }}>
+                      + Share
+                    </button>
                   </>
                 )}
               </div>
@@ -627,8 +622,9 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                           : (() => {
                             const people: { id: string; name: string | null }[] = [];
                             for (const t of mTasks) {
-                              if (t.status === 'open' && t.assignee_id && !people.some((p) => p.id === t.assignee_id)) {
-                                people.push({ id: t.assignee_id, name: t.assignee_name });
+                              if (t.status !== 'open') continue;
+                              for (const a of t.assignees ?? []) {
+                                if (!people.some((p) => p.id === a.id)) people.push(a);
                               }
                             }
                             return (
@@ -639,7 +635,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                                   : people.length
                                     ? `Open items assigned to ${people.map((p) => p.name).filter(Boolean).join(', ')}`
                                     : 'Show next steps for this member'}
-                                onClick={() => { setOpenTasks(expanded ? null : m.pid); setTaskText(''); setTaskAssignee(''); }}>
+                                onClick={() => { setOpenTasks(expanded ? null : m.pid); setTaskText(''); setTaskAssignees([]); }}>
                                 {people.length > 0 && (
                                   <span style={{ display: 'inline-flex' }}>
                                     {people.slice(0, 3).map((p, i) => (
@@ -679,23 +675,52 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                           onMouseMove={touchTasks} onClick={touchTasks} onKeyDown={touchTasks}>
                           {mTasks.length === 0 && <div className="bnl-sub" style={{ marginBottom: 8 }}>No next steps yet.</div>}
                           {[...mTasks].sort((a, b) => (a.status === b.status ? 0 : a.status === 'open' ? -1 : 1))
-                            .map((t) => (
-                            <div key={t.id} style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
-                              <input type="checkbox" checked={t.status === 'done'} disabled={busy}
-                                title={t.status === 'done' ? `Done ${t.done_at?.slice(0, 10) ?? ''} by ${t.done_by ?? '—'} — click to reopen` : 'Mark done'}
-                                onChange={async () => {
-                                  const r = await act({ action: 'toggle_task', task_id: t.id, done: t.status !== 'done' });
+                            .map((t) => {
+                              const done = t.status === 'done';
+                              return (
+                            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                              {/* Status button (user request: no checkbox, no strikethrough —
+                                  a green ✓ button; done text green, pending text amber) */}
+                              <button className="btn" disabled={busy}
+                                style={{ padding: '0 9px', fontSize: 11, fontWeight: 700, flexShrink: 0,
+                                  ...(done
+                                    ? { color: 'var(--accent)', borderColor: 'var(--accent)', background: 'rgba(52,199,123,0.14)' }
+                                    : { color: 'var(--accent)', borderColor: 'var(--accent)' }) }}
+                                title={done
+                                  ? `Completed ${t.done_at?.slice(0, 10) ?? ''} by ${t.done_by ?? '—'} — click to reopen`
+                                  : 'Mark completed'}
+                                onClick={async () => {
+                                  const r = await act({ action: 'toggle_task', task_id: t.id, done: !done });
                                   if (r?.ok) loadDetail(sel!);
-                                }} />
-                              <span style={{ fontSize: '.85rem',
-                                textDecoration: t.status === 'done' ? 'line-through' : 'none',
-                                color: t.status === 'done' ? 'var(--muted)' : 'var(--text)' }}>
+                                }}>
+                                {done ? '✓ Completed' : 'Complete'}
+                              </button>
+                              <span style={{ fontSize: '.85rem', color: done ? 'var(--accent)' : 'var(--warn)' }}>
                                 {t.body}
                               </span>
-                              <span className="bnl-sub" style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                {t.assignee_id
-                                  ? <><Avatar name={t.assignee_name} id={t.assignee_id} size={20} />
-                                      <b style={{ color: 'var(--strong)', fontWeight: 600 }}>{t.assignee_name}</b></>
+                              <span className="bnl-sub" style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6,
+                                  cursor: isAdmin ? 'pointer' : 'default' }}
+                                title={((t.assignees?.length ?? 0)
+                                  ? t.assignees.map((a) => a.name).filter(Boolean).join(', ')
+                                  : 'Unassigned') + (isAdmin ? ' — click to change who is assigned' : '')}
+                                onClick={isAdmin ? (e) => {
+                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                  setPeoplePick({ x: rect.left, y: rect.bottom + 6, mode: 'task', taskId: t.id });
+                                } : undefined}>
+                                {(t.assignees?.length ?? 0)
+                                  ? <>
+                                      <span style={{ display: 'inline-flex' }}>
+                                        {t.assignees.slice(0, 4).map((a, i) => (
+                                          <span key={a.id} style={{ marginLeft: i ? -7 : 0, display: 'inline-flex',
+                                            borderRadius: '50%', border: '1.5px solid var(--card)' }}>
+                                            <Avatar name={a.name} id={a.id} size={20} />
+                                          </span>
+                                        ))}
+                                      </span>
+                                      <b style={{ color: 'var(--strong)', fontWeight: 600 }}>
+                                        {t.assignees.map((a) => (a.name ?? '?').split(' ')[0]).join(', ')}
+                                      </b>
+                                    </>
                                   : <><AvatarEmpty size={20} /> unassigned</>}
                                 {' '}· {t.created_at.slice(0, 10)}
                               </span>
@@ -708,29 +733,43 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                                   }}>✕</span>
                               )}
                             </div>
-                          ))}
+                              );
+                            })}
                           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
                             <input className="finput" style={{ flex: 1, minWidth: 240 }}
                               placeholder="New next step…" value={taskText}
                               onChange={(e) => setTaskText(e.target.value)} />
                             {(() => {
-                              const chosen = detail.staff.find((s) => s.id === taskAssignee) ?? null;
+                              const chosen = detail.staff.filter((s) => taskAssignees.includes(s.id));
                               return (
-                                <button className="btn" title={chosen ? `Assigned to ${chosen.display_name || chosen.email} — click to change` : 'Assign to…'}
+                                <button className="btn"
+                                  title={chosen.length
+                                    ? `${chosen.map((s) => s.display_name || s.email).join(', ')} — click to change`
+                                    : 'Assign to one or more people…'}
                                   style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '3px 10px' }}
                                   onClick={(e) => {
                                     const rect = e.currentTarget.getBoundingClientRect();
-                                    setPeoplePick(peoplePick ? null : { x: rect.left, y: rect.bottom + 6 });
+                                    setPeoplePick(peoplePick?.mode === 'draft' ? null : { x: rect.left, y: rect.bottom + 6, mode: 'draft' });
                                   }}>
-                                  {chosen
-                                    ? <><Avatar name={chosen.display_name || chosen.email} id={chosen.id} size={22} />{chosen.display_name || chosen.email}</>
+                                  {chosen.length
+                                    ? <>
+                                        <span style={{ display: 'inline-flex' }}>
+                                          {chosen.slice(0, 3).map((s, i) => (
+                                            <span key={s.id} style={{ marginLeft: i ? -7 : 0, display: 'inline-flex',
+                                              borderRadius: '50%', border: '1.5px solid var(--card)' }}>
+                                              <Avatar name={s.display_name || s.email} id={s.id} size={22} />
+                                            </span>
+                                          ))}
+                                        </span>
+                                        {chosen.length === 1 ? (chosen[0].display_name || chosen[0].email) : `${chosen.length} people`}
+                                      </>
                                     : <><AvatarEmpty size={22} /><span className="bnl-sub">Assign</span></>}
                                 </button>
                               );
                             })()}
                             <button className="btn" disabled={busy || !taskText.trim()} onClick={async () => {
-                              const r = await act({ action: 'add_task', id: sel, pid: m.pid, body: taskText, assignee_id: taskAssignee || null });
-                              if (r?.ok) { setTaskText(''); setTaskAssignee(''); loadDetail(sel!); }
+                              const r = await act({ action: 'add_task', id: sel, pid: m.pid, body: taskText, assignee_ids: taskAssignees });
+                              if (r?.ok) { setTaskText(''); setTaskAssignees([]); loadDetail(sel!); }
                             }}>+ Add</button>
                           </div>
                         </td>
@@ -793,17 +832,63 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
             width: 252, maxHeight: 320, overflowY: 'auto', zIndex: 70,
             padding: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
           }}>
-            <div className="dd-opt" style={{ border: 'none' }}
-              onClick={() => { setTaskAssignee(''); setPeoplePick(null); }}>
-              <AvatarEmpty size={26} /><span className="dd-nm">Unassigned</span>
-            </div>
-            {(isAdmin ? detail.staff : detail.staff.filter((s) => s.id === viewerId)).map((s) => (
-              <div key={s.id} className={`dd-opt${taskAssignee === s.id ? ' on' : ''}`} style={{ border: 'none' }}
-                onClick={() => { setTaskAssignee(s.id); setPeoplePick(null); }}>
-                <Avatar name={s.display_name || s.email} id={s.id} size={26} />
-                <span className="dd-nm">{s.display_name || s.email}</span>
-              </div>
-            ))}
+            {(() => {
+              const isAccess = peoplePick.mode === 'access';
+              const roster = isAccess
+                // Admins already see every cohort — a grant would be a no-op.
+                ? detail.staff.filter((s) => !s.is_admin)
+                : (isAdmin ? detail.staff : detail.staff.filter((s) => s.id === viewerId));
+              const selected: string[] = isAccess
+                ? (detail.access ?? []).map((a) => a.user_id)
+                : peoplePick.mode === 'task'
+                  ? (detail.tasks?.find((t) => t.id === peoplePick.taskId)?.assignees ?? []).map((a) => a.id)
+                  : taskAssignees;
+              // draft mode edits local state; task mode saves immediately;
+              // access mode grants/revokes immediately. The menu STAYS OPEN so
+              // several people can be toggled in a row (user request).
+              const apply = async (next: string[], toggledId: string, nowOn: boolean) => {
+                if (peoplePick.mode === 'draft') { setTaskAssignees(next); return; }
+                if (peoplePick.mode === 'task') {
+                  const r = await act({ action: 'set_assignees', task_id: peoplePick.taskId, assignee_ids: next });
+                  if (r?.ok) loadDetail(sel!);
+                  return;
+                }
+                const r = await act({ action: nowOn ? 'grant_access' : 'revoke_access', id: sel, user_id: toggledId });
+                if (r?.ok) loadDetail(sel!);
+              };
+              return (
+                <>
+                  <div className="bnl-sub" style={{ padding: '2px 8px 6px' }}>
+                    <b>{isAccess ? 'Share cohort with…' : 'Assign…'}</b> · click to toggle, several allowed
+                  </div>
+                  {!isAccess && (
+                    <div className="dd-opt" style={{ border: 'none' }}
+                      onClick={() => { void apply([], '', false); }}>
+                      <AvatarEmpty size={26} /><span className="dd-nm">Clear — unassigned</span>
+                    </div>
+                  )}
+                  {roster.map((s) => {
+                    const on = selected.includes(s.id);
+                    return (
+                      <div key={s.id} className={`dd-opt${on ? ' on' : ''}`} style={{ border: 'none' }}
+                        onClick={() => {
+                          const next = on ? selected.filter((x) => x !== s.id) : [...selected, s.id];
+                          void apply(next, s.id, !on);
+                        }}>
+                        <Avatar name={s.display_name || s.email} id={s.id} size={26} />
+                        <span className="dd-nm">
+                          {s.display_name || s.email}{isAccess && !s.bnl_access ? ' (no BNL access)' : ''}
+                        </span>
+                        {on && <span style={{ color: 'var(--primary)', fontWeight: 700, flexShrink: 0 }}>✓</span>}
+                      </div>
+                    );
+                  })}
+                  {isAccess && !roster.length && (
+                    <div className="bnl-sub" style={{ padding: 8 }}>No non-admin accounts to share with.</div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </>
       )}

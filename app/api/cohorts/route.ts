@@ -79,7 +79,7 @@ export async function GET(req: Request) {
   // itself: admins see every approved account, others only their own row.
   const [tRes, aRes, stRes] = await Promise.all([
     sb.from('cohort_tasks')
-      .select('id, pid, body, assignee_id, assignee_name, status, created_by, created_at, done_at, done_by')
+      .select('id, pid, body, assignees, status, created_by, created_at, done_at, done_by')
       .eq('cohort_id', cohortId).order('created_at'),
     sb.from('cohort_access').select('user_id, granted_at').eq('cohort_id', cohortId),
     sb.from('profiles').select('id, display_name, email, bnl_access, is_admin').eq('status', 'approved').order('display_name'),
@@ -251,7 +251,7 @@ export async function POST(req: Request) {
   let body: {
     action?: string; id?: number; name?: string; description?: string;
     pids?: string[]; pid?: string; user_id?: string;
-    task_id?: number; body?: string; assignee_id?: string | null; done?: boolean;
+    task_id?: number; body?: string; assignee_ids?: string[]; done?: boolean;
   };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: 'invalid JSON' }, { status: 400 });
@@ -266,36 +266,65 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'admin only' }, { status: 403 });
   }
 
+  // Assignees are dashboard accounts only (user decision 2026-08-12), several
+  // per task allowed. Resolves ids → [{id, name}] snapshots; null = an id was
+  // unknown or not approved. Order of the input is preserved.
+  const resolveAssignees = async (ids: string[]): Promise<{ id: string; name: string | null }[] | null> => {
+    if (!ids.length) return [];
+    const { data, error } = await sb.from('profiles')
+      .select('id, display_name, email, status').in('id', ids);
+    if (error) return null;
+    const byId = new Map((data ?? []).map((p: { id: string; display_name: string | null; email: string | null; status: string }) => [p.id, p]));
+    const out: { id: string; name: string | null }[] = [];
+    for (const id of ids) {
+      const p = byId.get(id);
+      if (!p || p.status !== 'approved') return null;
+      out.push({ id, name: p.display_name || p.email || null });
+    }
+    return out;
+  };
+
   if (body.action === 'add_task') {
     const id = Number(body.id);
     const text = (body.body ?? '').trim();
     if (!Number.isFinite(id)) return NextResponse.json({ error: 'id required' }, { status: 400 });
     if (!text) return NextResponse.json({ error: 'task text required' }, { status: 400 });
     if (!body.pid) return NextResponse.json({ error: 'pid required' }, { status: 400 });
-    // Assignees are dashboard accounts only (user decision 2026-08-12). A
-    // non-admin can assign only to themself — they cannot read other profiles
-    // to pick from anyway (profiles RLS).
-    let assigneeName: string | null = null;
-    const assigneeId = body.assignee_id || null;
-    if (assigneeId) {
-      if (!viewer.isAdmin && assigneeId !== viewer.id) {
-        return NextResponse.json({ error: 'you can only assign tasks to yourself' }, { status: 403 });
-      }
-      const p = await sb.from('profiles').select('display_name, email, status').eq('id', assigneeId).maybeSingle();
-      if (!p.data || p.data.status !== 'approved') {
-        return NextResponse.json({ error: 'assignee must be an approved account' }, { status: 400 });
-      }
-      assigneeName = p.data.display_name || p.data.email || null;
+    const ids = [...new Set((body.assignee_ids ?? []).map(String).filter(Boolean))];
+    // A non-admin can assign only to themself — they cannot read other
+    // profiles to pick from anyway (profiles RLS).
+    if (!viewer.isAdmin && ids.some((a) => a !== viewer.id)) {
+      return NextResponse.json({ error: 'you can only assign tasks to yourself' }, { status: 403 });
+    }
+    const assignees = await resolveAssignees(ids);
+    if (assignees === null) {
+      return NextResponse.json({ error: 'assignees must be approved accounts' }, { status: 400 });
     }
     const { data, error } = await sb.from('cohort_tasks')
       .insert({
         cohort_id: id, pid: body.pid, body: text,
-        assignee_id: assigneeId, assignee_name: assigneeName,
+        assignees,
         created_by: viewer.email ?? null,
       })
       .select('id').single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true, id: data.id });
+  }
+
+  if (body.action === 'set_assignees') {
+    // Reassign an existing task (admin-only via the gate above).
+    const taskId = Number(body.task_id);
+    if (!Number.isFinite(taskId)) return NextResponse.json({ error: 'task_id required' }, { status: 400 });
+    const ids = [...new Set((body.assignee_ids ?? []).map(String).filter(Boolean))];
+    const assignees = await resolveAssignees(ids);
+    if (assignees === null) {
+      return NextResponse.json({ error: 'assignees must be approved accounts' }, { status: 400 });
+    }
+    const { data, error } = await sb.from('cohort_tasks')
+      .update({ assignees }).eq('id', taskId).select('id');
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!data?.length) return NextResponse.json({ error: 'task not found' }, { status: 404 });
+    return NextResponse.json({ ok: true });
   }
 
   if (body.action === 'toggle_task') {

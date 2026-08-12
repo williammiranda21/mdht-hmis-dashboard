@@ -26,8 +26,10 @@ create table if not exists cohort_tasks (
   cohort_id     bigint not null references cohorts(id) on delete cascade,
   pid           text not null,                     -- hashed PersonalID (bnl_clients.pid)
   body          text not null,
-  assignee_id   uuid references auth.users on delete set null,
-  assignee_name text,                              -- display name at assignment time
+  -- [{id, name}, ...] — account id + display-name snapshots at assignment time
+  -- (multiple assignees per task, user request 2026-08-12; snapshot rationale
+  -- as bnl_notes authors)
+  assignees     jsonb not null default '[]'::jsonb,
   status        text not null default 'open' check (status in ('open', 'done')),
   created_by    text,                              -- email snapshot
   created_at    timestamptz not null default now(),
@@ -35,6 +37,23 @@ create table if not exists cohort_tasks (
   done_by       text,                              -- email snapshot
   constraint cohort_tasks_body_not_blank check (length(btrim(body)) > 0)
 );
+
+-- Migration for tables created by the earlier single-assignee version of this
+-- file: fold assignee_id/assignee_name into the assignees array, then drop
+-- the old columns. Safe to re-run.
+alter table cohort_tasks add column if not exists assignees jsonb not null default '[]'::jsonb;
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'cohort_tasks'
+               and column_name = 'assignee_id') then
+    update cohort_tasks
+       set assignees = jsonb_build_array(jsonb_build_object('id', assignee_id, 'name', assignee_name))
+     where assignee_id is not null and assignees = '[]'::jsonb;
+    alter table cohort_tasks drop column assignee_id;
+    alter table cohort_tasks drop column assignee_name;
+  end if;
+end $$;
 
 create index if not exists cohort_tasks_lookup on cohort_tasks (cohort_id, pid, status);
 
