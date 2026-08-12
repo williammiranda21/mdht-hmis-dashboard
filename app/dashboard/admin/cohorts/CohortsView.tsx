@@ -162,6 +162,9 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [paste, setPaste] = useState('');
+  // Add-clients paste box is COLLAPSED by default (user report 2026-08-12:
+  // the always-open textarea + access row stole ~90px from the member list).
+  const [addOpen, setAddOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Member click → the SAME client card as the BNL (ClientDrawer). The member
@@ -188,7 +191,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
   // it). mode 'draft' = picking for the add form · 'task' = reassigning an
   // existing task (admin) · 'access' = sharing the cohort (instant grant/revoke)
   const [peoplePick, setPeoplePick] = useState<{ x: number; y: number; mode: 'draft' | 'task' | 'access'; taskId?: number } | null>(null);
-  useEffect(() => { setOpenTasks(null); setTaskText(''); setTaskAssignees([]); setPeoplePick(null); }, [sel]);
+  useEffect(() => { setOpenTasks(null); setTaskText(''); setTaskAssignees([]); setPeoplePick(null); setAddOpen(false); }, [sel]);
   // ── AI Layer-2 pilot (per-member summary card in the expanded panel) ──────
   const [ai, setAi] = useState<Record<string, AiResult>>({});
   const [aiBusy, setAiBusy] = useState<string | null>(null);
@@ -686,9 +689,11 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
               )}
             </div>
 
-            {/* Access — which accounts can open this cohort (admin-curated).
-                Grants open the cohort page + tasks; the member NAMES still ride
-                on BNL access, so flag grantees who lack it. */}
+            {/* ONE compact toolbar row (user report 2026-08-12: the stacked
+                Access row + always-open paste textarea stole ~90px from the
+                member list). Access chips + Share on the left, the Add-clients
+                TOGGLE at the right — the paste box itself only renders when
+                toggled open below. */}
             {isAdmin && (
               <div style={{ padding: '0 18px 12px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <span className="flabel" style={{ margin: 0 }}>Access</span>
@@ -728,6 +733,13 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                     </button>
                   </>
                 )}
+                <button className="btn" aria-expanded={addOpen}
+                  style={{ marginLeft: 'auto',
+                    ...(addOpen ? { borderColor: 'var(--primary)', color: 'var(--primary)' } : {}) }}
+                  title="Paste hashed client IDs to add members (every ID in the app is click-to-copy)"
+                  onClick={() => setAddOpen((v) => !v)}>
+                  + Add clients {addOpen ? '▴' : '▾'}
+                </button>
               </div>
             )}
             {detail.restricted && (
@@ -744,20 +756,22 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
                 </button>
               </div>
             )}
-            {isAdmin && (
+            {isAdmin && addOpen && (
               <div style={{ padding: '0 18px 12px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                <textarea className="finput" rows={2} style={{ minWidth: 320, flex: 1 }}
+                <textarea className="finput" rows={2} autoFocus style={{ minWidth: 320, flex: 1 }}
                   placeholder="Paste hashed client IDs (one per line, or comma/space separated)…"
                   value={paste} onChange={(e) => setPaste(e.target.value)} />
                 <button className="btn" disabled={busy || !paste.trim()} onClick={async () => {
                   const pids = paste.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
                   const r = await act({ action: 'add_members', id: sel, pids });
                   if (r?.ok) {
-                    setPaste('');
+                    setPaste(''); setAddOpen(false);
                     setMsg(`Added ${r.added}.${(r.unknown as string[]).length ? ` Not on the roster (skipped): ${(r.unknown as string[]).join(', ')}` : ''}`);
                     loadDetail(sel!); loadList();
                   }
-                }}>+ Add clients</button>
+                }}>Add</button>
+                <button className="btn" title="Close — a pasted draft is kept"
+                  onClick={() => setAddOpen(false)}>✕</button>
               </div>
             )}
             <div className="scroll scroll-pin">
