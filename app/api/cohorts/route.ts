@@ -1,20 +1,28 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
+import { enrichRoster } from '../../../lib/bnl-enrich';
+import type { BnlClient } from '../../dashboard/bnl/types';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Client cohorts (admin-only, backed by RLS "admins all" — supabase/cohorts.sql).
+ * Client cohorts (admin-managed; per-cohort grants — supabase/cohorts.sql +
+ * cohort_tasks.sql).
  *
- * GET            → cohort list with member counts
- * GET ?id=N      → one cohort: members joined LIVE to bnl_clients (current
- *                  status/journey — always as fresh as the last refresh),
- *                  aggregate metrics computed here, and the snapshot trend
- * POST {action}  → create | rename | delete | add_members | remove_member
+ * GET            → cohort list with member counts (admins: all; others: the
+ *                  cohorts they were granted via cohort_access — RLS filters)
+ * GET ?id=N      → one cohort: members joined LIVE to bnl_clients + last notes
+ *                  (bnl_notes enrichment, same as the BNL roster), aggregate
+ *                  metrics, snapshot trend, staffing tasks, and access grants
+ * POST {action}  → admin: create | delete | add_members | remove_member |
+ *                         grant_access | revoke_access | delete_task
+ *                  any grantee (RLS-enforced): add_task | toggle_task
  *
  * add_members takes pasted hashed PersonalIDs (the CopyId chips everywhere in
  * the app produce exactly these); unknown IDs are reported back, not silently
  * dropped. Membership is static — nothing here auto-removes housed clients.
+ * Member names/notes still ride on can_see_bnl(): a grantee without BNL access
+ * gets the cohort shell but an empty member list (flagged `restricted`).
  */
 
 const MS_ORDER = ['ident', 'assessed', 'referred', 'accepted', 'movein'];
@@ -30,7 +38,9 @@ const mean = (v: number[]): number | null =>
 export async function GET(req: Request) {
   const viewer = await getViewer();
   if (!viewer) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  if (!viewer.isAdmin) return NextResponse.json({ error: 'admin only' }, { status: 403 });
+  // Not admin-only anymore: RLS scopes non-admins to cohorts they were granted
+  // (cohort_access, supabase/cohort_tasks.sql). Approval is still required.
+  if (!viewer.isApproved) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const sb = supabaseServer();
   const id = new URL(req.url).searchParams.get('id');
@@ -46,6 +56,7 @@ export async function GET(req: Request) {
       counts.set(Number(m.cohort_id), (counts.get(Number(m.cohort_id)) ?? 0) + 1);
     }
     return NextResponse.json({
+      manage: viewer.isAdmin,
       cohorts: (cRes.data ?? []).map((c: Record<string, unknown>) => ({
         ...c, members: counts.get(Number(c.id)) ?? 0,
       })),
@@ -60,6 +71,18 @@ export async function GET(req: Request) {
     // system-wide journey benchmark — rendered as the ghost figures on the
     // cohort's journey bar ("are we faster than the system?")
     sb.from('meta').select('value').eq('key', 'ce_milestones').maybeSingle(),
+  ]);
+  // Staffing tasks + access grants + the assignee/grant picker. Queried apart
+  // from the Promise.all above because cohort_tasks.sql may not have been run
+  // yet — a missing table degrades to tasks:null (the UI shows the setup hint)
+  // instead of failing the whole cohort. profiles RLS shapes the staff list by
+  // itself: admins see every approved account, others only their own row.
+  const [tRes, aRes, stRes] = await Promise.all([
+    sb.from('cohort_tasks')
+      .select('id, pid, body, assignee_id, assignee_name, status, created_by, created_at, done_at, done_by')
+      .eq('cohort_id', cohortId).order('created_at'),
+    sb.from('cohort_access').select('user_id, granted_at').eq('cohort_id', cohortId),
+    sb.from('profiles').select('id, display_name, email, bnl_access').eq('status', 'approved').order('display_name'),
   ]);
   if (cRes.error) return NextResponse.json({ error: cRes.error.message }, { status: 500 });
   if (!cRes.data) return NextResponse.json({ error: 'not found' }, { status: 404 });
@@ -86,6 +109,11 @@ export async function GET(req: Request) {
   }
   const found = new Set(members.map((m) => m.pid));
   const missing = pids.filter((p) => !found.has(p));   // left the roster since being added
+
+  // Last-notes column, same enrichment as the BNL roster (notes2, cap 5 per
+  // client). bnl_notes rides on can_see_bnl(); for a viewer without BNL access
+  // it simply returns nothing — notes2 stays null, no error.
+  await enrichRoster(sb, members as unknown as BnlClient[]);
 
   // ── aggregates ──────────────────────────────────────────────────────────
   const by = { active: 0, housed: 0, inactive: 0 };
@@ -191,6 +219,14 @@ export async function GET(req: Request) {
     members,
     missing,
     snapshots: sRes.data ?? [],
+    // null = cohort_tasks.sql not run yet (missing table) → UI shows setup hint
+    tasks: tRes.error ? null : (tRes.data ?? []),
+    access: aRes.error ? null : (aRes.data ?? []),
+    staff: stRes.data ?? [],
+    manage: viewer.isAdmin,
+    // pids exist but every member row was filtered away → the viewer lacks
+    // BNL access (bnl_clients RLS), not an empty cohort
+    restricted: !viewer.isAdmin && pids.length > 0 && members.length === 0,
     agg: {
       n: members.length,
       ...by,
@@ -210,13 +246,95 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const viewer = await getViewer();
   if (!viewer) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  if (!viewer.isAdmin) return NextResponse.json({ error: 'admin only' }, { status: 403 });
+  if (!viewer.isApproved) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
-  let body: { action?: string; id?: number; name?: string; description?: string; pids?: string[]; pid?: string };
+  let body: {
+    action?: string; id?: number; name?: string; description?: string;
+    pids?: string[]; pid?: string; user_id?: string;
+    task_id?: number; body?: string; assignee_id?: string | null; done?: boolean;
+  };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: 'invalid JSON' }, { status: 400 });
   }
   const sb = supabaseServer();
+
+  // Cohort management stays admin-only; task add/toggle is open to grantees —
+  // the cohort_tasks RLS policies (cohort_access membership) are the boundary,
+  // this split just gives honest error messages.
+  const TASK_ACTIONS = new Set(['add_task', 'toggle_task']);
+  if (!viewer.isAdmin && !TASK_ACTIONS.has(body.action ?? '')) {
+    return NextResponse.json({ error: 'admin only' }, { status: 403 });
+  }
+
+  if (body.action === 'add_task') {
+    const id = Number(body.id);
+    const text = (body.body ?? '').trim();
+    if (!Number.isFinite(id)) return NextResponse.json({ error: 'id required' }, { status: 400 });
+    if (!text) return NextResponse.json({ error: 'task text required' }, { status: 400 });
+    if (!body.pid) return NextResponse.json({ error: 'pid required' }, { status: 400 });
+    // Assignees are dashboard accounts only (user decision 2026-08-12). A
+    // non-admin can assign only to themself — they cannot read other profiles
+    // to pick from anyway (profiles RLS).
+    let assigneeName: string | null = null;
+    const assigneeId = body.assignee_id || null;
+    if (assigneeId) {
+      if (!viewer.isAdmin && assigneeId !== viewer.id) {
+        return NextResponse.json({ error: 'you can only assign tasks to yourself' }, { status: 403 });
+      }
+      const p = await sb.from('profiles').select('display_name, email, status').eq('id', assigneeId).maybeSingle();
+      if (!p.data || p.data.status !== 'approved') {
+        return NextResponse.json({ error: 'assignee must be an approved account' }, { status: 400 });
+      }
+      assigneeName = p.data.display_name || p.data.email || null;
+    }
+    const { data, error } = await sb.from('cohort_tasks')
+      .insert({
+        cohort_id: id, pid: body.pid, body: text,
+        assignee_id: assigneeId, assignee_name: assigneeName,
+        created_by: viewer.email ?? null,
+      })
+      .select('id').single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, id: data.id });
+  }
+
+  if (body.action === 'toggle_task') {
+    const taskId = Number(body.task_id);
+    if (!Number.isFinite(taskId)) return NextResponse.json({ error: 'task_id required' }, { status: 400 });
+    const done = body.done === true;
+    const { data, error } = await sb.from('cohort_tasks')
+      .update(done
+        ? { status: 'done', done_at: new Date().toISOString(), done_by: viewer.email ?? null }
+        : { status: 'open', done_at: null, done_by: null })
+      .eq('id', taskId)
+      .select('id');
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // RLS silently matches nothing when the viewer lacks a grant — say so.
+    if (!data?.length) return NextResponse.json({ error: 'task not found or no access' }, { status: 404 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === 'delete_task') {
+    const taskId = Number(body.task_id);
+    if (!Number.isFinite(taskId)) return NextResponse.json({ error: 'task_id required' }, { status: 400 });
+    const { error } = await sb.from('cohort_tasks').delete().eq('id', taskId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === 'grant_access' || body.action === 'revoke_access') {
+    const id = Number(body.id);
+    if (!Number.isFinite(id)) return NextResponse.json({ error: 'id required' }, { status: 400 });
+    if (!body.user_id) return NextResponse.json({ error: 'user_id required' }, { status: 400 });
+    const q = body.action === 'grant_access'
+      ? sb.from('cohort_access').upsert(
+          { cohort_id: id, user_id: body.user_id, granted_by: viewer.email ?? null },
+          { onConflict: 'cohort_id,user_id', ignoreDuplicates: true })
+      : sb.from('cohort_access').delete().eq('cohort_id', id).eq('user_id', body.user_id);
+    const { error } = await q;
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
 
   if (body.action === 'create') {
     const name = (body.name ?? '').trim();

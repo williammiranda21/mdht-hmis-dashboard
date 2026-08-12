@@ -17,10 +17,20 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Data cutoff (Export.csv ExportEndDate, loaded into meta.export_end) —
   // shown on every page so nobody mistakes the dashboard for live HMIS.
   let exportEnd: string | null = null;
+  // Does a NON-admin have any per-cohort grant? Drives the Cohorts nav link
+  // (cohort_access RLS lets a user read only their own rows; a missing table
+  // — cohort_tasks.sql not run — just returns an error → false).
+  let cohortAccess = false;
   if (viewer?.isApproved) {
-    const { data } = await supabaseServer()
-      .from('meta').select('value').eq('key', 'export_end').maybeSingle();
-    exportEnd = (data?.value as string | null) ?? null;
+    const sb = supabaseServer();
+    const [metaRes, accessRes] = await Promise.all([
+      sb.from('meta').select('value').eq('key', 'export_end').maybeSingle(),
+      viewer.isAdmin
+        ? Promise.resolve({ data: null })
+        : sb.from('cohort_access').select('cohort_id').limit(1),
+    ]);
+    exportEnd = (metaRes.data?.value as string | null) ?? null;
+    cohortAccess = ((accessRes.data as unknown[] | null)?.length ?? 0) > 0;
   }
 
   // Signed in but not approved yet (or switched off): show the status screen
@@ -83,7 +93,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </Link>
         <div className="nav-label">Menu</div>
         <Suspense fallback={<nav className="tabnav" />}>
-          <TabNav isAdmin={viewer?.isAdmin ?? false} />
+          <TabNav isAdmin={viewer?.isAdmin ?? false} cohortAccess={cohortAccess} />
         </Suspense>
         <div className="foot">HMIS Performance Dashboard<br />Data refreshed from HMIS</div>
       </aside>

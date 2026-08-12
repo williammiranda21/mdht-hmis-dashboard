@@ -90,7 +90,8 @@ const ICONS: Record<string, JSX.Element> = {
 type Tab = (typeof TABS)[number];
 const isAdminTab = (t: Tab): boolean => 'adminOnly' in t && t.adminOnly === true;
 
-export default function TabNav({ isAdmin = false }: { isAdmin?: boolean }) {
+export default function TabNav({ isAdmin = false, cohortAccess = false }:
+    { isAdmin?: boolean; cohortAccess?: boolean }) {
   const pathname = usePathname();
   const search = useSearchParams();
   const qs = search.toString();
@@ -108,7 +109,11 @@ export default function TabNav({ isAdmin = false }: { isAdmin?: boolean }) {
     );
   };
 
-  const regular = TABS.filter((t) => !isAdminTab(t));
+  // A non-admin who was granted specific cohorts (cohort_access) gets the
+  // Cohorts tab in the main list — the page itself is RLS-scoped to their
+  // grants. Admins keep it in the Admin section as before.
+  const regular = TABS.filter((t) => !isAdminTab(t)
+    || (!isAdmin && cohortAccess && t.href === '/dashboard/admin/cohorts'));
   const admin = TABS.filter(isAdminTab);
 
   return (

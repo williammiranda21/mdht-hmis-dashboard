@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { fmtInt } from '../../../../lib/format';
 import CopyId from '../../../../components/CopyId';
 import JourneyBar from '../../../../components/JourneyBar';
@@ -21,6 +21,13 @@ import { MILESTONES, type BnlClient } from '../../bnl/types';
 const MS_ORDER = MILESTONES.map(([k]) => k);
 const MS_LABELS = Object.fromEntries(MILESTONES);
 
+/** '2026-08-05' → 'today' / '3d' / '2mo' — freshness for the notes column
+ *  (same helper as the BNL roster). */
+function noteAge(at: string): string {
+  const d = Math.max(0, Math.floor((Date.now() - +new Date(`${at}T00:00:00`)) / 86400000));
+  return d === 0 ? 'today' : d < 30 ? `${d}d` : d < 365 ? `${Math.round(d / 30)}mo` : `${Math.round(d / 365)}y`;
+}
+
 interface CohortRow { id: number; name: string; description: string | null; created_by: string | null; created_at: string; members: number }
 interface Member {
   pid: string; name: string | null; age: number | null; status: string;
@@ -29,11 +36,28 @@ interface Member {
   as_of: string | null;
   /** live CE worklist leg + days on it (ETL fields — same source as the bar) */
   ms_stage: string | null; ms_wait: number | null;
+  /** last notes (bnl_notes enrichment, cap 5) — same shape as the BNL roster */
+  notes2?: { body: string; author: string | null; at: string }[] | null;
 }
+interface Task {
+  id: number; pid: string; body: string;
+  assignee_id: string | null; assignee_name: string | null;
+  status: 'open' | 'done';
+  created_by: string | null; created_at: string;
+  done_at: string | null; done_by: string | null;
+}
+interface Staff { id: string; display_name: string | null; email: string | null; bnl_access: boolean }
 interface Detail {
   cohort: { id: number; name: string; description: string | null; created_by: string | null; created_at: string };
   members: Member[];
   missing: string[];
+  /** null → cohort_tasks.sql not run yet (setup hint) */
+  tasks: Task[] | null;
+  access: { user_id: string; granted_at: string }[] | null;
+  staff: Staff[];
+  manage: boolean;
+  /** members exist but every row was RLS-filtered → viewer lacks BNL access */
+  restricted?: boolean;
   snapshots: { captured_on: string; counts: { housed_pct?: number | null; n?: number } }[];
   agg: {
     n: number; active: number; housed: number; inactive: number;
@@ -53,7 +77,8 @@ interface Detail {
   };
 }
 
-export default function CohortsView() {
+export default function CohortsView({ isAdmin = false, viewerId = null }:
+    { isAdmin?: boolean; viewerId?: string | null }) {
   const [cohorts, setCohorts] = useState<CohortRow[] | null>(null);
   const [setupNeeded, setSetupNeeded] = useState(false);
   const [sel, setSel] = useState<number | null>(null);
@@ -71,6 +96,18 @@ export default function CohortsView() {
   // that leg, longest-waiting first (same behavior as the BNL page).
   const [fStage, setFStage] = useState('');
   useEffect(() => setFStage(''), [sel]);   // a stage filter never outlives its cohort
+  // Notes hover card (same fixed-panel pattern as the BNL roster).
+  const [notePop, setNotePop] = useState<{
+    x: number; y: number; name: string;
+    notes: NonNullable<Member['notes2']>;
+  } | null>(null);
+  // Next-steps panel: which member's task list is expanded, + the add form.
+  const [openTasks, setOpenTasks] = useState<string | null>(null);
+  const [taskText, setTaskText] = useState('');
+  const [taskAssignee, setTaskAssignee] = useState('');
+  useEffect(() => { setOpenTasks(null); setTaskText(''); setTaskAssignee(''); }, [sel]);
+  // Access panel (admin): pick an account to grant.
+  const [grantSel, setGrantSel] = useState('');
 
   async function openMember(m: Member) {
     try {
@@ -122,9 +159,13 @@ export default function CohortsView() {
           <div>
             <h3>Client cohorts</h3>
             <div className="meta">
-              Create a group, paste client IDs (every ID in the app is click-to-copy), and track
-              the group&apos;s housing outcomes. Membership is static — clients stay after they&apos;re
-              housed; that&apos;s what makes the trend meaningful. Admin-only.
+              {isAdmin
+                ? <>Create a group, paste client IDs (every ID in the app is click-to-copy), and track
+                    the group&apos;s housing outcomes. Membership is static — clients stay after they&apos;re
+                    housed; that&apos;s what makes the trend meaningful. Share a cohort with staff via
+                    its Access panel.</>
+                : <>Cohorts shared with you. Open one to see its members, meeting notes, and your
+                    next-step assignments.</>}
             </div>
           </div>
         </div>
@@ -134,16 +175,18 @@ export default function CohortsView() {
               One-time setup: run <code>supabase/cohorts.sql</code> in the Supabase SQL editor, then reload.
             </div>
           )}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
-            <input className="finput" placeholder="New cohort name…" value={name}
-              onChange={(e) => setName(e.target.value)} style={{ minWidth: 200 }} />
-            <input className="finput" placeholder="Description (optional)" value={desc}
-              onChange={(e) => setDesc(e.target.value)} style={{ minWidth: 260 }} />
-            <button className="btn" disabled={busy || !name.trim()} onClick={async () => {
-              const r = await act({ action: 'create', name, description: desc });
-              if (r?.ok) { setName(''); setDesc(''); loadList(); loadDetail(Number(r.id)); }
-            }}>+ Create cohort</button>
-          </div>
+          {isAdmin && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+              <input className="finput" placeholder="New cohort name…" value={name}
+                onChange={(e) => setName(e.target.value)} style={{ minWidth: 200 }} />
+              <input className="finput" placeholder="Description (optional)" value={desc}
+                onChange={(e) => setDesc(e.target.value)} style={{ minWidth: 260 }} />
+              <button className="btn" disabled={busy || !name.trim()} onClick={async () => {
+                const r = await act({ action: 'create', name, description: desc });
+                if (r?.ok) { setName(''); setDesc(''); loadList(); loadDetail(Number(r.id)); }
+              }}>+ Create cohort</button>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {(cohorts ?? []).map((c) => (
               <button key={c.id} className="btn" aria-pressed={sel === c.id}
@@ -153,7 +196,9 @@ export default function CohortsView() {
               </button>
             ))}
             {cohorts !== null && cohorts.length === 0 && !setupNeeded && (
-              <span className="bnl-sub">No cohorts yet — create the first one above.</span>
+              <span className="bnl-sub">
+                {isAdmin ? 'No cohorts yet — create the first one above.' : 'No cohorts have been shared with you yet.'}
+              </span>
             )}
           </div>
           {msg && <div className="bnl-dq" style={{ marginTop: 10 }}>{msg}</div>}
@@ -337,12 +382,66 @@ export default function CohortsView() {
                   {detail.missing.length > 0 && ` · ⚠ ${detail.missing.length} member(s) no longer on the roster`}
                 </div>
               </div>
-              <button className="btn" disabled={busy} onClick={async () => {
-                if (!window.confirm(`Delete cohort “${detail.cohort.name}”? Members are not affected — only the grouping is removed.`)) return;
-                const r = await act({ action: 'delete', id: sel });
-                if (r?.ok) { setSel(null); setDetail(null); loadList(); }
-              }}>Delete cohort</button>
+              {isAdmin && (
+                <button className="btn" disabled={busy} onClick={async () => {
+                  if (!window.confirm(`Delete cohort “${detail.cohort.name}”? Members are not affected — only the grouping is removed.`)) return;
+                  const r = await act({ action: 'delete', id: sel });
+                  if (r?.ok) { setSel(null); setDetail(null); loadList(); }
+                }}>Delete cohort</button>
+              )}
             </div>
+
+            {/* Access — which accounts can open this cohort (admin-curated).
+                Grants open the cohort page + tasks; the member NAMES still ride
+                on BNL access, so flag grantees who lack it. */}
+            {isAdmin && (
+              <div style={{ padding: '0 18px 12px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span className="flabel" style={{ margin: 0 }}>Access</span>
+                {detail.access === null ? (
+                  <span className="bnl-sub">run <code>supabase/cohort_tasks.sql</code> to enable sharing &amp; tasks</span>
+                ) : (
+                  <>
+                    {detail.access.map((a) => {
+                      const s = detail.staff.find((st) => st.id === a.user_id);
+                      const nm = s?.display_name || s?.email || a.user_id.slice(0, 8);
+                      return (
+                        <span key={a.user_id} className="bnl-chip" title={s?.bnl_access === false
+                          ? 'This account has no By-Name List access — they will see the cohort but not member names. Grant BNL access in the Users console.'
+                          : undefined}>
+                          {nm}{s?.bnl_access === false && ' ⚠'}
+                          <span role="button" style={{ cursor: 'pointer', marginLeft: 6, opacity: .7 }}
+                            title="Revoke access"
+                            onClick={async () => {
+                              const r = await act({ action: 'revoke_access', id: sel, user_id: a.user_id });
+                              if (r?.ok) loadDetail(sel!);
+                            }}>✕</span>
+                        </span>
+                      );
+                    })}
+                    <select className="fselect" value={grantSel} onChange={(e) => setGrantSel(e.target.value)}>
+                      <option value="">Grant access to…</option>
+                      {detail.staff
+                        .filter((s) => !detail.access!.some((a) => a.user_id === s.id))
+                        .map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.display_name || s.email}{s.bnl_access === false ? ' (no BNL access)' : ''}
+                          </option>
+                        ))}
+                    </select>
+                    <button className="btn" disabled={busy || !grantSel} onClick={async () => {
+                      const r = await act({ action: 'grant_access', id: sel, user_id: grantSel });
+                      if (r?.ok) { setGrantSel(''); loadDetail(sel!); }
+                    }}>Share</button>
+                  </>
+                )}
+              </div>
+            )}
+            {detail.restricted && (
+              <div style={{ padding: '0 18px 10px' }} className="bnl-sub">
+                You have access to this cohort, but member details require By-Name List access —
+                ask an administrator to enable it for your account.
+              </div>
+            )}
             {fStage && (
               <div style={{ padding: '0 18px 10px' }}>
                 <button className="btn" onClick={() => setFStage('')}
@@ -351,26 +450,29 @@ export default function CohortsView() {
                 </button>
               </div>
             )}
-            <div style={{ padding: '0 18px 12px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-              <textarea className="finput" rows={2} style={{ minWidth: 320, flex: 1 }}
-                placeholder="Paste hashed client IDs (one per line, or comma/space separated)…"
-                value={paste} onChange={(e) => setPaste(e.target.value)} />
-              <button className="btn" disabled={busy || !paste.trim()} onClick={async () => {
-                const pids = paste.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
-                const r = await act({ action: 'add_members', id: sel, pids });
-                if (r?.ok) {
-                  setPaste('');
-                  setMsg(`Added ${r.added}.${(r.unknown as string[]).length ? ` Not on the roster (skipped): ${(r.unknown as string[]).join(', ')}` : ''}`);
-                  loadDetail(sel!); loadList();
-                }
-              }}>+ Add clients</button>
-            </div>
+            {isAdmin && (
+              <div style={{ padding: '0 18px 12px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                <textarea className="finput" rows={2} style={{ minWidth: 320, flex: 1 }}
+                  placeholder="Paste hashed client IDs (one per line, or comma/space separated)…"
+                  value={paste} onChange={(e) => setPaste(e.target.value)} />
+                <button className="btn" disabled={busy || !paste.trim()} onClick={async () => {
+                  const pids = paste.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
+                  const r = await act({ action: 'add_members', id: sel, pids });
+                  if (r?.ok) {
+                    setPaste('');
+                    setMsg(`Added ${r.added}.${(r.unknown as string[]).length ? ` Not on the roster (skipped): ${(r.unknown as string[]).join(', ')}` : ''}`);
+                    loadDetail(sel!); loadList();
+                  }
+                }}>+ Add clients</button>
+              </div>
+            )}
             <div className="scroll scroll-pin">
               <table>
                 <thead>
                   <tr>
                     <th>Client</th><th className="num">Age</th><th>Status</th><th>Project</th>
-                    <th className="num">Days homeless</th><th className="num">CE leg wait</th><th>Flags</th><th className="num"></th>
+                    <th className="num">Days homeless</th><th className="num">CE leg wait</th><th>Flags</th>
+                    <th>Last note</th><th>Next steps</th><th className="num"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -378,10 +480,15 @@ export default function CohortsView() {
                     ? detail.members.filter((m) => m.ms_stage === fStage)
                         .sort((a, b) => (b.ms_wait ?? 0) - (a.ms_wait ?? 0))
                     : detail.members
-                  ).map((m) => (
-                    /* row opens the shared client card; CopyId and the remove
-                       button stop propagation so they stay independent */
-                    <tr key={m.pid} onClick={() => openMember(m)} style={{ cursor: 'pointer' }}
+                  ).map((m) => {
+                    const mTasks = (detail.tasks ?? []).filter((t) => t.pid === m.pid);
+                    const openN = mTasks.filter((t) => t.status === 'open').length;
+                    const expanded = openTasks === m.pid;
+                    return (
+                    /* row opens the shared client card; CopyId, the notes cell,
+                       the tasks cell and the remove button stop propagation */
+                    <React.Fragment key={m.pid}>
+                    <tr onClick={() => openMember(m)} style={{ cursor: 'pointer' }}
                         title="Open client card">
                       <td>
                         <div className="bnl-nm bnl-drillname">{m.name ?? m.pid}</div>
@@ -399,23 +506,122 @@ export default function CohortsView() {
                         {m.returned && <span className="bnl-fp bnl-fp-ret">RETURNED</span>}
                         {m.risk_band === 'High' && <span className="bnl-fp bnl-fp-dq">HIGH RISK</span>}
                       </td>
+                      {/* Last note — same treatment as the BNL roster column */}
+                      <td style={{ maxWidth: 200 }}
+                        onMouseEnter={(e) => {
+                          if (!m.notes2?.length) return;
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setNotePop({ x: rect.left, y: rect.top, name: m.name ?? m.pid, notes: m.notes2 });
+                        }}
+                        onMouseLeave={() => setNotePop(null)}>
+                        {(m.notes2?.length ?? 0)
+                          ? (() => {
+                              const latest = m.notes2![0];
+                              const age = noteAge(latest.at);
+                              const fresh = age === 'today' || age.endsWith('d');
+                              return (
+                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, maxWidth: 200 }}>
+                                  {m.notes2!.length > 1 && (
+                                    <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+                                      border: '1px solid rgba(148,163,184,0.35)', borderRadius: 8, padding: '0 5px' }}>
+                                      {m.notes2!.length}{m.notes2!.length === 5 ? '+' : ''}
+                                    </span>
+                                  )}
+                                  <span style={{ flexShrink: 0, fontSize: 11, fontVariantNumeric: 'tabular-nums',
+                                    fontWeight: fresh ? 700 : 400,
+                                    color: fresh ? 'var(--strong)' : 'var(--muted)' }}>{age}</span>
+                                  <span className="bnl-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {latest.body}
+                                  </span>
+                                </div>
+                              );
+                            })()
+                          : <span className="bnl-sub">—</span>}
+                      </td>
+                      {/* Next steps — open-item count; click expands the checklist */}
+                      <td onClick={(e) => e.stopPropagation()}>
+                        {detail.tasks === null
+                          ? <span className="bnl-sub" title="Run supabase/cohort_tasks.sql to enable">—</span>
+                          : (
+                            <button className="btn" style={{ padding: '0 8px', fontSize: 12,
+                              ...(openN ? { borderColor: 'var(--warn)', color: 'var(--warn)' } : {}) }}
+                              title={expanded ? 'Collapse next steps' : 'Show next steps for this member'}
+                              onClick={() => { setOpenTasks(expanded ? null : m.pid); setTaskText(''); setTaskAssignee(''); }}>
+                              {openN ? `${openN} open` : mTasks.length ? 'all done' : '+ add'} {expanded ? '▴' : '▾'}
+                            </button>
+                          )}
+                      </td>
                       <td className="num">
-                        <button className="btn" style={{ padding: '0 8px', fontSize: 12 }} title="Remove from cohort"
-                          disabled={busy}
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            const r = await act({ action: 'remove_member', id: sel, pid: m.pid });
-                            if (r?.ok) { loadDetail(sel!); loadList(); }
-                          }}>✕</button>
+                        {isAdmin && (
+                          <button className="btn" style={{ padding: '0 8px', fontSize: 12 }} title="Remove from cohort"
+                            disabled={busy}
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const r = await act({ action: 'remove_member', id: sel, pid: m.pid });
+                              if (r?.ok) { loadDetail(sel!); loadList(); }
+                            }}>✕</button>
+                        )}
                       </td>
                     </tr>
-                  ))}
+                    {expanded && detail.tasks !== null && (
+                      <tr>
+                        <td colSpan={10} style={{ background: 'var(--card-top)', padding: '10px 18px 14px' }}>
+                          {mTasks.length === 0 && <div className="bnl-sub" style={{ marginBottom: 8 }}>No next steps yet.</div>}
+                          {[...mTasks].sort((a, b) => (a.status === b.status ? 0 : a.status === 'open' ? -1 : 1))
+                            .map((t) => (
+                            <div key={t.id} style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                              <input type="checkbox" checked={t.status === 'done'} disabled={busy}
+                                title={t.status === 'done' ? `Done ${t.done_at?.slice(0, 10) ?? ''} by ${t.done_by ?? '—'} — click to reopen` : 'Mark done'}
+                                onChange={async () => {
+                                  const r = await act({ action: 'toggle_task', task_id: t.id, done: t.status !== 'done' });
+                                  if (r?.ok) loadDetail(sel!);
+                                }} />
+                              <span style={{ fontSize: '.85rem',
+                                textDecoration: t.status === 'done' ? 'line-through' : 'none',
+                                color: t.status === 'done' ? 'var(--muted)' : 'var(--text)' }}>
+                                {t.body}
+                              </span>
+                              <span className="bnl-sub" style={{ flexShrink: 0 }}>
+                                {t.assignee_name ? <b style={{ color: 'var(--strong)', fontWeight: 600 }}>{t.assignee_name}</b> : 'unassigned'}
+                                {' '}· {t.created_at.slice(0, 10)}
+                              </span>
+                              {isAdmin && (
+                                <span role="button" className="bnl-sub" style={{ cursor: 'pointer', flexShrink: 0 }}
+                                  title="Delete this item"
+                                  onClick={async () => {
+                                    const r = await act({ action: 'delete_task', task_id: t.id });
+                                    if (r?.ok) loadDetail(sel!);
+                                  }}>✕</span>
+                              )}
+                            </div>
+                          ))}
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
+                            <input className="finput" style={{ flex: 1, minWidth: 240 }}
+                              placeholder="New next step…" value={taskText}
+                              onChange={(e) => setTaskText(e.target.value)} />
+                            <select className="fselect" value={taskAssignee} onChange={(e) => setTaskAssignee(e.target.value)}>
+                              <option value="">Unassigned</option>
+                              {(isAdmin ? detail.staff : detail.staff.filter((s) => s.id === viewerId)).map((s) => (
+                                <option key={s.id} value={s.id}>{s.display_name || s.email}</option>
+                              ))}
+                            </select>
+                            <button className="btn" disabled={busy || !taskText.trim()} onClick={async () => {
+                              const r = await act({ action: 'add_task', id: sel, pid: m.pid, body: taskText, assignee_id: taskAssignee || null });
+                              if (r?.ok) { setTaskText(''); setTaskAssignee(''); loadDetail(sel!); }
+                            }}>+ Add</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
+                    );
+                  })}
                   {detail.members.length === 0 && (
-                    <tr><td colSpan={8} className="empty">No members yet — paste IDs above.</td></tr>
+                    <tr><td colSpan={10} className="empty">{isAdmin ? 'No members yet — paste IDs above.' : 'No members visible.'}</td></tr>
                   )}
                   {detail.members.length > 0 && fStage
                     && detail.members.every((m) => m.ms_stage !== fStage) && (
-                    <tr><td colSpan={8} className="empty">No members are waiting at {MS_LABELS[fStage] ?? fStage} right now.</td></tr>
+                    <tr><td colSpan={10} className="empty">No members are waiting at {MS_LABELS[fStage] ?? fStage} right now.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -425,10 +631,38 @@ export default function CohortsView() {
       )}
       {sel != null && !detail && !msg && <div className="panel" style={{ marginTop: 16 }}><div className="hc-none">Loading…</div></div>}
 
-      {/* The SAME client card as the BNL — cohorts is admin-only, so the
-          add-to-cohort control inside the drawer is always shown. */}
+      {/* Notes hover card — fixed so the table's scroll area can't clip it
+          (same pattern as the BNL roster's). */}
+      {notePop && (
+        <div className="panel" style={{
+          position: 'fixed',
+          right: Math.max(window.innerWidth - notePop.x + 10, 12),
+          top: Math.min(notePop.y, Math.max(window.innerHeight - 320, 12)),
+          width: 380, maxWidth: '60vw', maxHeight: 420, overflow: 'hidden',
+          zIndex: 60, pointerEvents: 'none',
+          padding: '12px 14px', boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+        }}>
+          <div style={{ fontWeight: 700, fontSize: '.85rem', marginBottom: 6 }}>
+            {notePop.name} <span className="bnl-sub">· last {notePop.notes.length} note{notePop.notes.length === 1 ? '' : 's'}</span>
+          </div>
+          {notePop.notes.map((n, i) => (
+            <div key={i} style={{ marginBottom: i < notePop.notes.length - 1 ? 10 : 0 }}>
+              <div className="bnl-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {n.at}{n.author ? ` · ${n.author}` : ''}
+              </div>
+              <div style={{ fontSize: '.82rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {n.body}
+              </div>
+            </div>
+          ))}
+          <div className="bnl-sub" style={{ marginTop: 8 }}>open the client for the full thread</div>
+        </div>
+      )}
+
+      {/* The SAME client card as the BNL; admin-only controls inside the
+          drawer follow the real role now that cohorts can be shared. */}
       {drill && (
-        <ClientDrawer row={drill} asOf={drillAsOf} isAdmin
+        <ClientDrawer row={drill} asOf={drillAsOf} isAdmin={isAdmin}
                       onClose={() => setDrill(null)} />
       )}
     </>
