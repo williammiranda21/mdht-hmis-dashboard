@@ -24,7 +24,8 @@ const COLS: Array<[SortKey | 'flags' | 'notes', string]> = [
   ['risk_pts', 'Risk'],
   ['income', 'Income (mo)'],
   ['ref_status', 'Referral'],
-  ['assessed', 'CE assessed'],
+  // CE assessed column removed 2026-08-13 (user: notes need the room) — the
+  // assessed FILTER, drawer tile, and CSV field all remain.
   ['notes', 'Last note'],
 ];
 
@@ -473,12 +474,7 @@ export default function BnlView({
                     <td>{r.ref_type ? (
                       <><div>{r.ref_type} · <b>{r.ref_status}</b></div><div className="bnl-sub">{r.ref_date}{r.ref_prov ? ` · ${r.ref_prov}` : ''}</div></>
                     ) : <span className="bnl-sub">—</span>}</td>
-                    <td className="num">{r.assessed
-                      ? <>{r.assessed}{r.spdat_tool && (
-                          <div className="bnl-sub">{r.spdat_tool}{r.spdat_score != null ? ` · ${r.spdat_score}` : ''}</div>
-                        )}</>
-                      : <span className="bnl-sub">no</span>}</td>
-                    <td style={{ maxWidth: 220 }}
+                    <td style={{ maxWidth: 380, minWidth: 260 }}
                       onMouseEnter={(e) => {
                         if (!r.notes2?.length) return;
                         const rect = e.currentTarget.getBoundingClientRect();
@@ -491,7 +487,7 @@ export default function BnlView({
                             const age = noteAge(latest.at);
                             const fresh = age === 'today' || age.endsWith('d');
                             return (
-                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, maxWidth: 220 }}>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, maxWidth: 380 }}>
                                 {r.notes2!.length > 1 && (
                                   <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: 'var(--muted)',
                                     border: '1px solid rgba(148,163,184,0.35)', borderRadius: 8, padding: '0 5px' }}>
