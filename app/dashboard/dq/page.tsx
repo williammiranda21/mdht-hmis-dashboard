@@ -25,11 +25,13 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     getProjectsMap(),
   ]);
 
-  // Eva check counts per project — snapshot keyed to the latest COMPLETE month
-  // (independent of the selected period/granularity). Unique clients per
-  // severity; rendered as the "Eva issues" column in DqView.
+  // Eva check counts per project — FOLLOW the selected reporting period
+  // (user directive 2026-08-13; recompute_eva v2 emits every complete month,
+  // universe = enrollments active in that month, judged on current record
+  // state). Quarterly/fiscal views fall back to the latest complete month
+  // (rows are monthly-keyed) — DqView labels the fallback.
   const monthly = await getDqPeriods('monthly');
-  const evaPeriod = monthly[0] ?? period;   // getDqPeriods returns newest first
+  const evaPeriod = granularity === 'monthly' ? period : (monthly[0] ?? period);
   const sb = supabaseServer();
   const { data: evaRows } = await sb.from('drill_clients')
     .select('project_id, metric, personal_ids')
@@ -67,5 +69,5 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     ? Number(searchParams.focus) : null;
 
   return <DqView periods={periods} granularity={granularity} period={period} rows={merged}
-    evaCounts={evaCounts} focusProject={focusProject} />;
+    evaCounts={evaCounts} evaPeriod={evaPeriod} focusProject={focusProject} />;
 }

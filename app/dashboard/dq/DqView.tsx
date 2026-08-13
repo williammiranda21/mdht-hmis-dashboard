@@ -28,6 +28,9 @@ type Props = {
   /** Auto-open this project's fix-list on mount (deep-link from Deep Dive). */
   focusProject?: number | null;
   evaCounts?: Record<number, EvaCatCounts>;
+  /** Month the check columns describe — equals `period` on monthly views;
+   *  quarterly/fiscal fall back to the latest complete month. */
+  evaPeriod?: string;
 };
 
 /** Compact severity chips (high-priority / error / warning) for one category. */
@@ -57,7 +60,7 @@ const TOGGLE_COLS: { k: string; label: string }[] = [
   { k: 'inc', label: 'Q6c Income' },
   { k: 'chronic', label: 'Q6d Chronic' },
   { k: 'movein', label: 'Move-In Missing' },
-  { k: 'annual', label: 'Annual Overdue' },
+  { k: 'annual', label: 'Annual Income' },
   { k: 'household', label: 'Household checks' },
   { k: 'dates', label: 'Date checks' },
   { k: 'dupes', label: 'Duplicates' },
@@ -94,7 +97,9 @@ function PctCell({ pct, thr, sub }: { pct: number | null; thr: number; sub?: str
 
 type SortKey = 'name' | 'type_name' | string;
 
-export default function DqView({ periods, granularity, period, rows, evaCounts, focusProject = null }: Props) {
+export default function DqView({ periods, granularity, period, rows, evaCounts, evaPeriod, focusProject = null }: Props) {
+  // Check-column tooltips carry the fallback month on non-monthly views.
+  const evaWhen = granularity === 'monthly' ? '' : ` · shown for ${evaPeriod ?? 'the latest complete month'} (checks are monthly)`;
   const router = useRouter();
   // Column visibility — default all on; persisted per browser.
   const [visible, setVisible] = useState<Set<string>>(() => new Set(TOGGLE_COLS.map((c) => c.k)));
@@ -233,20 +238,24 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
           <div className="dq-kpi-val">{kpi.avgScore != null ? <span className={`dq-score-pill ${scoreClass(kpi.avgScore)}`} style={{ fontSize: 20 }}>{kpi.avgScore}%</span> : '—'}</div>
           <div className="dq-kpi-sub">avg across {fmtInt(filtered.length)} active projects</div>
         </div>
-        <div className="dq-kpi">
-          <div className="dq-kpi-label">Missing Destination</div>
+        {/* FY2026 alignment (2026-08-13): Destination lives in Q6c now (it was
+            never Q6b in the APR sense); entry income = the stage-1 record
+            DATED at entry over adult/HoH clients; annual = INCOME at the
+            annual assessment (Q6c row 4), HoH calendar anniversary. */}
+        <div className="dq-kpi" title="Q6c row 2 — leavers with destination don't-know/refused, no exit interview, or missing">
+          <div className="dq-kpi-label">Missing Destination (Q6c)</div>
           <div className="dq-kpi-val">{kpi.destPct != null ? `${kpi.destPct}%` : '—'}</div>
           <div className="dq-kpi-sub">of {fmtInt(kpi.totalExits)} exits</div>
         </div>
-        <div className="dq-kpi">
-          <div className="dq-kpi-label">Missing Entry Income</div>
+        <div className="dq-kpi" title="Q6c row 3 — adult/HoH clients with no income record dated at project start, or the record is blank/not collected">
+          <div className="dq-kpi-label">Missing Entry Income (Q6c)</div>
           <div className="dq-kpi-val">{kpi.incMissPct != null ? `${kpi.incMissPct}%` : '—'}</div>
-          <div className="dq-kpi-sub">missing entry record · {fmtInt(kpi.totalActive)} active</div>
+          <div className="dq-kpi-sub">no record dated at entry · adult/HoH universe</div>
         </div>
-        <div className="dq-kpi">
-          <div className="dq-kpi-label">Overdue Annual Assessment</div>
+        <div className="dq-kpi" title="Q6c row 4 — adult/HoH stayers due an annual (head-of-household anniversary ±30d, capped at report end) whose stage-5 income record is missing, unknown, or contradicts its sources">
+          <div className="dq-kpi-label">Annual Assessment Income (Q6c)</div>
           <div className="dq-kpi-val">{kpi.annualPct != null ? `${kpi.annualPct}%` : '—'}</div>
-          <div className="dq-kpi-sub">of {fmtInt(kpi.annualDue)} due (±30d anniversary)</div>
+          <div className="dq-kpi-sub">of {fmtInt(kpi.annualDue)} due (HoH anniversary ±30d)</div>
         </div>
       </div>
 
@@ -292,11 +301,13 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
                 {vis('inc') && <th className={th('DQ_Inc_Score', true)} onClick={() => toggleSort('DQ_Inc_Score')}
                   title="Full APR Q6c: income at entry AND exit — missing, don't-know/refused, or a yes/no answer that contradicts the source rows">Q6c Income {car('DQ_Inc_Score')}</th>}
                 {vis('chronic') && <th className={th('DQ_Chronic_Score', true)} onClick={() => toggleSort('DQ_Chronic_Score')}>Q6d Chronic {car('DQ_Chronic_Score')}</th>}
-                {vis('movein') && <th className={th('DQ_MoveIn_pct', true)} onClick={() => toggleSort('DQ_MoveIn_pct')}>Move-In Missing % {car('DQ_MoveIn_pct')}</th>}
-                {vis('annual') && <th className={th('DQ_Annual_pct', true)} onClick={() => toggleSort('DQ_Annual_pct')}>Annual Overdue % {car('DQ_Annual_pct')}</th>}
-                {vis('household') && <th title="Household checks — no/multiple head of household, missing relationship, children-only (clients flagged, by severity)">Household</th>}
-                {vis('dates') && <th title="Date checks — future exits, exit before entry, future entries, DOB conflicts, move-in outside the stay (clients flagged, by severity)">Dates</th>}
-                {vis('dupes') && <th title="Duplicate enrollments — same client, project, and entry date (clients flagged)">Duplicates</th>}
+                {vis('movein') && <th className={th('DQ_MoveIn_pct', true)} onClick={() => toggleSort('DQ_MoveIn_pct')}
+                  title="LOCAL metric (no APR Q6 row) — PH stayers enrolled before the period still missing a valid move-in, plus out-of-range move-in dates">Move-In Missing % {car('DQ_MoveIn_pct')}</th>}
+                {vis('annual') && <th className={th('DQ_Annual_pct', true)} onClick={() => toggleSort('DQ_Annual_pct')}
+                  title="APR Q6c row 4 — income at the annual assessment missing/unknown/conflicting, of adult/HoH stayers due one (HoH anniversary ±30d)">Annual Income % {car('DQ_Annual_pct')}</th>}
+                {vis('household') && <th title={`Household checks — no/multiple head of household, missing relationship, children-only (clients flagged, by severity)${evaWhen}`}>Household</th>}
+                {vis('dates') && <th title={`Date checks — future exits, exit before entry, future entries, DOB conflicts, move-in outside the stay, homelessness start after entry (clients flagged, by severity)${evaWhen}`}>Dates</th>}
+                {vis('dupes') && <th title={`Duplicate enrollments — same client, project, and entry date (clients flagged)${evaWhen}`}>Duplicates</th>}
                 {vis('active') && <th className={th('DQ_ActiveTotal', true)} onClick={() => toggleSort('DQ_ActiveTotal')}>Active {car('DQ_ActiveTotal')}</th>}
                 {vis('exits') && <th className={th('DQ_ExitsTotal', true)} onClick={() => toggleSort('DQ_ExitsTotal')}>Exits {car('DQ_ExitsTotal')}</th>}
               </tr>

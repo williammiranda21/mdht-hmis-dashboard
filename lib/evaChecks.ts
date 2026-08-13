@@ -68,7 +68,10 @@ export const EVA_CHECKS: EvaCheck[] = [
     breaks: 'Length of stay, utilization, every date-window count.',
   },
   {
-    id: '75', label: 'Entry date after record creation', severity: 'error', category: 'Dates',
+    // Severity matches Eva (Warning) — downgraded from our earlier 'error'
+    // per the 2026-08-13 parity audit. PSH/OPH entries before 10/1/2017 are
+    // excused pipeline-side, also per Eva.
+    id: '75', label: 'Entry date after record creation', severity: 'warning', category: 'Dates',
     meaning: 'The entry date is later than the day the record was created — a future-dated entry.',
     fix: 'Correct the entry date to the actual project start date.',
     breaks: 'Clients-served counts, entry cohorts, time-to-housing.',
@@ -87,17 +90,25 @@ export const EVA_CHECKS: EvaCheck[] = [
   },
   {
     id: '40', label: 'Move-in outside the stay', severity: 'error', category: 'Dates',
-    meaning: 'The housing move-in date falls before entry or after exit — it can’t belong to this stay.',
+    meaning: 'The housing move-in date falls before entry, after exit, or after the data’s as-of date — it can’t belong to this stay.',
     fix: 'Correct the Housing Move-In Date to the real lease-up date within the enrollment.',
     breaks: 'Move-in counts, RRH/PSH utilization, time-to-housing.',
   },
   {
-    id: '69', label: 'Homelessness start after entry', severity: 'error', category: 'Dates',
+    // Severity matches Eva (Warning) — downgraded from 'error' per the
+    // 2026-08-13 parity audit.
+    id: '69', label: 'Homelessness start after entry', severity: 'warning', category: 'Dates',
     meaning: 'The "approximate date homelessness started" (3.917) is after the project entry date.',
     fix: 'Correct the approximate start date on the entry assessment — it should be on or before the entry.',
     breaks: 'Chronic-homelessness determination, length-of-time-homeless measures (SPM 1).',
   },
   // ── Duplicates ─────────────────────────────────────────────────────────────
+  {
+    id: '77', label: 'Overlapping stays at the same project', severity: 'warning', category: 'Duplicates',
+    meaning: 'The client has two stays at this project that overlap in time with different entry dates — usually staff re-enrolled them instead of updating the open enrollment, and the first stay was never exited.',
+    fix: 'Decide which enrollment is the real, current stay. Exit the superseded one as of the date the client actually left it (or delete it if it never happened).',
+    breaks: 'Double-counts the client in served and utilization; corrupts length of stay and entry cohorts.',
+  },
   {
     id: '1', label: 'Duplicate enrollment', severity: 'hp', category: 'Duplicates',
     meaning: 'The same client has two or more enrollments at the same project with the same entry date — one stay entered twice.',
