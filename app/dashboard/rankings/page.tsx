@@ -1,5 +1,6 @@
 import { getPeriods, getProjectMetrics } from '../../../lib/queries';
-import { getViewer } from '../../../lib/supabase-server';
+import { getTargetFlags } from '../../../lib/target-flags';
+import { getViewer, supabaseServer } from '../../../lib/supabase-server';
 import type { Granularity } from '../../../lib/types';
 import RankingsView from './RankingsView';
 
@@ -42,6 +43,10 @@ export default async function RankingsPage({ searchParams }: { searchParams: Sea
   }
 
   const rows = await getProjectMetrics(granularity, period, household, subpopulation);
+  // Off-target chips — same evaluation the Project Performance table uses
+  // (empty on filtered household/subpop views by design).
+  const targetFlags = await getTargetFlags(
+    supabaseServer(), granularity, period, household, subpopulation, rows);
 
   return (
     <RankingsView
@@ -51,6 +56,7 @@ export default async function RankingsPage({ searchParams }: { searchParams: Sea
       period={period}
       household={household}
       subpopulation={subpopulation}
+      targetFlags={targetFlags}
     />
   );
 }

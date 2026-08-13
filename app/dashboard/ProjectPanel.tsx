@@ -309,17 +309,13 @@ export default function ProjectPanel({
                 returns mode reads "do exits stick" on the Returns panel */}
             <PerformanceDiagnosis diagnosis={diagnosis} />
 
-            {/* Where do clients go — ALL exits by destination (Pillar 3), snapshot only.
-                Falls back to the latest complete month when the selected period
-                has no dest_profile row — the label says which month it shows. */}
-            {!isRet && <DestProfile profile={destProfile}
-              periodLabel={destPeriod && destPeriod !== period
-                ? `${periodLabel(destPeriod)} — latest complete month`
-                : periodLabel(period)} />}
-
             {/* Targets & progress (Pillar 3-4) — mounted only once data exists so
-                the section's initial state is seeded correctly */}
-            {!isRet && targets && <TargetsSection key={proj.project_id} projectId={proj.project_id} data={targets} />}
+                the section's initial state is seeded correctly. The returns
+                drawer shows ONLY the return-rate targets; the performance
+                drawer shows the rest (user decision 2026-08-13). */}
+            {targets && <TargetsSection key={proj.project_id} projectId={proj.project_id}
+              data={targets} scope={isRet ? 'returns' : 'performance'}
+              projectType={proj.project_type} />}
 
             {/* Destination breakdown — returns mode only */}
             {isRet && dest && Object.keys(dest).length > 0 && (
@@ -381,6 +377,15 @@ export default function ProjectPanel({
                 </div>
               </>
             )}
+
+            {/* Where do clients go — ALL exits by destination (Pillar 3), snapshot
+                only; sits below Length of stay (user request 2026-08-13). Falls
+                back to the latest complete month when the selected period has no
+                dest_profile row — the label says which month it shows. */}
+            {!isRet && <DestProfile profile={destProfile}
+              periodLabel={destPeriod && destPeriod !== period
+                ? `${periodLabel(destPeriod)} — latest complete month`
+                : periodLabel(period)} />}
 
             {/* Time to housing (Kaplan-Meier) — snapshot only. The returns panel
                 answers a different question and does not need a second curve. */}

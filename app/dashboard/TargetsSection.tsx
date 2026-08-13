@@ -1,6 +1,6 @@
 'use client';
 
-import { TARGET_METRICS, fmtTarget } from '../../lib/target-metrics';
+import { TARGET_METRICS, fmtTarget, metricAppliesTo } from '../../lib/target-metrics';
 
 /**
  * Targets & progress (Pillar 3-4) — READ-ONLY progress bars against the SAME
@@ -22,20 +22,34 @@ export interface TargetsData {
   current: Record<string, number | null>;
 }
 
-export default function TargetsSection({ data }: { projectId: number; data: TargetsData | null }) {
+/** Return-rate targets render on the RETURNS drawer, everything else on the
+ *  Performance drawer (user decision 2026-08-13) — same data, split view. */
+const RETURNS_KEYS = new Set(['returns_6mo', 'returns_2yr']);
+
+export default function TargetsSection({ data, scope = 'performance', projectType = null }: {
+  projectId: number; data: TargetsData | null; scope?: 'performance' | 'returns';
+  /** HUD type code — rows for metrics that don't apply to this type are hidden. */
+  projectType?: number | null;
+}) {
   if (!data) return null;
   const override: Record<string, number | undefined> =
     Object.fromEntries((data.rows ?? []).map((r) => [r.metric, r.target]));
   const typeDefault: Record<string, number | undefined> =
     Object.fromEntries((data.typeRows ?? []).map((r) => [r.metric, r.target]));
 
-  const visible = TARGET_METRICS.filter((m) => (override[m.key] ?? typeDefault[m.key]) != null);
+  const pool = TARGET_METRICS.filter((m) =>
+    (scope === 'returns' ? RETURNS_KEYS.has(m.key) : !RETURNS_KEYS.has(m.key))
+    && metricAppliesTo(m, projectType));
+  const visible = pool.filter((m) => (override[m.key] ?? typeDefault[m.key]) != null);
+  // Returns drawer: appear only when return targets actually exist. The
+  // Performance drawer keeps the admin "no targets yet" pointer.
+  if (scope === 'returns' && !visible.length) return null;
   if (!visible.length && !data.editable) return null;
 
   return (
     <>
       <div className="hc-sub">
-        Targets &amp; progress
+        {scope === 'returns' ? 'Return targets & progress' : 'Targets & progress'}
         {data.editable && (
           <a href="/dashboard/admin/targets" className="bnl-sub"
             style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
@@ -59,17 +73,32 @@ export default function TargetsSection({ data }: { projectId: number; data: Targ
               : m.higherBetter
                 ? Math.min(100, (cur / Math.max(target, 1e-9)) * 100)
                 : Math.min(100, (Math.max(target, 1e-9) / Math.max(cur, 1e-9)) * 100);
+            // Explicit per-metric verdict (user request 2026-08-13): how far
+            // off, in the metric's own unit (pp for rates).
+            const gap = target == null || cur == null ? null
+              : m.higherBetter ? target - cur : cur - target;
+            const gapTxt = gap == null ? ''
+              : `${Number(Math.abs(gap).toFixed(1))}${m.unit === '%' ? 'pp' : m.unit} ${m.higherBetter ? (met ? 'above' : 'below') : (met ? 'under' : 'over')}`;
+            const chip = cur == null
+              ? { txt: 'no data', bg: 'var(--track)', fg: 'var(--muted)', tip: 'No stored value for this metric in the selected period.' }
+              : met
+                ? { txt: '✓ on target', bg: 'var(--accent-light)', fg: 'var(--accent)', tip: gapTxt }
+                : { txt: '⚑ off target', bg: 'var(--warn-light)', fg: 'var(--warn)', tip: gapTxt };
             return (
               <div key={m.key} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12 }}>
                 <span style={{ minWidth: 150, color: 'var(--muted)' }}>{m.label}</span>
                 <span style={{ minWidth: 60, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtTarget(cur, m.unit)}</span>
                 <span style={{ flex: 1, minWidth: 120, height: 7, borderRadius: 4, background: 'var(--border)', overflow: 'hidden' }}>
                   <span style={{ display: 'block', height: '100%', width: `${pct}%`,
-                    background: met ? 'var(--accent)' : 'var(--warn)' }} />
+                    background: cur == null ? 'var(--border)' : met ? 'var(--accent)' : 'var(--warn)' }} />
                 </span>
                 <span className="bnl-sub" style={{ minWidth: 110 }}>
                   {`target ${m.higherBetter ? '≥' : '≤'} ${fmtTarget(target, m.unit)}${inherited ? ' · type default' : ''}`}
-                  {met && <span style={{ color: 'var(--accent)', fontWeight: 700 }}> ✓</span>}
+                </span>
+                <span title={chip.tip} style={{ minWidth: 84, textAlign: 'center', fontSize: 10.5, fontWeight: 700,
+                  padding: '2px 8px', borderRadius: 999, background: chip.bg, color: chip.fg,
+                  cursor: chip.tip ? 'help' : undefined, whiteSpace: 'nowrap' }}>
+                  {chip.txt}
                 </span>
               </div>
             );

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { TARGET_METRICS } from './target-metrics';
+import { TARGET_METRICS, metricAppliesTo } from './target-metrics';
 import type { ProjectMetric } from './types';
 
 /**
@@ -84,18 +84,29 @@ export async function getTargetFlags(
     if (!own?.size && !inherited?.size) continue;
 
     const rr = ret.get(id);
+    // SO metrics + income live in the row's data jsonb. Engagement rate is
+    // DERIVED from the stored counts (SOEngagements ÷ SOContacts) — same
+    // house pattern as the returns rates; no rate column exists anywhere.
+    const d = (row.data ?? {}) as Record<string, unknown>;
+    const soC = num(d['SOContacts']), soE = num(d['SOEngagements']);
     const current: Record<string, number | null> = {
       ph_exit_rate: num(row.ph_exit_rate),
       unsub_rate: num(row.unsub_rate),
+      income_impr: num(d['EarnedIncomeImprovementRate']),
       dq_score: dqScore.get(id) ?? null,
       returns_6mo: rr && rr.total_ph_exits ? ((rr.returns_lt6mo ?? 0) / rr.total_ph_exits) * 100 : null,
       returns_2yr: rr && rr.total_ph_exits ? ((rr.returns_2yr ?? 0) / rr.total_ph_exits) * 100 : null,
       avg_los: num(row.avg_los),
       median_days: median.get(id) ?? null,
+      pos_outreach_rate: num(d['PosOutreachRate']),
+      so_engagement_rate: soC != null && soC > 0 && soE != null ? (soE / soC) * 100 : null,
     };
 
     const misses: TargetMiss[] = [];
     for (const m of TARGET_METRICS) {
+      // A metric that doesn't apply to this project's type never flags,
+      // even if a stale target row exists for it.
+      if (!metricAppliesTo(m, ptype.get(id) ?? null)) continue;
       const target = own?.get(m.key) ?? inherited?.get(m.key);
       const cur = current[m.key];
       if (target == null || cur == null) continue;

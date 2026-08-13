@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import type { Granularity, ProjectMetric } from '../../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../../lib/types';
 import { periodLabel, fmtInt } from '../../../lib/format';
+import { fmtTarget } from '../../../lib/target-metrics';
+import type { TargetMiss } from '../../../lib/target-flags';
 
 type Props = {
   rows: ProjectMetric[];
@@ -13,6 +15,8 @@ type Props = {
   period: string;
   household: string;
   subpopulation: string;
+  /** project_id → missed targets (empty on filtered household/subpop views). */
+  targetFlags?: Record<number, TargetMiss[]>;
 };
 
 const METRICS: { key: keyof ProjectMetric; label: string; pct?: boolean; unit?: string }[] = [
@@ -27,7 +31,7 @@ const METRICS: { key: keyof ProjectMetric; label: string; pct?: boolean; unit?: 
 
 const N_OPTIONS = [10, 25, 50, 0]; // 0 = All
 
-export default function RankingsView({ rows, periods, granularity, period, household, subpopulation }: Props) {
+export default function RankingsView({ rows, periods, granularity, period, household, subpopulation, targetFlags = {} }: Props) {
   const router = useRouter();
   const [metricKey, setMetricKey] = useState<keyof ProjectMetric>('ph_exit_rate');
   const [topN, setTopN] = useState(25);
@@ -135,6 +139,13 @@ export default function RankingsView({ rows, periods, granularity, period, house
                 <span className="pnm" title={r.type_name ? `${r.project_name} · ${r.type_name}` : r.project_name ?? ''}>
                   <span className="nm">{r.project_name}</span>
                   <span className="ty">{r.type_name}</span>
+                  {(targetFlags[r.project_id]?.length ?? 0) > 0 && (
+                    // Icon-only in the fixed-width name block; tooltip carries
+                    // the same detail as the Performance table's chip.
+                    <span className="tflag" title={targetFlags[r.project_id]
+                      .map((m) => `${m.label}: ${fmtTarget(m.current, m.unit)} vs target ${m.higherBetter ? '≥' : '≤'} ${fmtTarget(m.target, m.unit)}`)
+                      .join(' · ')}>⚑</span>
+                  )}
                 </span>
                 <span className="rkbar"><i style={{ width: `${w}%` }} /></span>
                 <span className="rkval">{fmtVal(v)}</span>

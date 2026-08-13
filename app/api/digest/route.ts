@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
+import { getTargetFlags, type TargetMiss } from '../../../lib/target-flags';
+import type { ProjectMetric } from '../../../lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -202,5 +204,37 @@ export async function GET(req: Request) {
     };
   }).filter((r) => r.active);
 
-  return NextResponse.json({ cur, prev, fixed_base: fixedBase, fixed_period: fixedPeriod, rows });
+  // ── Off-target headline (user request 2026-08-13) ───────────────────────────
+  // Which of these projects are below their admin-set targets for the current
+  // complete month, and which FELL below since last month. Reuses
+  // lib/target-flags verbatim (same evaluation as the Performance/Rankings
+  // chips), both months at monthly All/All. Failure → line simply absent.
+  let targets: {
+    period: string;
+    below: Array<{ project_id: number; name: string; newly: boolean; misses: TargetMiss[] }>;
+  } | null = null;
+  try {
+    // data jsonb rides along for the SO/income target metrics.
+    const pmCols = 'project_id, ph_exit_rate, unsub_rate, avg_los, data';
+    const [pmCur, pmPrev] = await Promise.all([cur, prev].map((p) =>
+      sb.from('project_metrics').select(pmCols)
+        .eq('granularity', 'monthly').eq('period', p)
+        .eq('household_type', 'All').eq('subpopulation', 'All')
+        .in('project_id', ids)));
+    const [fCur, fPrev] = await Promise.all([
+      getTargetFlags(sb, 'monthly', cur, 'All', 'All', (pmCur.data ?? []) as unknown as ProjectMetric[]),
+      getTargetFlags(sb, 'monthly', prev, 'All', 'All', (pmPrev.data ?? []) as unknown as ProjectMetric[]),
+    ]);
+    const below = Object.entries(fCur).map(([id, misses]) => ({
+      project_id: Number(id),
+      name: projInfo.get(Number(id))?.name ?? `Project ${id}`,
+      newly: !(Number(id) in fPrev),
+      misses,
+    })).sort((a, b) => Number(b.newly) - Number(a.newly) || b.misses.length - a.misses.length);
+    targets = { period: cur, below };
+  } catch {
+    targets = null;
+  }
+
+  return NextResponse.json({ cur, prev, fixed_base: fixedBase, fixed_period: fixedPeriod, rows, targets });
 }

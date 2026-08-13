@@ -188,7 +188,11 @@ export async function GET(req: Request) {
     typeRows: { metric: string; target: number }[];
     current: Record<string, number | null>;
   } | null = null;
-  if (mode === 'snapshot' && period) {
+  // Built for BOTH modes since 2026-08-13: the returns drawer shows the
+  // return-rate targets (TargetsSection scope='returns'). In returns mode the
+  // history rows carry no ph/unsub/los columns, so those currents resolve
+  // null — harmless, that scope never renders them.
+  if (period) {
     const histRows2 = (historyRes.data ?? []) as unknown as Array<Record<string, unknown>>;
     const latest2 = histRows2.find((h) => h['period'] === period) ?? null;
     const [tRes, ttRes, dqRes2, retRes2] = await Promise.all([
@@ -211,6 +215,10 @@ export async function GET(req: Request) {
     // rolling 24-month cohort figure, NOT keyed to the selected period.
     const sv = (survival?.project ?? null) as { median_days?: number | null } | null;
     const num = (v: unknown) => (typeof v === 'number' ? v : null);
+    // SO + income targets read the row's data jsonb (snapshot history carries
+    // it; returns-mode history doesn't — those metrics never render there).
+    const l2d = (latest2?.['data'] ?? null) as Record<string, unknown> | null;
+    const soC = num(l2d?.['SOContacts']), soE = num(l2d?.['SOEngagements']);
     targets = {
       editable: viewer.isAdmin,
       rows: ((tRes.data ?? []) as { metric: string; target: number }[]),
@@ -218,11 +226,14 @@ export async function GET(req: Request) {
       current: {
         ph_exit_rate: num(latest2?.['ph_exit_rate']),
         unsub_rate: num(latest2?.['unsub_rate']),
+        income_impr: num(l2d?.['EarnedIncomeImprovementRate']),
         dq_score: num(dqd?.['DQ_Score']),
         returns_6mo: ret && ret.total_ph_exits ? ((ret.returns_lt6mo ?? 0) / ret.total_ph_exits) * 100 : null,
         returns_2yr: ret && ret.total_ph_exits ? ((ret.returns_2yr ?? 0) / ret.total_ph_exits) * 100 : null,
         avg_los: num(latest2?.['avg_los']),
         median_days: sv?.median_days ?? null,
+        pos_outreach_rate: num(l2d?.['PosOutreachRate']),
+        so_engagement_rate: soC != null && soC > 0 && soE != null ? (soE / soC) * 100 : null,
       },
     };
   }

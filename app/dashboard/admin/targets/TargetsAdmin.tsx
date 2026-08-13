@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { TARGET_METRICS, fmtTarget, type TargetMetric } from '../../../../lib/target-metrics';
+import { TARGET_METRICS, fmtTarget, metricAppliesTo, type TargetMetric } from '../../../../lib/target-metrics';
 
 export interface ProjOpt { id: number; name: string; type: number | null; typeName: string }
 export interface ProjectTargetRow { project_id: number; metric: string; target: number }
@@ -59,6 +59,12 @@ export default function TargetsAdmin({
 
   const proj = mode === 'project' && projSel !== '' ? projects.find((p) => p.id === projSel) ?? null : null;
   const scopeReady = mode === 'type' ? typeSel !== '' : proj != null;
+  // Only the metrics that apply to the selected type render (user request
+  // 2026-08-13): editing PSH hides the SO metrics and vice versa.
+  const scopeType = mode === 'type' ? (typeSel === '' ? null : typeSel) : (proj?.type ?? null);
+  const visibleMetrics = useMemo(
+    () => TARGET_METRICS.filter((m) => metricAppliesTo(m, scopeType)), [scopeType]);
+  const hiddenCount = TARGET_METRICS.length - visibleMetrics.length;
   const saved: Record<string, number> = mode === 'type'
     ? (typeSel === '' ? {} : (tT[typeSel] ?? {}))
     : (proj == null ? {} : (pT[proj.id] ?? {}));
@@ -158,8 +164,15 @@ export default function TargetsAdmin({
         </div>
 
         {scopeReady ? (
-          <Editor key={`${mode}:${mode === 'type' ? typeSel : projSel}`}
-            saved={saved} onSave={saveTarget} context={context} />
+          <>
+            <Editor key={`${mode}:${mode === 'type' ? typeSel : projSel}`}
+              metrics={visibleMetrics} saved={saved} onSave={saveTarget} context={context} />
+            {hiddenCount > 0 && (
+              <div className="bnl-sub" style={{ marginTop: 14 }}>
+                {hiddenCount} metric{hiddenCount === 1 ? '' : 's'} hidden — not applicable to this project type.
+              </div>
+            )}
+          </>
         ) : (
           <div className="bnl-sub">
             Pick a {mode === 'type' ? 'project type' : 'project'} above to view and set its targets.
@@ -171,8 +184,9 @@ export default function TargetsAdmin({
 }
 
 function Editor({
-  saved, onSave, context,
+  metrics, saved, onSave, context,
 }: {
+  metrics: TargetMetric[];
   saved: Record<string, number>;
   onSave: (metric: string, value: number | null) => Promise<string | null>;
   context: (m: TargetMetric) => string;
@@ -201,7 +215,7 @@ function Editor({
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
-      {TARGET_METRICS.map((m) => (
+      {metrics.map((m) => (
         <div key={m.key} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <span style={{ minWidth: 200, paddingTop: 6 }}>
             {m.label}

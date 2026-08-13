@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { periodLabel, fmtInt } from '../../../lib/format';
+import { fmtTarget } from '../../../lib/target-metrics';
 
 /**
  * Since-last-month digest (Pillar 3) — "what changed" for the Deep Dive
@@ -22,9 +23,18 @@ interface DigestRow {
   fixed_top: { label: string; n: number } | null;
   score_since: number | null;
 }
+interface TargetMissLine {
+  label: string; unit: string; higherBetter: boolean; target: number; current: number;
+}
 interface DigestData {
   cur: string; prev: string; rows: DigestRow[];
   fixed_base: string | null; fixed_period: string | null;
+  /** Off-target headline — projects below their admin-set targets for `period`,
+   *  `newly` = was NOT below last month (i.e. fell below this month). */
+  targets?: {
+    period: string;
+    below: { project_id: number; name: string; newly: boolean; misses: TargetMissLine[] }[];
+  } | null;
 }
 
 /** Delta chip. `dir` says which direction is good; neutral renders muted. */
@@ -64,7 +74,9 @@ export default function DigestSection({ projectIds }: { projectIds: number[] }) 
 
   if (!projectIds.length || err) return null;
   if (!data) return <div className="panel"><div className="hc-none">Loading digest…</div></div>;
-  if (!data.rows.length) return null;
+  // Keep the panel when projects are below target even if DQ didn't move —
+  // the off-target headline must not disappear with a quiet DQ month.
+  if (!data.rows.length && !(data.targets?.below.length ?? 0)) return null;
 
   // Most movement first: new errors weigh heaviest (actionable), then DQ swing.
   const rows = [...data.rows].sort((a, b) => {
@@ -88,6 +100,30 @@ export default function DigestSection({ projectIds }: { projectIds: number[] }) 
         </div>
         <span className="dd-caret">{open ? '▾' : '▸'}</span>
       </div>
+      {/* Off-target headline — ALWAYS visible (even collapsed): targets should
+          be something admins notice, not something they go look up. */}
+      {(data.targets?.below.length ?? 0) > 0 && (() => {
+        const below = data.targets!.below;
+        const newly = below.filter((b) => b.newly).length;
+        const SHOW = 4;
+        return (
+          <div className="dg-below">
+            <span className="dg-below-n">⚑ {below.length} project{below.length === 1 ? '' : 's'} below target</span>
+            {' '}for {periodLabel(data.targets!.period)}
+            {newly > 0 && <> · <b>{newly} fell below this month</b></>}
+            {': '}
+            {below.slice(0, SHOW).map((b, i) => (
+              <span key={b.project_id} title={b.misses
+                .map((m) => `${m.label}: ${fmtTarget(m.current, m.unit)} vs target ${m.higherBetter ? '≥' : '≤'} ${fmtTarget(m.target, m.unit)}`)
+                .join(' · ')}>
+                {i > 0 && ' · '}
+                {b.name} <span className="bnl-sub">({b.misses.length === 1 ? b.misses[0].label : `${b.misses.length} metrics`}{b.newly ? ' · new' : ''})</span>
+              </span>
+            ))}
+            {below.length > SHOW && <span className="bnl-sub"> +{below.length - SHOW} more</span>}
+          </div>
+        );
+      })()}
       {open && <div className="scroll">
         <table className="bnl-table">
           <thead>
