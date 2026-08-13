@@ -23,6 +23,14 @@ const ELEMENTS: { key: string; metric: string; pctKey: string }[] = [
   { key: 'income', metric: 'dq:income', pctKey: 'DQ_IncMiss_pct' },
   { key: 'incexit', metric: 'dq:incexit', pctKey: 'DQ_IncExit_pct' },
   { key: 'annual', metric: 'dq:annual', pctKey: 'DQ_Annual_pct' },
+  // Q6b FY2026 elements + Q6d chronic (ETL rebuild 2026-08-13) — rows appear
+  // once the first post-rebuild refresh loads dq:* drills for them.
+  { key: 'veteran', metric: 'dq:veteran', pctKey: 'DQ_Veteran_pct' },
+  { key: 'psd', metric: 'dq:psd', pctKey: 'DQ_PSD_pct' },
+  { key: 'relhoh', metric: 'dq:relhoh', pctKey: 'DQ_RelHoH_pct' },
+  { key: 'coc', metric: 'dq:coc', pctKey: 'DQ_CoC_pct' },
+  { key: 'disabling', metric: 'dq:disabling', pctKey: 'DQ_Disabling_pct' },
+  { key: 'chronic', metric: 'dq:chronic', pctKey: 'DQ_Chronic_pct' },
   // Left-open enrollment suspects (pipeline/recompute_openstay.py) — a SNAPSHOT
   // keyed to the latest complete month; no trend % exists for it.
   { key: 'openstay', metric: 'dq:openstay', pctKey: 'DQ_OpenStay_pct' },

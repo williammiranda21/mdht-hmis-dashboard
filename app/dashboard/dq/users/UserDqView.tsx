@@ -22,9 +22,12 @@ const MIN_VOL = 20;
 const DQ_LABEL: Record<string, string> = {
   'dq:dest': 'Missing exit destination', 'dq:movein': 'Missing move-in date',
   'dq:income': 'Income at entry', 'dq:incexit': 'Income at exit',
-  'dq:annual': 'Overdue annual assessment', 'dq:openstay': 'Enrollment left open',
+  'dq:annual': 'Income at annual assessment', 'dq:openstay': 'Enrollment left open',
   'dq:name': 'Name', 'dq:ssn': 'SSN', 'dq:dob': 'DOB',
   'dq:race': 'Race/ethnicity', 'dq:sex': 'Sex',
+  'dq:veteran': 'Veteran status', 'dq:psd': 'Project start date',
+  'dq:relhoh': 'Head of household', 'dq:coc': 'Enrollment CoC',
+  'dq:disabling': 'Disabling condition', 'dq:chronic': 'Homeless history (3.917)',
 };
 const label = (metric: string): string =>
   DQ_LABEL[metric]

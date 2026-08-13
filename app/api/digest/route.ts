@@ -23,8 +23,12 @@ export const dynamic = 'force-dynamic';
 
 const DQ_SHORT: Record<string, string> = {
   'dq:dest': 'exit destination', 'dq:movein': 'move-in date', 'dq:income': 'income at entry',
-  'dq:annual': 'annual assessment', 'dq:name': 'name', 'dq:ssn': 'SSN', 'dq:dob': 'DOB',
+  'dq:incexit': 'income at exit', 'dq:annual': 'income at annual assessment',
+  'dq:name': 'name', 'dq:ssn': 'SSN', 'dq:dob': 'DOB',
   'dq:race': 'race/ethnicity', 'dq:sex': 'sex',
+  'dq:veteran': 'veteran status', 'dq:psd': 'project start date',
+  'dq:relhoh': 'head of household', 'dq:coc': 'enrollment CoC',
+  'dq:disabling': 'disabling condition', 'dq:chronic': 'homeless history',
 };
 
 export async function GET(req: Request) {
