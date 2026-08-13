@@ -52,6 +52,9 @@ a{color:inherit;text-decoration:none}
    notes column need the full viewport. The page renders the .bnl-wide marker;
    every other tab keeps the standard 1340px. */
 .wrap:has(.bnl-wide){max-width:none}
+/* Project Performance gets a modest bump (not full-bleed like BNL) so 3-4
+   extra columns breathe — user: "a bit wider but not much" (2026-08-13) */
+.wrap:has(.perf-wide){max-width:1520px}
 
 .tabnav{display:flex;flex-direction:column;background:transparent;border:0;border-radius:0;box-shadow:none;padding:8px 0;margin:0;overflow:visible}
 .tab{border:0;background:transparent;font:inherit;font-size:13px;font-weight:500;color:#9AA7BA;padding:10px 20px;border-radius:0;border-left:3px solid transparent;cursor:pointer;white-space:nowrap;text-align:left}
@@ -107,6 +110,10 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
 .perf-table tfoot td{padding:10px 9px}
 .perf-table th:first-child,.perf-table td:first-child{padding-left:16px}
 .perf-table .ty{margin-left:0}
+/* Cap the project-name block (rank chip + name + flag) so the name column
+   stops hoarding width — long names wrap to 2 lines instead (user request).
+   Same idea as .rkrow .pnm's fixed 300px on Rankings. */
+.perf-table .pnm{max-width:340px}
 .perf-table thead th.xcol{white-space:normal;line-height:1.3;max-width:84px;vertical-align:middle}
 /* % pills match the 13px body numbers (Clients/Leavers) — user: easier to see */
 .perf-table .pill{font-size:13px}

@@ -25,12 +25,14 @@ type Props = {
 };
 
 // Extra columns available through the ⚙ Columns picker — pulled from the full jsonb record.
+// Labels stay SHORT — long header words set the column's minimum width, and
+// the compact table exists to fit 3-4 of these before a horizontal scroll.
 const EXTRA_COLUMNS: { key: string; label: string; pct?: boolean }[] = [
-  { key: 'ExitsToPosOutreach', label: '→ Pos Outreach' },
-  { key: 'PosOutreachRate', label: 'Pos Outreach %', pct: true },
-  { key: 'SOContacts', label: 'SO Contacts' },
-  { key: 'SOEngagements', label: 'SO Engagements' },
-  { key: 'EarnedIncomeImprovementRate', label: 'Earned Inc Impr %', pct: true },
+  { key: 'ExitsToPosOutreach', label: 'Pos Exits' },
+  { key: 'PosOutreachRate', label: 'Pos Rate', pct: true },
+  { key: 'SOContacts', label: 'Contacts' },
+  { key: 'SOEngagements', label: 'Engaged' },
+  { key: 'EarnedIncomeImprovementRate', label: 'Earned Inc %', pct: true },
   { key: 'LOS_0_30', label: 'LOS 0–30' },
   { key: 'LOS_31_90', label: 'LOS 31–90' },
   { key: 'LOS_91_180', label: 'LOS 91–180' },
@@ -158,16 +160,39 @@ export default function DashboardView({
   // Totals (rates are recomputed from summed numerators/denominators, not averaged).
   const totals = useMemo(() => {
     let clients = 0, leavers = 0, exitsPh = 0, exitsUnsub = 0;
+    // Rollup conventions: rates = ratio of sums (same as phRate below); Avg
+    // LOS = client-weighted mean. Pos Rate sums SO rows only (the pipeline
+    // emits null for every other type) over raw leavers — the APR
+    // Appendix-A excluded-destination denominator isn't stored per row.
+    // Earned Inc % gets NO total: its denominator (clients with income
+    // data) isn't stored either, and a client-weighted guess would be wrong.
+    let losWt = 0, losClients = 0, posExits = 0, posLeavers = 0, hasPos = false;
+    const extraSum: Record<string, number> = {};
     filtered.forEach((r) => {
       clients += r.clients_served || 0;
       leavers += r.leavers || 0;
       exitsPh += r.exits_ph || 0;
       exitsUnsub += r.exits_unsub || 0;
+      if (r.avg_los != null && r.clients_served) {
+        losWt += r.avg_los * r.clients_served; losClients += r.clients_served;
+      }
+      if (typeof r.data?.['ExitsToPosOutreach'] === 'number') {
+        hasPos = true;
+        posExits += r.data['ExitsToPosOutreach'] as number;
+        posLeavers += r.leavers || 0;
+      }
+      for (const c of EXTRA_COLUMNS) {
+        if (c.pct) continue;
+        const v = r.data?.[c.key];
+        if (typeof v === 'number') extraSum[c.key] = (extraSum[c.key] ?? 0) + v;
+      }
     });
     return {
-      clients, leavers, exitsPh, exitsUnsub,
+      clients, leavers, exitsPh, exitsUnsub, extraSum,
       phRate: leavers ? (exitsPh / leavers) * 100 : null,
       unsubRate: leavers ? (exitsUnsub / leavers) * 100 : null,
+      avgLos: losClients ? losWt / losClients : null,
+      posRate: hasPos && posLeavers ? (posExits / posLeavers) * 100 : null,
     };
   }, [filtered]);
 
@@ -216,10 +241,16 @@ export default function DashboardView({
   const thCls = (key: SortKey, num = false) =>
     `sortable${num ? ' num' : ''}${sortKey === key ? ' sorted' : ''}`;
 
+  /* Delta lines show just "▲ 2.3pp" — the MoM/QoQ/YoY tag lives in this
+     tooltip (and the PH Rate header) to keep the rate columns narrow. */
+  const deltaTitle = `${POP_LABEL[granularity] ?? 'MoM'} — vs prior ${
+    granularity === 'quarterly' ? 'quarter' : granularity === 'fiscal' ? 'fiscal year' : 'month'}`;
+
   return (
     <>
-      {/* ── Filter bar (View by / period / household / subpop drive the server query) ── */}
-      <div className="fbar">
+      {/* ── Filter bar (View by / period / household / subpop drive the server query) ──
+          perf-wide widens THIS tab's .wrap to 1520px (extra-columns headroom) */}
+      <div className="fbar perf-wide">
         <div className="frow">
           <div className="fgroup">
             <span className="flabel">View by</span>
@@ -331,8 +362,9 @@ export default function DashboardView({
                 <th className={thCls('ph_exit_rate', true)} onClick={() => toggleSort('ph_exit_rate')}
                   title={`Period-over-period change (${POP_LABEL[granularity] ?? 'MoM'}) shown under each rate`}>PH Rate {sortCar('ph_exit_rate')}</th>
                 <th className={thCls('exits_unsub', true)} onClick={() => toggleSort('exits_unsub')}
-                  title="Exits to unsubsidized permanent housing (own lease, destinations 410/411) — the count behind Unsub Rate">→ Unsub {sortCar('exits_unsub')}</th>
-                <th className={thCls('unsub_rate', true)} onClick={() => toggleSort('unsub_rate')}>Unsub Rate {sortCar('unsub_rate')}</th>
+                  title="Exits to unsubsidized permanent housing (own lease, destinations 410/411) — the count behind Unsub %">Unsub {sortCar('exits_unsub')}</th>
+                <th className={thCls('unsub_rate', true)} onClick={() => toggleSort('unsub_rate')}
+                  title="Unsubsidized rate — share of PH exits going to own lease (410/411)">Unsub % {sortCar('unsub_rate')}</th>
                 <th className={thCls('avg_los', true)} onClick={() => toggleSort('avg_los')}>Avg LOS {sortCar('avg_los')}</th>
                 {extraCols.map((k) => {
                   const c = EXTRA_COLUMNS.find((x) => x.key === k)!;
@@ -409,8 +441,8 @@ export default function DashboardView({
                             <span className={`pill ${band}`}>{phr.toFixed(0)}%</span>
                           </span>
                           {m != null && (
-                            <div className={`rdel ${m > 0 ? 'up' : m < 0 ? 'down' : 'flat'}`}>
-                              {m > 0 ? `▲ ${m.toFixed(1)}pp` : m < 0 ? `▼ ${Math.abs(m).toFixed(1)}pp` : '±0'} {POP_LABEL[granularity] ?? 'MoM'}
+                            <div className={`rdel ${m > 0 ? 'up' : m < 0 ? 'down' : 'flat'}`} title={deltaTitle}>
+                              {m > 0 ? `▲ ${m.toFixed(1)}pp` : m < 0 ? `▼ ${Math.abs(m).toFixed(1)}pp` : '±0'}
                             </div>
                           )}
                         </>
@@ -450,8 +482,8 @@ export default function DashboardView({
                               <span className={`pill ${pb}`}>{n.toFixed(0)}%</span>
                             </span>
                             {pdn != null && (
-                              <div className={`rdel ${pdn > 0 ? 'up' : pdn < 0 ? 'down' : 'flat'}`}>
-                                {pdn > 0 ? `▲ ${pdn.toFixed(1)}pp` : pdn < 0 ? `▼ ${Math.abs(pdn).toFixed(1)}pp` : '±0'} {POP_LABEL[granularity] ?? 'MoM'}
+                              <div className={`rdel ${pdn > 0 ? 'up' : pdn < 0 ? 'down' : 'flat'}`} title={deltaTitle}>
+                                {pdn > 0 ? `▲ ${pdn.toFixed(1)}pp` : pdn < 0 ? `▼ ${Math.abs(pdn).toFixed(1)}pp` : '±0'}
                               </div>
                             )}
                           </td>
@@ -481,8 +513,20 @@ export default function DashboardView({
                   <td className="num">{totals.phRate == null ? '—' : `${totals.phRate.toFixed(0)}%`}</td>
                   <td className="num">{fmtInt(totals.exitsUnsub)}</td>
                   <td className="num">{totals.unsubRate == null ? '—' : `${totals.unsubRate.toFixed(0)}%`}</td>
-                  <td />
-                  {extraCols.map((k) => <td key={k} />)}
+                  <td className="num" title="Client-weighted average across the listed projects">
+                    {totals.avgLos == null ? '—' : `${Math.round(totals.avgLos)}d`}
+                  </td>
+                  {extraCols.map((k) => {
+                    if (k === 'PosOutreachRate') {
+                      return (
+                        <td key={k} className="num" title="SO projects only — positive exits / leavers">
+                          {totals.posRate == null ? '—' : `${totals.posRate.toFixed(0)}%`}
+                        </td>
+                      );
+                    }
+                    const s = totals.extraSum[k];
+                    return <td key={k} className="num">{s == null ? '—' : fmtInt(s)}</td>;
+                  })}
                 </tr>
               </tfoot>
             )}
