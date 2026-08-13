@@ -135,10 +135,16 @@ def main():
 
     PII = {"dq:name", "dq:ssn", "dq:dob", "dq:race", "dq:sex"}
 
-    def attribute(metric: str, pid: str, project: int, entry: str | None) -> str | None:
+    def attribute(metric: str, pid: str, project: int, entry: str | None,
+                  eid_hint: str | None = None) -> str | None:
         if metric in PII:
             return cl_user.get(pid)
-        eid = by_exact.get((pid, project, entry)) if entry else None
+        # detail rows written since 2026-08-13 carry the exact EnrollmentID —
+        # use it outright; older rows fall back to the (pid, project, entry)
+        # lookup and then to the client's latest stay.
+        eid = eid_hint if eid_hint and eid_hint in en_user else None
+        if eid is None:
+            eid = by_exact.get((pid, project, entry)) if entry else None
         if eid is None:
             hit = by_pp.get((pid, project))
             eid = hit[1] if hit else None
@@ -177,7 +183,7 @@ def main():
                                           for p in (row.get("personal_ids") or [])]
             for u in units:
                 total_units += 1
-                uid = attribute(metric, str(u["pid"]), project, u.get("entry"))
+                uid = attribute(metric, str(u["pid"]), project, u.get("entry"), u.get("eid"))
                 if uid is None or uid == "nan":
                     unattributed += 1
                     continue

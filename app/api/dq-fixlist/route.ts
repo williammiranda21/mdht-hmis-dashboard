@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
+import { EVA_BY_ID } from '../../../lib/evaChecks';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,7 +75,7 @@ export async function GET(req: Request) {
 
   if (drillRes.error) return NextResponse.json({ error: drillRes.error.message }, { status: 500 });
 
-  type DetailRow = { pid: string; entry: string | null };
+  type DetailRow = { pid: string; entry: string | null; eid?: string | null };
   const rowsByMetric = new Map<string, { ids: string[]; detail: DetailRow[] | null }>(
     (drillRes.data ?? []).map((r: { metric: string; personal_ids: string[]; detail: DetailRow[] | null }) =>
       [r.metric, { ids: r.personal_ids ?? [], detail: r.detail ?? null }]),
@@ -88,7 +89,9 @@ export async function GET(req: Request) {
     return {
       key: e.key,
       ids: row?.ids ?? [],
-      // enrollment-precise rows (dest/movein/income/annual); null for PII (client-level)
+      // per-stay rows {pid, entry, eid} — every element since the 2026-08-13
+      // ETL change (client-level elements use the latest stay); null for rows
+      // loaded before it.
       detail: row?.detail ?? null,
       trend: recent.map((h) => ({ period: h.period, pct: (h.data?.[e.pctKey] as number | null) ?? null })),
     };
@@ -115,14 +118,19 @@ export async function GET(req: Request) {
   // Blob downloads break under the county's Web Isolation (its scanning proxy
   // 500s them); a plain GET with Content-Disposition survives it.
   if (sp.get('format') === 'csv') {
-    const lines = ['error,client_id,entry_date'];
+    const lines = ['error,client_id,enrollment_id,entry_date'];
+    const noDetail = (id: string): DetailRow => ({ pid: id, entry: null, eid: null });
     for (const c of categories) {
-      const rows = c.detail ?? c.ids.map((id) => ({ pid: id, entry: null }));
-      for (const d of rows) lines.push(`${c.key},${d.pid},${d.entry ?? ''}`);
+      const rows = c.detail ?? c.ids.map(noDetail);
+      for (const d of rows) lines.push(`${c.key},${d.pid},${d.eid ?? ''},${d.entry ?? ''}`);
     }
     for (const f of eva) {
-      const rows = f.detail ?? f.ids.map((id) => ({ pid: id, entry: null }));
-      for (const d of rows) lines.push(`eva_${f.id},${d.pid},${d.entry ?? ''}`);
+      // readable error key ('overlapping_stays', 'duplicate_enrollment', …) —
+      // 'eva_2' told staff nothing (user request 2026-08-13). Unregistered
+      // check ids keep the eva_<id> fallback.
+      const slug = EVA_BY_ID.get(f.id)?.slug ?? `eva_${f.id}`;
+      const rows = f.detail ?? f.ids.map(noDetail);
+      for (const d of rows) lines.push(`${slug},${d.pid},${d.eid ?? ''},${d.entry ?? ''}`);
     }
     return new NextResponse(lines.join('\r\n'), {
       headers: {

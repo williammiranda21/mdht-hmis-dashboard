@@ -11,8 +11,8 @@ enrollment shows under the ES project that owns it.
 
 Emits drill_clients rows in the dq:* shape:
   period = latest COMPLETE month | project_id | metric = 'dq:openstay'
-  personal_ids = unique hashed clients (detail=None — the offending stay's
-  dates live in the roster's dq strings, not parsed here).
+  personal_ids = unique hashed clients · detail = [{pid, entry, eid}] from the
+  roster's open_suspect_detail (the suspect stay's entry date + EnrollmentID).
 
 SNAPSHOT metric: rows exist only under the latest complete month; projects
 that no longer have suspects are pruned on reload, and rows under older
@@ -79,15 +79,27 @@ def main():
         period = (as_of.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
 
     per_proj: dict[int, list[str]] = {}
+    # (project, pid) → {pid, entry, eid} from the roster's open_suspect_detail
+    # (bnl_core, 2026-08-13) — the suspect stay's entry date + EnrollmentID so
+    # the fix-list CSV carries them like every other element. Rosters built
+    # before that lack the key; those rows fall back to entry/eid = None.
+    per_unit: dict[tuple, dict] = {}
     for r in d["roster"]:
         if not r.get("open_suspect"):
             continue
+        det = r.get("open_suspect_detail") or {}
         for pj in (r.get("open_suspect_projects") or []):
-            per_proj.setdefault(int(pj), []).append(str(r["pid"]))
+            pid = str(r["pid"])
+            per_proj.setdefault(int(pj), []).append(pid)
+            ed = det.get(str(pj)) or [None, None]
+            per_unit[(int(pj), pid)] = {"pid": pid, "entry": ed[0], "eid": ed[1]}
 
-    payload = [{"period": period, "project_id": pj, "metric": "dq:openstay",
-                "personal_ids": list(dict.fromkeys(pids)), "detail": None}
-               for pj, pids in sorted(per_proj.items())]
+    payload = []
+    for pj, pids in sorted(per_proj.items()):
+        uniq = list(dict.fromkeys(pids))
+        payload.append({"period": period, "project_id": pj, "metric": "dq:openstay",
+                        "personal_ids": uniq,
+                        "detail": [per_unit[(pj, p)] for p in uniq]})
     n_clients = len({p for row in payload for p in row["personal_ids"]})
     print(f"dq:openstay — {n_clients} clients across {len(payload)} projects "
           f"(period {period})")

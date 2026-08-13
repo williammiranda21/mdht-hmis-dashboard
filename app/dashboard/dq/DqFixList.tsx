@@ -11,8 +11,9 @@ import CopyId from '../../../components/CopyId';
  * from /api/dq-fixlist (drill_clients, agency-scoped RLS); the counts/labels come
  * from the row already on screen. Hashed IDs only — HMIS lookup, not names.
  *
- * These four elements are all ENROLLMENT-level: fix each stay's field. (Client-
- * level PII — DOB/SSN — would be a fix-once-per-client list; a later addition.)
+ * Every element carries per-stay detail {pid, entry, eid} since the 2026-08-13
+ * ETL change — enrollment-level elements list each offending stay; client-level
+ * elements (PII/Q6b/chronic) list the latest stay they were judged on.
  */
 interface RowData { [k: string]: number | null }
 
@@ -73,13 +74,13 @@ const ELEMENTS = [
     denomKey: 'DQ_ActiveTotal' },
 ] as const;
 
-interface DetailRow { pid: string; entry: string | null }
+interface DetailRow { pid: string; entry: string | null; eid?: string | null }
 interface EvaFinding { id: string; ids: string[]; detail: DetailRow[] | null }
 interface Category {
   key: string;
   ids: string[];
-  // enrollment-precise rows (dest/movein/income/annual) — one per offending stay;
-  // null for the client-level PII elements.
+  // per-stay rows {pid, entry, eid} — one per offending stay (client-level
+  // elements use the latest stay); null for rows loaded before 2026-08-13.
   detail: DetailRow[] | null;
   trend: { period: string; pct: number | null }[];
 }

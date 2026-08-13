@@ -5,9 +5,9 @@ Computes HUD Eva's client/enrollment-level checks (github.com/abtassociates/eva,
 EvaChecks.csv ids kept) against the local hud_data export and emits findings in
 the SAME shape as the dq:* fix-lists: drill_clients rows keyed
   period = each COMPLETE month | project_id | metric = 'eva:<id>'
-with personal_ids (unique clients) and detail = [{pid, entry}] per offending
-enrollment — so the fix-list UI, digest new/cleared diffs, and agency RLS
-scoping all inherit Eva checks with no new plumbing.
+with personal_ids (unique clients) and detail = [{pid, entry, eid}] per
+offending enrollment — so the fix-list UI, CSV export, digest new/cleared
+diffs, and agency RLS scoping all inherit Eva checks with no new plumbing.
 
 v2 (2026-08-13, user directive): findings are emitted PER REPORTING PERIOD —
 every complete month since PERIODS_START — with each period's universe =
@@ -153,7 +153,7 @@ def main():
         def flag(cid: str, mask):
             df = e[mask]
             if len(df):
-                findings[cid] = df[["PersonalID", "ProjectID", "EntryDate"]]
+                findings[cid] = df[["PersonalID", "ProjectID", "EntryDate", "EnrollmentID"]]
 
         # ── Household integrity (composition within this month's universe) ──
         n_hoh = e.groupby("HouseholdID")["RelationshipToHoH"].apply(lambda s: int((s == 1).sum()))
@@ -193,7 +193,8 @@ def main():
             for pid, g in df.groupby("ProjectID"):
                 pids = list(dict.fromkeys(g["PersonalID"].astype(str)))
                 detail = [{"pid": str(r.PersonalID),
-                           "entry": r.EntryDate.date().isoformat() if pd.notna(r.EntryDate) else None}
+                           "entry": r.EntryDate.date().isoformat() if pd.notna(r.EntryDate) else None,
+                           "eid": str(r.EnrollmentID) if pd.notna(r.EnrollmentID) else None}
                           for r in g.itertuples()]
                 payload.append({"period": key, "project_id": int(pid),
                                 "metric": f"eva:{cid}", "personal_ids": pids, "detail": detail})

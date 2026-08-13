@@ -296,12 +296,15 @@ def build_drill_clients(drill: dict) -> list[dict]:
             "metric": metric,
             "personal_ids": resolve(vals),
         }
-        # Enrollment-precise fix-list detail (dq: metrics only) — [{pid, entry}]
-        # per offending enrollment, so re-enrollments don't collapse and each row
-        # shows which stay to fix. Null for every non-dq drill.
+        # Enrollment-precise fix-list detail (dq: metrics only) — [{pid, entry,
+        # eid}] per offending enrollment/stay, so re-enrollments don't collapse
+        # and each row shows which stay to fix plus its EnrollmentID for HMIS
+        # lookup. Null for every non-dq drill. drill files generated before
+        # 2026-08-13 carry 2-item [idx, entry] rows — eid is None for those.
         det = dq_detail.get(key)
         if det is not None:
-            row["detail"] = [{"pid": ids[i], "entry": entry} for i, entry in det]
+            row["detail"] = [{"pid": ids[t[0]], "entry": t[1],
+                              "eid": t[2] if len(t) > 2 else None} for t in det]
         out.append(row)
     for key, vals in drill.get("sys", {}).items():
         period, metric = key.split("|")
