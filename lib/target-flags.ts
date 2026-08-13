@@ -15,6 +15,10 @@ import type { ProjectMetric } from './types';
  * simply has no dq/returns rows, so those metrics silently skip there.
  */
 
+/** One evaluated target metric. Since 2026-08-13 the map carries EVERY metric
+ *  that has both a target and a value — met and missed — so the table can
+ *  color cells against the project's own target. Chip/digest consumers filter
+ *  to `!met`; the name stays TargetMiss to spare every import site. */
 export interface TargetMiss {
   key: string;
   label: string;
@@ -22,6 +26,7 @@ export interface TargetMiss {
   higherBetter: boolean;
   target: number;
   current: number;
+  met: boolean;
 }
 
 export async function getTargetFlags(
@@ -102,21 +107,19 @@ export async function getTargetFlags(
       so_engagement_rate: soC != null && soC > 0 && soE != null ? (soE / soC) * 100 : null,
     };
 
-    const misses: TargetMiss[] = [];
+    const evals: TargetMiss[] = [];
     for (const m of TARGET_METRICS) {
-      // A metric that doesn't apply to this project's type never flags,
+      // A metric that doesn't apply to this project's type never evaluates,
       // even if a stale target row exists for it.
       if (!metricAppliesTo(m, ptype.get(id) ?? null)) continue;
       const target = own?.get(m.key) ?? inherited?.get(m.key);
       const cur = current[m.key];
       if (target == null || cur == null) continue;
-      const missed = m.higherBetter ? cur < target : cur > target;
-      if (missed) {
-        misses.push({ key: m.key, label: m.label, unit: m.unit,
-          higherBetter: m.higherBetter, target, current: cur });
-      }
+      evals.push({ key: m.key, label: m.label, unit: m.unit,
+        higherBetter: m.higherBetter, target, current: cur,
+        met: m.higherBetter ? cur >= target : cur <= target });
     }
-    if (misses.length) out[id] = misses;
+    if (evals.length) out[id] = evals;
   }
   return out;
 }

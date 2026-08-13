@@ -381,8 +381,19 @@ export default function DashboardView({
             <tbody>
               {sorted.map((r, i) => {
                 const phr = r.ph_exit_rate;
-                const band = rateBand(phr);
                 const m = mom(r);
+                // Target-aware coloring (user directive 2026-08-13): a metric
+                // WITH a resolved target colors green/red against IT; only
+                // untargeted metrics use the fixed system-wide bands. tEval
+                // is empty on filtered household/subpop views → bands there.
+                const tf = targetFlags[r.project_id];
+                const tEval = (k: string) => tf?.find((e) => e.key === k);
+                const misses = (tf ?? []).filter((e) => !e.met);
+                const phT = tEval('ph_exit_rate');
+                const band = phT ? (phT.met ? 'good' : 'bad') : rateBand(phr);
+                const tTip = (t: TargetMiss | undefined) => t
+                  ? `${t.met ? 'meets' : 'misses'} target ${t.higherBetter ? '≥' : '≤'} ${fmtTarget(t.target, t.unit)}`
+                  : undefined;
                 return (
                   <tr key={r.project_id}>
                     <td>
@@ -394,10 +405,10 @@ export default function DashboardView({
                           onKeyDown={(e) => e.key === 'Enter' && setPanelProject(r.project_id)}>
                           {r.project_name}
                         </span>
-                        {(targetFlags[r.project_id]?.length ?? 0) > 0 && (
+                        {misses.length > 0 && (
                           <span className="tflag"
-                            title={targetFlags[r.project_id]
-                              .map((m) => `${m.label}: ${fmtTarget(m.current, m.unit)} vs target ${m.higherBetter ? '≥' : '≤'} ${fmtTarget(m.target, m.unit)}`)
+                            title={misses
+                              .map((x) => `${x.label}: ${fmtTarget(x.current, x.unit)} vs target ${x.higherBetter ? '≥' : '≤'} ${fmtTarget(x.target, x.unit)}`)
                               .join(' · ')}>
                             ⚑ off target
                           </span>
@@ -442,7 +453,7 @@ export default function DashboardView({
                         <>
                           <span className="rbar">
                             <span className="vpil"><i style={{ height: `${Math.min(100, phr)}%`, background: bandColorVar(band) }} /></span>
-                            <span className={`pill ${band}`}>{phr.toFixed(0)}%</span>
+                            <span className={`pill ${band}`} title={tTip(phT)}>{phr.toFixed(0)}%</span>
                           </span>
                           {m != null && (
                             <div className={`rdel ${m > 0 ? 'up' : m < 0 ? 'down' : 'flat'}`} title={deltaTitle}>
@@ -463,8 +474,12 @@ export default function DashboardView({
                       ) : fmtInt(r.exits_unsub)}
                     </td>
                     <td className="num">
-                      {r.unsub_rate == null ? '—'
-                        : <span className={`pill ${r.unsub_rate >= 20 ? 'good' : r.unsub_rate >= 10 ? 'warn' : 'bad'}`}>{r.unsub_rate.toFixed(0)}%</span>}
+                      {r.unsub_rate == null ? '—' : (() => {
+                        const unT = tEval('unsub_rate');
+                        const cls = unT ? (unT.met ? 'good' : 'bad')
+                          : r.unsub_rate! >= 20 ? 'good' : r.unsub_rate! >= 10 ? 'warn' : 'bad';
+                        return <span className={`pill ${cls}`} title={tTip(unT)}>{r.unsub_rate!.toFixed(0)}%</span>;
+                      })()}
                     </td>
                     <td className="num">{r.avg_los == null ? '—' : `${Math.round(r.avg_los)}d`}</td>
                     {extraCols.map((k) => {
@@ -476,14 +491,15 @@ export default function DashboardView({
                       // green ≥55, amber 45–54, red <45.
                       if (k === 'PosOutreachRate' && v != null && v !== '') {
                         const n = Number(v);
-                        const pb = rateBand(n, 55, 45);
+                        const poT = tEval('pos_outreach_rate');
+                        const pb = poT ? (poT.met ? 'good' : 'bad') : rateBand(n, 55, 45);
                         const pd = r.data?.['MoM_PosOutreachRate_pp'];
                         const pdn = typeof pd === 'number' ? pd : null;
                         return (
                           <td key={k} className="num">
                             <span className="rbar">
                               <span className="vpil"><i style={{ height: `${Math.min(100, n)}%`, background: bandColorVar(pb) }} /></span>
-                              <span className={`pill ${pb}`}>{n.toFixed(0)}%</span>
+                              <span className={`pill ${pb}`} title={tTip(poT)}>{n.toFixed(0)}%</span>
                             </span>
                             {pdn != null && (
                               <div className={`rdel ${pdn > 0 ? 'up' : pdn < 0 ? 'down' : 'flat'}`} title={deltaTitle}>

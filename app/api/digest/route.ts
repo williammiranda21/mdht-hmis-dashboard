@@ -225,12 +225,18 @@ export async function GET(req: Request) {
       getTargetFlags(sb, 'monthly', cur, 'All', 'All', (pmCur.data ?? []) as unknown as ProjectMetric[]),
       getTargetFlags(sb, 'monthly', prev, 'All', 'All', (pmPrev.data ?? []) as unknown as ProjectMetric[]),
     ]);
-    const below = Object.entries(fCur).map(([id, misses]) => ({
-      project_id: Number(id),
-      name: projInfo.get(Number(id))?.name ?? `Project ${id}`,
-      newly: !(Number(id) in fPrev),
-      misses,
-    })).sort((a, b) => Number(b.newly) - Number(a.newly) || b.misses.length - a.misses.length);
+    // The flag map now carries met AND missed evaluations — a project is
+    // "below" only when something is missed, and "newly" means last month
+    // had no misses at all (met-or-unevaluated).
+    const below = Object.entries(fCur)
+      .map(([id, evals]) => ({
+        project_id: Number(id),
+        name: projInfo.get(Number(id))?.name ?? `Project ${id}`,
+        newly: !(fPrev[Number(id)] ?? []).some((e) => !e.met),
+        misses: evals.filter((e) => !e.met),
+      }))
+      .filter((b) => b.misses.length > 0)
+      .sort((a, b) => Number(b.newly) - Number(a.newly) || b.misses.length - a.misses.length);
     targets = { period: cur, below };
   } catch {
     targets = null;

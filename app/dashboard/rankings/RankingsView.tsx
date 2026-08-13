@@ -139,13 +139,16 @@ export default function RankingsView({ rows, periods, granularity, period, house
                 <span className="pnm" title={r.type_name ? `${r.project_name} · ${r.type_name}` : r.project_name ?? ''}>
                   <span className="nm">{r.project_name}</span>
                   <span className="ty">{r.type_name}</span>
-                  {(targetFlags[r.project_id]?.length ?? 0) > 0 && (
+                  {(() => {
+                    const miss = (targetFlags[r.project_id] ?? []).filter((e) => !e.met);
                     // Icon-only in the fixed-width name block; tooltip carries
                     // the same detail as the Performance table's chip.
-                    <span className="tflag" title={targetFlags[r.project_id]
-                      .map((m) => `${m.label}: ${fmtTarget(m.current, m.unit)} vs target ${m.higherBetter ? '≥' : '≤'} ${fmtTarget(m.target, m.unit)}`)
-                      .join(' · ')}>⚑</span>
-                  )}
+                    return miss.length > 0 && (
+                      <span className="tflag" title={miss
+                        .map((x) => `${x.label}: ${fmtTarget(x.current, x.unit)} vs target ${x.higherBetter ? '≥' : '≤'} ${fmtTarget(x.target, x.unit)}`)
+                        .join(' · ')}>⚑</span>
+                    );
+                  })()}
                 </span>
                 <span className="rkbar"><i style={{ width: `${w}%` }} /></span>
                 <span className="rkval">{fmtVal(v)}</span>
