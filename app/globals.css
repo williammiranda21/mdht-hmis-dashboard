@@ -418,6 +418,12 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .hc-blab b{color:var(--strong);font-variant-numeric:tabular-nums;white-space:nowrap}
 .hc-bar{height:7px;border-radius:999px;background:var(--track);overflow:hidden}
 .hc-bar i{display:block;height:100%;border-radius:999px;background:var(--warn)}
+/* Dest-profile per-destination sub-rows — indented, slimmer bar, muted label */
+.dp-sub{margin:0 0 4px 16px}
+.dp-sub .hc-blab{margin-bottom:2px}
+.dp-sub .hc-blab>span{color:var(--muted)}
+.dp-subbar{height:5px}
+.dp-subbar i{opacity:.6}
 .hc-ep{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--hair);border-radius:9px;padding:7px 11px;margin-bottom:6px;font-size:12px}
 .hc-ep .d{display:flex;align-items:center;gap:7px;color:var(--text);min-width:0}
 .hc-ep .d::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--danger);flex:none}

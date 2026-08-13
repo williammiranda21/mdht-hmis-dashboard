@@ -64,17 +64,34 @@ export default function DestProfile({ profile, periodLabel }: {
       <div className="hc-sub">Where do clients go — all {total.toLocaleString()} exits, {periodLabel}</div>
       {tierList.map((t) => {
         const pct = (t.g!.n / total) * 100;
-        const top = t.g!.codes.sort((a, b) => b[1] - a[1]).slice(0, 3)
-          .map(([c, n]) => `${LABELS[c] ?? `Destination ${c}`} (${n})`).join(' · ');
         return (
-          <div className="hc-row" key={t.key}>
-            <div className="hc-bwrap">
-              <div className="hc-blab">
-                <span>{t.label} <span style={{ color: 'var(--muted)', fontSize: 12 }}>{top}</span></span>
-                <b>{t.g!.n.toLocaleString()} ({Number(pct.toFixed(1))}%)</b>
+          <div key={t.key} style={{ marginBottom: 10 }}>
+            <div className="hc-row" style={{ marginBottom: 5 }}>
+              <div className="hc-bwrap">
+                <div className="hc-blab">
+                  <span>{t.label}</span>
+                  <b>{t.g!.n.toLocaleString()} ({Number(pct.toFixed(1))}%)</b>
+                </div>
+                <div className="hc-bar"><i style={{ width: `${Math.min(100, pct)}%`, background: t.color }} /></div>
               </div>
-              <div className="hc-bar"><i style={{ width: `${Math.min(100, pct)}%`, background: t.color }} /></div>
             </div>
+            {/* One line + bar PER DESTINATION (user request 2026-08-13 — was a
+                bundled top-3 text). Sub-bars share the tier's 0-100% axis so
+                widths compare across the whole section. */}
+            {t.g!.codes.sort((a, b) => b[1] - a[1]).map(([c, n]) => {
+              const p = (n / total) * 100;
+              return (
+                <div className="hc-row dp-sub" key={c}>
+                  <div className="hc-bwrap">
+                    <div className="hc-blab">
+                      <span>{LABELS[c] ?? `Destination ${c}`}</span>
+                      <b>{n.toLocaleString()} ({Number(p.toFixed(1))}%)</b>
+                    </div>
+                    <div className="hc-bar dp-subbar"><i style={{ width: `${Math.min(100, p)}%`, background: t.color }} /></div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
       })}
