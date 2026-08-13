@@ -43,7 +43,12 @@ export default function TargetsAdmin({
     const seen = new Map<number, { code: number; name: string; count: number }>();
     projects.forEach((p) => {
       if (p.type == null) return;
-      const e = seen.get(p.type) ?? { code: p.type, name: p.typeName || `Type ${p.type}`, count: 0 };
+      // Retired/unknown HUD codes (e.g. type 5) surface as "Other"/"Type 5.0"
+      // — meaningless as a target scope, so keep them out of the picker
+      // (user report 2026-08-13). Their projects can still be targeted
+      // individually via "Specific project".
+      if (p.type === 5 || !p.typeName || /^(other$|type \d)/i.test(p.typeName)) return;
+      const e = seen.get(p.type) ?? { code: p.type, name: p.typeName, count: 0 };
       e.count += 1;
       seen.set(p.type, e);
     });
