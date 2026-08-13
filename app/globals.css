@@ -98,6 +98,24 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
 .rbar{display:inline-flex;align-items:center;gap:8px;justify-content:flex-end;width:100%}
 .rmb{width:54px;height:6px;border-radius:999px;background:var(--track);overflow:hidden;flex:none}.rmb i{display:block;height:6px;border-radius:999px}
 .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;font-variant-numeric:tabular-nums}
+/* Project Performance table — compact mode so 3-4 ⚙ extra columns fit before a
+   horizontal scroll appears: tighter cell padding, shorter rate bars, and the
+   EXTRA columns' longer headers may wrap to two lines (base headers stay one
+   line). Scoped to .perf-table — every other table keeps the roomy defaults. */
+.perf-table thead th{padding:10px 9px}
+.perf-table tbody td{padding:11px 9px}
+.perf-table tfoot td{padding:10px 9px}
+.perf-table th:first-child,.perf-table td:first-child{padding-left:16px}
+.perf-table .ty{margin-left:0}
+.perf-table thead th.xcol{white-space:normal;line-height:1.3;max-width:84px;vertical-align:middle}
+/* % pills match the 13px body numbers (Clients/Leavers) — user: easier to see */
+.perf-table .pill{font-size:13px}
+/* Rate cell = vertical fill pill + % pill, P-o-P delta stacked underneath
+   (replaced the horizontal bar AND the separate MoM Δ column, 2026-08-13) */
+.vpil{width:6px;height:20px;border-radius:999px;background:var(--track);overflow:hidden;flex:none;display:inline-flex;align-items:flex-end}
+.vpil i{display:block;width:100%;border-radius:999px}
+.rdel{font-size:10.5px;font-weight:600;margin-top:2px;white-space:nowrap}
+.rdel.up{color:var(--accent)} .rdel.down{color:var(--danger)} .rdel.flat{color:var(--faint)}
 .pill.good{color:var(--accent);background:var(--accent-light)} .pill.warn{color:var(--warn);background:var(--warn-light)} .pill.bad{color:var(--danger);background:var(--danger-light)}
 
 /* ── Sign-in ── */

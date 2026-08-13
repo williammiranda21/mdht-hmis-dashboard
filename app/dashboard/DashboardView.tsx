@@ -320,7 +320,7 @@ export default function DashboardView({
           </div>
         </div>
         <div className="scroll">
-          <table>
+          <table className="perf-table">
             <thead>
               <tr>
                 <th className={thCls('name')} onClick={() => toggleSort('name')}>Project {sortCar('name')}</th>
@@ -328,8 +328,8 @@ export default function DashboardView({
                 <th className={thCls('clients_served', true)} onClick={() => toggleSort('clients_served')}>Clients {sortCar('clients_served')}</th>
                 <th className={thCls('leavers', true)} onClick={() => toggleSort('leavers')}>Leavers {sortCar('leavers')}</th>
                 <th className={thCls('exits_ph', true)} onClick={() => toggleSort('exits_ph')}>→ PH {sortCar('exits_ph')}</th>
-                <th className={thCls('ph_exit_rate', true)} onClick={() => toggleSort('ph_exit_rate')}>PH Rate {sortCar('ph_exit_rate')}</th>
-                <th className={thCls('mom', true)} onClick={() => toggleSort('mom')}>{POP_LABEL[granularity] ?? 'MoM'} Δ {sortCar('mom')}</th>
+                <th className={thCls('ph_exit_rate', true)} onClick={() => toggleSort('ph_exit_rate')}
+                  title={`Period-over-period change (${POP_LABEL[granularity] ?? 'MoM'}) shown under each rate`}>PH Rate {sortCar('ph_exit_rate')}</th>
                 <th className={thCls('exits_unsub', true)} onClick={() => toggleSort('exits_unsub')}
                   title="Exits to unsubsidized permanent housing (own lease, destinations 410/411) — the count behind Unsub Rate">→ Unsub {sortCar('exits_unsub')}</th>
                 <th className={thCls('unsub_rate', true)} onClick={() => toggleSort('unsub_rate')}>Unsub Rate {sortCar('unsub_rate')}</th>
@@ -337,7 +337,7 @@ export default function DashboardView({
                 {extraCols.map((k) => {
                   const c = EXTRA_COLUMNS.find((x) => x.key === k)!;
                   return (
-                    <th key={k} className={thCls(k, true)} onClick={() => toggleSort(k)}>{c.label} {sortCar(k)}</th>
+                    <th key={k} className={`${thCls(k, true)} xcol`} onClick={() => toggleSort(k)}>{c.label} {sortCar(k)}</th>
                   );
                 })}
               </tr>
@@ -399,19 +399,22 @@ export default function DashboardView({
                         </span>
                       ) : fmtInt(r.exits_ph)}
                     </td>
+                    {/* Rate + P-o-P delta live in ONE cell (user pick 2026-08-13:
+                        vertical fill pill, delta stacked under — no Δ column). */}
                     <td className="num">
                       {phr == null ? '—' : (
-                        <span className="rbar">
-                          <span className="rmb"><i style={{ width: `${Math.min(100, phr)}%`, background: bandColorVar(band) }} /></span>
-                          <span className={`pill ${band}`}>{phr.toFixed(0)}%</span>
-                        </span>
+                        <>
+                          <span className="rbar">
+                            <span className="vpil"><i style={{ height: `${Math.min(100, phr)}%`, background: bandColorVar(band) }} /></span>
+                            <span className={`pill ${band}`}>{phr.toFixed(0)}%</span>
+                          </span>
+                          {m != null && (
+                            <div className={`rdel ${m > 0 ? 'up' : m < 0 ? 'down' : 'flat'}`}>
+                              {m > 0 ? `▲ ${m.toFixed(1)}pp` : m < 0 ? `▼ ${Math.abs(m).toFixed(1)}pp` : '±0'} {POP_LABEL[granularity] ?? 'MoM'}
+                            </div>
+                          )}
+                        </>
                       )}
-                    </td>
-                    <td className="num">
-                      {m == null ? <span className="mom flat">—</span>
-                        : m > 0 ? <span className="mom up">+{m.toFixed(1)}pp</span>
-                        : m < 0 ? <span className="mom down">{m.toFixed(1)}pp</span>
-                        : <span className="mom flat">—</span>}
                     </td>
                     <td className="num">
                       {canDrill && r.exits_unsub ? (
@@ -431,6 +434,29 @@ export default function DashboardView({
                     {extraCols.map((k) => {
                       const c = EXTRA_COLUMNS.find((x) => x.key === k)!;
                       const v = r.data?.[k];
+                      // Pos Outreach % mirrors the PH Rate cell exactly (user
+                      // pick 2026-08-13): vertical pill + stacked P-o-P delta,
+                      // same 3-band coloring anchored at the SO threshold —
+                      // green ≥55, amber 45–54, red <45.
+                      if (k === 'PosOutreachRate' && v != null && v !== '') {
+                        const n = Number(v);
+                        const pb = rateBand(n, 55, 45);
+                        const pd = r.data?.['MoM_PosOutreachRate_pp'];
+                        const pdn = typeof pd === 'number' ? pd : null;
+                        return (
+                          <td key={k} className="num">
+                            <span className="rbar">
+                              <span className="vpil"><i style={{ height: `${Math.min(100, n)}%`, background: bandColorVar(pb) }} /></span>
+                              <span className={`pill ${pb}`}>{n.toFixed(0)}%</span>
+                            </span>
+                            {pdn != null && (
+                              <div className={`rdel ${pdn > 0 ? 'up' : pdn < 0 ? 'down' : 'flat'}`}>
+                                {pdn > 0 ? `▲ ${pdn.toFixed(1)}pp` : pdn < 0 ? `▼ ${Math.abs(pdn).toFixed(1)}pp` : '±0'} {POP_LABEL[granularity] ?? 'MoM'}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      }
                       return (
                         <td key={k} className="num">
                           {v == null || v === '' ? '—' : c.pct ? `${Number(v).toFixed(0)}%` : fmtInt(Number(v))}
@@ -441,7 +467,7 @@ export default function DashboardView({
                 );
               })}
               {sorted.length === 0 && (
-                <tr><td colSpan={10 + extraCols.length} className="empty">No projects match these filters.</td></tr>
+                <tr><td colSpan={9 + extraCols.length} className="empty">No projects match these filters.</td></tr>
               )}
             </tbody>
             {sorted.length > 0 && (
@@ -453,7 +479,6 @@ export default function DashboardView({
                   <td className="num">{fmtInt(totals.leavers)}</td>
                   <td className="num">{fmtInt(totals.exitsPh)}</td>
                   <td className="num">{totals.phRate == null ? '—' : `${totals.phRate.toFixed(0)}%`}</td>
-                  <td />
                   <td className="num">{fmtInt(totals.exitsUnsub)}</td>
                   <td className="num">{totals.unsubRate == null ? '—' : `${totals.unsubRate.toFixed(0)}%`}</td>
                   <td />
