@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Granularity, ProjectMetric } from '../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../lib/types';
-import { periodLabel, rateBand, bandColorVar, fmtInt } from '../../lib/format';
+import { periodLabel, fmtInt } from '../../lib/format';
 import { fmtTarget } from '../../lib/target-metrics';
 import type { TargetMiss } from '../../lib/target-flags';
 import ProjectPanel from './ProjectPanel';
@@ -382,15 +382,16 @@ export default function DashboardView({
               {sorted.map((r, i) => {
                 const phr = r.ph_exit_rate;
                 const m = mom(r);
-                // Target-aware coloring (user directive 2026-08-13): a metric
-                // WITH a resolved target colors green/red against IT; only
-                // untargeted metrics use the fixed system-wide bands. tEval
-                // is empty on filtered household/subpop views → bands there.
+                // Target-only coloring (user directive 2026-08-13): a metric
+                // WITH a resolved target colors green/red against IT; without
+                // one there are NO colors — plain text, neutral bar. Filtered
+                // household/subpop views have no flags → everything plain.
                 const tf = targetFlags[r.project_id];
                 const tEval = (k: string) => tf?.find((e) => e.key === k);
                 const misses = (tf ?? []).filter((e) => !e.met);
                 const phT = tEval('ph_exit_rate');
-                const band = phT ? (phT.met ? 'good' : 'bad') : rateBand(phr);
+                const tCol = (t: TargetMiss | undefined) =>
+                  t ? (t.met ? 'var(--accent)' : 'var(--danger)') : 'var(--muted)';
                 const tTip = (t: TargetMiss | undefined) => t
                   ? `${t.met ? 'meets' : 'misses'} target ${t.higherBetter ? '≥' : '≤'} ${fmtTarget(t.target, t.unit)}`
                   : undefined;
@@ -452,8 +453,10 @@ export default function DashboardView({
                       {phr == null ? '—' : (
                         <>
                           <span className="rbar">
-                            <span className="vpil"><i style={{ height: `${Math.min(100, phr)}%`, background: bandColorVar(band) }} /></span>
-                            <span className={`pill ${band}`} title={tTip(phT)}>{phr.toFixed(0)}%</span>
+                            <span className="vpil"><i style={{ height: `${Math.min(100, phr)}%`, background: tCol(phT) }} /></span>
+                            {phT
+                              ? <span className={`pill ${phT.met ? 'good' : 'bad'}`} title={tTip(phT)}>{phr.toFixed(0)}%</span>
+                              : <span className="rate-plain">{phr.toFixed(0)}%</span>}
                           </span>
                           {m != null && (
                             <div className={`rdel ${m > 0 ? 'up' : m < 0 ? 'down' : 'flat'}`} title={deltaTitle}>
@@ -476,9 +479,9 @@ export default function DashboardView({
                     <td className="num">
                       {r.unsub_rate == null ? '—' : (() => {
                         const unT = tEval('unsub_rate');
-                        const cls = unT ? (unT.met ? 'good' : 'bad')
-                          : r.unsub_rate! >= 20 ? 'good' : r.unsub_rate! >= 10 ? 'warn' : 'bad';
-                        return <span className={`pill ${cls}`} title={tTip(unT)}>{r.unsub_rate!.toFixed(0)}%</span>;
+                        return unT
+                          ? <span className={`pill ${unT.met ? 'good' : 'bad'}`} title={tTip(unT)}>{r.unsub_rate!.toFixed(0)}%</span>
+                          : <span className="rate-plain">{r.unsub_rate!.toFixed(0)}%</span>;
                       })()}
                     </td>
                     <td className="num">{r.avg_los == null ? '—' : `${Math.round(r.avg_los)}d`}</td>
@@ -492,14 +495,15 @@ export default function DashboardView({
                       if (k === 'PosOutreachRate' && v != null && v !== '') {
                         const n = Number(v);
                         const poT = tEval('pos_outreach_rate');
-                        const pb = poT ? (poT.met ? 'good' : 'bad') : rateBand(n, 55, 45);
                         const pd = r.data?.['MoM_PosOutreachRate_pp'];
                         const pdn = typeof pd === 'number' ? pd : null;
                         return (
                           <td key={k} className="num">
                             <span className="rbar">
-                              <span className="vpil"><i style={{ height: `${Math.min(100, n)}%`, background: bandColorVar(pb) }} /></span>
-                              <span className={`pill ${pb}`} title={tTip(poT)}>{n.toFixed(0)}%</span>
+                              <span className="vpil"><i style={{ height: `${Math.min(100, n)}%`, background: tCol(poT) }} /></span>
+                              {poT
+                                ? <span className={`pill ${poT.met ? 'good' : 'bad'}`} title={tTip(poT)}>{n.toFixed(0)}%</span>
+                                : <span className="rate-plain">{n.toFixed(0)}%</span>}
                             </span>
                             {pdn != null && (
                               <div className={`rdel ${pdn > 0 ? 'up' : pdn < 0 ? 'down' : 'flat'}`} title={deltaTitle}>

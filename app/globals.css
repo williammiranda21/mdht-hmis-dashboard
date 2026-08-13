@@ -126,6 +126,9 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
 .vpil{width:6px;height:20px;border-radius:999px;background:var(--track);overflow:hidden;flex:none;display:inline-flex;align-items:flex-end}
 .vpil i{display:block;width:100%;border-radius:999px}
 .rdel{font-size:10.5px;font-weight:600;margin-top:2px;white-space:nowrap}
+/* Untargeted rate — plain text, aligned with the pill's box (no colors:
+   color is reserved for judged-against-a-target values, user directive) */
+.rate-plain{font-size:13px;font-weight:600;padding:2px 8px;font-variant-numeric:tabular-nums;color:var(--text)}
 .rdel.up{color:var(--accent)} .rdel.down{color:var(--danger)} .rdel.flat{color:var(--faint)}
 .pill.good{color:var(--accent);background:var(--accent-light)} .pill.warn{color:var(--warn);background:var(--warn-light)} .pill.bad{color:var(--danger);background:var(--danger-light)}
 
