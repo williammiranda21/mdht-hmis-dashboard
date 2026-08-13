@@ -160,26 +160,30 @@ export default function DashboardView({
   // Totals (rates are recomputed from summed numerators/denominators, not averaged).
   const totals = useMemo(() => {
     let clients = 0, leavers = 0, exitsPh = 0, exitsUnsub = 0;
-    // Rollup conventions: rates = ratio of sums (same as phRate below); Avg
-    // LOS = client-weighted mean. Pos Rate sums SO rows only (the pipeline
-    // emits null for every other type) over raw leavers — the APR
-    // Appendix-A excluded-destination denominator isn't stored per row.
-    // Earned Inc % gets NO total: its denominator (clients with income
-    // data) isn't stored either, and a client-weighted guess would be wrong.
-    let losWt = 0, losClients = 0, posExits = 0, posLeavers = 0, hasPos = false;
+    // Rollup conventions: rates = ratio of sums over PHRateDenom (APR
+    // Appendix-A Row 40 − Row 42 — the exact denominator behind every
+    // per-row rate; rows loaded before the ETL shipped it fall back to raw
+    // leavers). Avg LOS = client-weighted mean. Pos Rate sums SO rows only
+    // (the pipeline emits null for every other type). Earned Inc % gets NO
+    // total: its denominator (clients with income data) isn't stored, and
+    // a client-weighted guess would be wrong.
+    let phDen = 0, losWt = 0, losClients = 0, posExits = 0, posDen = 0, hasPos = false;
     const extraSum: Record<string, number> = {};
     filtered.forEach((r) => {
       clients += r.clients_served || 0;
       leavers += r.leavers || 0;
       exitsPh += r.exits_ph || 0;
       exitsUnsub += r.exits_unsub || 0;
+      const dRaw = r.data?.['PHRateDenom'];
+      const den = typeof dRaw === 'number' ? dRaw : (r.leavers || 0);
+      phDen += den;
       if (r.avg_los != null && r.clients_served) {
         losWt += r.avg_los * r.clients_served; losClients += r.clients_served;
       }
       if (typeof r.data?.['ExitsToPosOutreach'] === 'number') {
         hasPos = true;
         posExits += r.data['ExitsToPosOutreach'] as number;
-        posLeavers += r.leavers || 0;
+        posDen += den;
       }
       for (const c of EXTRA_COLUMNS) {
         if (c.pct) continue;
@@ -189,10 +193,10 @@ export default function DashboardView({
     });
     return {
       clients, leavers, exitsPh, exitsUnsub, extraSum,
-      phRate: leavers ? (exitsPh / leavers) * 100 : null,
-      unsubRate: leavers ? (exitsUnsub / leavers) * 100 : null,
+      phRate: phDen ? (exitsPh / phDen) * 100 : null,
+      unsubRate: phDen ? (exitsUnsub / phDen) * 100 : null,
       avgLos: losClients ? losWt / losClients : null,
-      posRate: hasPos && posLeavers ? (posExits / posLeavers) * 100 : null,
+      posRate: hasPos && posDen ? (posExits / posDen) * 100 : null,
     };
   }, [filtered]);
 
@@ -519,7 +523,7 @@ export default function DashboardView({
                   {extraCols.map((k) => {
                     if (k === 'PosOutreachRate') {
                       return (
-                        <td key={k} className="num" title="SO projects only — positive exits / leavers">
+                        <td key={k} className="num" title="SO projects only — positive exits / APR rate denominator">
                           {totals.posRate == null ? '—' : `${totals.posRate.toFixed(0)}%`}
                         </td>
                       );
