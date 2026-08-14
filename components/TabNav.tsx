@@ -17,6 +17,7 @@ const TABS = [
   { href: '/dashboard/bnl', label: 'By-Name List', icon: 'lock' },
   { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy', adminOnly: true },
   { href: '/dashboard/deep-dive', label: 'Deep Dive', icon: 'search' },
+  { href: '/dashboard/announcements', label: 'Announcements', icon: 'megaphone' },
   { href: '/dashboard/glossary', label: 'Glossary', icon: 'book' },
   { href: '/dashboard/admin', label: 'Users', icon: 'users', adminOnly: true },
   { href: '/dashboard/admin/cohorts', label: 'Cohorts', icon: 'cohort', adminOnly: true },
@@ -83,6 +84,12 @@ const ICONS: Record<string, JSX.Element> = {
     <>
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4a2 2 0 0 0-2-2H6.5A2.5 2.5 0 0 0 4 4.5z" />
       <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
+    </>
+  ),
+  megaphone: (
+    <>
+      <path d="M3 11v3a1 1 0 0 0 1 1h2l3 5a1 1 0 0 0 1.8-.6V5.6A1 1 0 0 0 9 5L6 10H4a1 1 0 0 0-1 1z" />
+      <path d="M14 8a5 5 0 0 1 0 8M17.5 5.5a9 9 0 0 1 0 13" />
     </>
   ),
 };
