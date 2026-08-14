@@ -105,24 +105,26 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <Suspense fallback={<nav className="tabnav" />}>
           <TabNav isAdmin={viewer?.isAdmin ?? false} cohortAccess={cohortAccess} />
         </Suspense>
-        <div className="foot">
-          HMIS Performance Dashboard<br />Data refreshed from HMIS<br />
-          <Link href="/dashboard/announcements" style={{ color: 'inherit' }}>Announcements →</Link>
-        </div>
+        <div className="foot">HMIS Performance Dashboard<br />Data refreshed from HMIS</div>
       </aside>
       <div className="mainc">
         <header className="hdr">
           <div>
             <h1>HMIS Performance Dashboard</h1>
-            <div className="sub">Miami-Dade County · Continuum of Care</div>
+            <div className="sub">
+              Miami-Dade County · Continuum of Care
+              {exportEnd && (
+                <span title="End date of the HMIS export behind every number on this dashboard">
+                  {' · '}Data as of <b style={{ color: 'var(--strong)' }}>{fmtAsOf(exportEnd)}</b>
+                </span>
+              )}
+            </div>
           </div>
           <span className="sp" />
-          {exportEnd && (
-            <span title="End date of the HMIS export behind every number on this dashboard"
-              style={{ fontSize: 12.5, color: 'var(--muted)', whiteSpace: 'nowrap', marginRight: 10 }}>
-              Data as of <b style={{ color: 'var(--strong)' }}>{fmtAsOf(exportEnd)}</b>
-            </span>
-          )}
+          <Link href="/dashboard/announcements" title="Announcements — notices and dashboard updates"
+            style={{ fontSize: 16, textDecoration: 'none', marginRight: 10, lineHeight: 1 }}>
+            📣
+          </Link>
           {viewer && (
             <UserMenu
               label={viewer.displayName || viewer.email || 'Signed in'}
