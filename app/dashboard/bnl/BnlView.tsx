@@ -187,7 +187,7 @@ export default function BnlView({
       ['Housed', c.housed, pop === 'family' ? 'households moved in / exited to PH' : 'moved in / exited to PH', 'var(--accent)'],
       ['Inactive (90d+)', c.inactive, 'no recent contact', 'var(--faint)'],
       ['Chronically homeless', c.chronic, 'HUD definition (approx.)', '#7E22CE'],
-      ['CE assessed', c.active ? `${Math.round((100 * c.assessed) / c.active)}%` : '—', 'of actively homeless', 'var(--secondary)'],
+      ['CE assessed', c.active ? `${((100 * c.assessed) / c.active).toFixed(1)}%` : '—', 'of actively homeless', 'var(--secondary)'],
     ];
   }, [pa, pop]);
 

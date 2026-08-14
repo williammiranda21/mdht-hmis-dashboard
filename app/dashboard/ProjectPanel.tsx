@@ -357,7 +357,7 @@ export default function ProjectPanel({
                     const pct = (100 * v) / losTotal;
                     return (
                       <span key={b.key} style={{ width: `${pct}%`, background: b.color }}
-                        title={`${b.label}: ${v.toLocaleString()} (${pct.toFixed(0)}%)`}>
+                        title={`${b.label}: ${v.toLocaleString()} (${pct.toFixed(1)}%)`}>
                         {pct >= 7 ? `${pct.toFixed(0)}%` : ''}
                       </span>
                     );
@@ -370,7 +370,7 @@ export default function ProjectPanel({
                     return (
                       <span key={b.key}>
                         <i style={{ background: b.color }} />
-                        {b.label}: {v.toLocaleString()} ({((100 * v) / losTotal).toFixed(0)}%)
+                        {b.label}: {v.toLocaleString()} ({((100 * v) / losTotal).toFixed(1)}%)
                       </span>
                     );
                   })}

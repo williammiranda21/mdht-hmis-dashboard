@@ -195,7 +195,7 @@ export default function SpmView({ periods, granularity, period, household, combo
         { n: 'Safe Haven', of: 'SH (8)', v: num('M3_SH') || 0, max: num('M3_Total') || 0 },
       ] },
       (() => { const ft = num('M5_FirstTime') || 0, ne = num('M5_NewEntries') || 0, reE = Math.max(0, ne - ft);
-        return { icon: 'spark', tag: 'M5', title: 'First-time homeless', vlabel: 'No prior 24-mo enrollment', val: num('M5_FirstTime'), avg: avgOf('M5_FirstTime'), prev: prev?.M5_FirstTime, deltaMode: 'pct', lowerBetter: true, gl: 'first-time', gr: ne > 0 ? `<b>${Math.round(ft / ne * 100)}%</b> of ${ne.toLocaleString()} entries` : '—', secTitle: 'Entries into the system', rows: [
+        return { icon: 'spark', tag: 'M5', title: 'First-time homeless', vlabel: 'No prior 24-mo enrollment', val: num('M5_FirstTime'), avg: avgOf('M5_FirstTime'), prev: prev?.M5_FirstTime, deltaMode: 'pct', lowerBetter: true, gl: 'first-time', gr: ne > 0 ? `<b>${(ft / ne * 100).toFixed(1)}%</b> of ${ne.toLocaleString()} entries` : '—', secTitle: 'Entries into the system', rows: [
           { n: 'First-time homeless', of: 'no prior history', v: ft, max: ne },
           { n: 'Re-entering', of: 'returning / inactive', v: reE, max: ne },
         ] } as Card; })(),

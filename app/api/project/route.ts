@@ -187,6 +187,9 @@ export async function GET(req: Request) {
     rows: { metric: string; target: number }[];
     typeRows: { metric: string; target: number }[];
     current: Record<string, number | null>;
+    // metric → period its current value actually comes from, ONLY when that
+    // differs from the selected period (e.g. DQ score under a partial month).
+    asOf?: Record<string, string>;
   } | null = null;
   // Built for BOTH modes since 2026-08-13: the returns drawer shows the
   // return-rate targets (TargetsSection scope='returns'). In returns mode the
@@ -201,13 +204,22 @@ export async function GET(req: Request) {
       proj.project_type == null
         ? Promise.resolve({ data: null })
         : sb.from('type_targets').select('metric, target').eq('project_type', proj.project_type),
-      sb.from('dq_metrics').select('data')
-        .eq('project_id', projectId).eq('granularity', granularity).eq('period', period).maybeSingle(),
+      // DQ lives on ITS OWN period list (complete months only — CLAUDE.md §6),
+      // while the Projects tab includes the partial current month/quarter/FY.
+      // An exact-period lookup therefore returned nothing under any partial
+      // period and the DQ target showed "no data" (user report 2026-08-14).
+      // Fall back to the latest DQ row AT OR BEFORE the selected period; the
+      // period it came from rides along in targets.asOf so the UI can say so.
+      // (Key formats sort lexically within a granularity: 2026-08, FY2026-Q3.)
+      sb.from('dq_metrics').select('period, data')
+        .eq('project_id', projectId).eq('granularity', granularity).lte('period', period)
+        .order('period', { ascending: false }).limit(1).maybeSingle(),
       sb.from('returns_metrics').select('total_ph_exits, returns_lt6mo, returns_2yr')
         .eq('project_id', projectId).eq('granularity', granularity).eq('period', period)
         .eq('household_type', household).eq('subpopulation', subpopulation).maybeSingle(),
     ]);
     const dqd = (dqRes2.data?.data ?? null) as Record<string, unknown> | null;
+    const dqPeriod = (dqRes2.data?.period ?? null) as string | null;
     const ret = retRes2.data as {
       total_ph_exits: number | null; returns_lt6mo: number | null; returns_2yr: number | null;
     } | null;
@@ -235,6 +247,8 @@ export async function GET(req: Request) {
         pos_outreach_rate: num(l2d?.['PosOutreachRate']),
         so_engagement_rate: soC != null && soC > 0 && soE != null ? (soE / soC) * 100 : null,
       },
+      ...(dqd != null && dqPeriod != null && dqPeriod !== period
+        ? { asOf: { dq_score: dqPeriod } } : {}),
     };
   }
 

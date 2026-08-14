@@ -455,8 +455,8 @@ export default function DashboardView({
                           <span className="rbar">
                             <span className="vpil"><i style={{ height: `${Math.min(100, phr)}%`, background: tCol(phT) }} /></span>
                             {phT
-                              ? <span className={`pill ${phT.met ? 'good' : 'bad'}`} title={tTip(phT)}>{phr.toFixed(0)}%</span>
-                              : <span className="rate-plain">{phr.toFixed(0)}%</span>}
+                              ? <span className={`pill ${phT.met ? 'good' : 'bad'}`} title={tTip(phT)}>{phr.toFixed(1)}%</span>
+                              : <span className="rate-plain">{phr.toFixed(1)}%</span>}
                           </span>
                           {m != null && (
                             <div className={`rdel ${m > 0 ? 'up' : m < 0 ? 'down' : 'flat'}`} title={deltaTitle}>
@@ -480,8 +480,8 @@ export default function DashboardView({
                       {r.unsub_rate == null ? '—' : (() => {
                         const unT = tEval('unsub_rate');
                         return unT
-                          ? <span className={`pill ${unT.met ? 'good' : 'bad'}`} title={tTip(unT)}>{r.unsub_rate!.toFixed(0)}%</span>
-                          : <span className="rate-plain">{r.unsub_rate!.toFixed(0)}%</span>;
+                          ? <span className={`pill ${unT.met ? 'good' : 'bad'}`} title={tTip(unT)}>{r.unsub_rate!.toFixed(1)}%</span>
+                          : <span className="rate-plain">{r.unsub_rate!.toFixed(1)}%</span>;
                       })()}
                     </td>
                     <td className="num">{r.avg_los == null ? '—' : `${Math.round(r.avg_los)}d`}</td>
@@ -502,8 +502,8 @@ export default function DashboardView({
                             <span className="rbar">
                               <span className="vpil"><i style={{ height: `${Math.min(100, n)}%`, background: tCol(poT) }} /></span>
                               {poT
-                                ? <span className={`pill ${poT.met ? 'good' : 'bad'}`} title={tTip(poT)}>{n.toFixed(0)}%</span>
-                                : <span className="rate-plain">{n.toFixed(0)}%</span>}
+                                ? <span className={`pill ${poT.met ? 'good' : 'bad'}`} title={tTip(poT)}>{n.toFixed(1)}%</span>
+                                : <span className="rate-plain">{n.toFixed(1)}%</span>}
                             </span>
                             {pdn != null && (
                               <div className={`rdel ${pdn > 0 ? 'up' : pdn < 0 ? 'down' : 'flat'}`} title={deltaTitle}>
@@ -515,7 +515,7 @@ export default function DashboardView({
                       }
                       return (
                         <td key={k} className="num">
-                          {v == null || v === '' ? '—' : c.pct ? `${Number(v).toFixed(0)}%` : fmtInt(Number(v))}
+                          {v == null || v === '' ? '—' : c.pct ? `${Number(v).toFixed(1)}%` : fmtInt(Number(v))}
                         </td>
                       );
                     })}
@@ -534,9 +534,9 @@ export default function DashboardView({
                   <td className="num">{fmtInt(totals.clients)}</td>
                   <td className="num">{fmtInt(totals.leavers)}</td>
                   <td className="num">{fmtInt(totals.exitsPh)}</td>
-                  <td className="num">{totals.phRate == null ? '—' : `${totals.phRate.toFixed(0)}%`}</td>
+                  <td className="num">{totals.phRate == null ? '—' : `${totals.phRate.toFixed(1)}%`}</td>
                   <td className="num">{fmtInt(totals.exitsUnsub)}</td>
-                  <td className="num">{totals.unsubRate == null ? '—' : `${totals.unsubRate.toFixed(0)}%`}</td>
+                  <td className="num">{totals.unsubRate == null ? '—' : `${totals.unsubRate.toFixed(1)}%`}</td>
                   <td className="num" title="Client-weighted average across the listed projects">
                     {totals.avgLos == null ? '—' : `${Math.round(totals.avgLos)}d`}
                   </td>
@@ -544,7 +544,7 @@ export default function DashboardView({
                     if (k === 'PosOutreachRate') {
                       return (
                         <td key={k} className="num" title="SO projects only — positive exits / APR rate denominator">
-                          {totals.posRate == null ? '—' : `${totals.posRate.toFixed(0)}%`}
+                          {totals.posRate == null ? '—' : `${totals.posRate.toFixed(1)}%`}
                         </td>
                       );
                     }

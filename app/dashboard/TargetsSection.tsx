@@ -1,6 +1,7 @@
 'use client';
 
 import { TARGET_METRICS, fmtTarget, metricAppliesTo } from '../../lib/target-metrics';
+import { periodLabel } from '../../lib/format';
 
 /**
  * Targets & progress (Pillar 3-4) — READ-ONLY progress bars against the SAME
@@ -20,6 +21,10 @@ export interface TargetsData {
   rows: { metric: string; target: number }[];      // project overrides
   typeRows: { metric: string; target: number }[];  // type defaults
   current: Record<string, number | null>;
+  /** metric → period its value comes from, when NOT the selected period
+   *  (DQ is measured on complete months, so under a partial month the score
+   *  falls back to the latest complete one and is labelled with it). */
+  asOf?: Record<string, string>;
 }
 
 /** Return-rate targets render on the RETURNS drawer, everything else on the
@@ -84,9 +89,18 @@ export default function TargetsSection({ data, scope = 'performance', projectTyp
               : met
                 ? { txt: '✓ on target', bg: 'var(--accent-light)', fg: 'var(--accent)', tip: gapTxt }
                 : { txt: '⚑ off target', bg: 'var(--warn-light)', fg: 'var(--warn)', tip: gapTxt };
+            const asOf = cur != null ? data.asOf?.[m.key] : undefined;
             return (
               <div key={m.key} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12 }}>
-                <span style={{ minWidth: 150, color: 'var(--muted)' }}>{m.label}</span>
+                <span style={{ minWidth: 150, color: 'var(--muted)' }}>
+                  {m.label}
+                  {asOf && (
+                    <span className="bnl-sub" title={`Measured on complete months — showing ${periodLabel(asOf)}, the latest available.`}
+                      style={{ marginLeft: 6, fontWeight: 400 }}>
+                      ({periodLabel(asOf)})
+                    </span>
+                  )}
+                </span>
                 <span style={{ minWidth: 60, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtTarget(cur, m.unit)}</span>
                 <span style={{ flex: 1, minWidth: 120, height: 7, borderRadius: 4, background: 'var(--border)', overflow: 'hidden' }}>
                   <span style={{ display: 'block', height: '100%', width: `${pct}%`,

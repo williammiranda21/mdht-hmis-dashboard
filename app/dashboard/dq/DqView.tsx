@@ -61,13 +61,16 @@ const TOGGLE_COLS: { k: string; label: string }[] = [
   { k: 'chronic', label: 'Q6d Chronic' },
   { k: 'movein', label: 'Move-In Missing' },
   { k: 'annual', label: 'Annual Income' },
+  { k: 'integrity', label: 'Record Integrity' },
   { k: 'household', label: 'Household checks' },
   { k: 'dates', label: 'Date checks' },
   { k: 'dupes', label: 'Duplicates' },
   { k: 'active', label: 'Active' },
   { k: 'exits', label: 'Exits' },
 ];
-const COLS_LS_KEY = 'dq_visible_cols_v1';
+// v2 (2026-08-14): key bump reveals the new Record Integrity column to
+// browsers that had already persisted a v1 column selection.
+const COLS_LS_KEY = 'dq_visible_cols_v2';
 
 const scoreClass = (v: number | null) => (v == null ? '' : v >= 80 ? 'dq-green' : v >= 60 ? 'dq-amber' : 'dq-red');
 const scoreColor = (v: number) => (v >= 80 ? 'var(--accent)' : v >= 60 ? 'var(--warn)' : 'var(--danger)');
@@ -305,6 +308,8 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
                   title="LOCAL metric (no APR Q6 row) — PH stayers enrolled before the period still missing a valid move-in, plus out-of-range move-in dates">Move-In Missing % {car('DQ_MoveIn_pct')}</th>}
                 {vis('annual') && <th className={th('DQ_Annual_pct', true)} onClick={() => toggleSort('DQ_Annual_pct')}
                   title="APR Q6c row 4 — income at the annual assessment missing/unknown/conflicting, of adult/HoH stayers due one (HoH anniversary ±30d)">Annual Income % {car('DQ_Annual_pct')}</th>}
+                {vis('integrity') && <th className={th('DQ_Integrity_Score', true)} onClick={() => toggleSort('DQ_Integrity_Score')}
+                  title="LOCAL category (no APR Q6 row), included in Overall — Eva-derived checks not counted anywhere else in the score: duplicate enrollments, future-dated exits, entered before born, homelessness start after entry, children-only households. Warnings 75 (entry after creation) and 143 (age >100) are worklist-only by design; household-head and overlapping-stay issues are already scored under Q6b. Unique clients failing any, per period.">Integrity {car('DQ_Integrity_Score')}</th>}
                 {vis('household') && <th title={`Household checks — no/multiple head of household, missing relationship, children-only (clients flagged, by severity)${evaWhen}`}>Household</th>}
                 {vis('dates') && <th title={`Date checks — future exits, exit before entry, future entries, DOB conflicts, move-in outside the stay, homelessness start after entry (clients flagged, by severity)${evaWhen}`}>Dates</th>}
                 {vis('dupes') && <th title={`Duplicate enrollments — same client, project, and entry date (clients flagged)${evaWhen}`}>Duplicates</th>}
@@ -337,6 +342,7 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
                       ? <PctCell pct={d.DQ_MoveIn_pct} thr={10} sub={d.DQ_PHEnrolls ? `${d.DQ_MoveInBad || 0} of ${d.DQ_PHEnrolls} enrolled` : null} />
                       : <td className="num" style={{ color: 'var(--muted)' }}>N/A</td>)}
                     {vis('annual') && <PctCell pct={d.DQ_Annual_pct} thr={20} sub={d.DQ_AnnualDue ? `${d.DQ_AnnualBad || 0} of ${d.DQ_AnnualDue} due` : null} />}
+                    {vis('integrity') && <td className="num"><ScorePill v={d.DQ_Integrity_Score} /></td>}
                     {vis('household') && <td><ChecksCell c={evaCounts?.[r.project_id]?.['Household']} /></td>}
                     {vis('dates') && <td><ChecksCell c={evaCounts?.[r.project_id]?.['Dates']} /></td>}
                     {vis('dupes') && <td><ChecksCell c={evaCounts?.[r.project_id]?.['Duplicates']} /></td>}
