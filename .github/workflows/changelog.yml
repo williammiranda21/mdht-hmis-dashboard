@@ -1,0 +1,42 @@
+# Auto-changelog: every push to main becomes a ✨ "Dashboard update" entry on
+# /dashboard/announcements (Changelog tab). Claude writes the user-facing copy
+# from the commit messages; entries land in history only — the live banner is
+# never touched. Add [skip-changelog] to a commit message to opt a push out.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   ANTHROPIC_API_KEY           — Claude API key
+#   SUPABASE_URL                — https://<ref>.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY   — service role key (writes the announcement)
+name: changelog
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: changelog
+  cancel-in-progress: false
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Generate and publish changelog entry
+        run: node scripts/auto-changelog.mjs
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # announcements.created_by references auth.users — the admin account.
+          CHANGELOG_AUTHOR_ID: eac3022c-4569-403f-90af-183f8cad86a7
+          RANGE_FROM: ${{ github.event.before }}
+          RANGE_TO: ${{ github.sha }}
