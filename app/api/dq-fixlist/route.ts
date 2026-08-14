@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
 import { EVA_BY_ID } from '../../../lib/evaChecks';
+import { DQ_ELEMENTS } from '../../../lib/dq-elements';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,33 +18,9 @@ export const dynamic = 'force-dynamic';
  * missing-% across recent monthly periods, so an agency can see itself improving.
  */
 
-// element → (drill metric, the dq_metrics % key for the trend). Order = display order.
-const ELEMENTS: { key: string; metric: string; pctKey: string }[] = [
-  { key: 'dest', metric: 'dq:dest', pctKey: 'DQ_Dest_pct' },
-  { key: 'movein', metric: 'dq:movein', pctKey: 'DQ_MoveIn_pct' },
-  { key: 'income', metric: 'dq:income', pctKey: 'DQ_IncMiss_pct' },
-  { key: 'incexit', metric: 'dq:incexit', pctKey: 'DQ_IncExit_pct' },
-  { key: 'annual', metric: 'dq:annual', pctKey: 'DQ_Annual_pct' },
-  // Q6b FY2026 elements + Q6d chronic (ETL rebuild 2026-08-13) — rows appear
-  // once the first post-rebuild refresh loads dq:* drills for them.
-  { key: 'veteran', metric: 'dq:veteran', pctKey: 'DQ_Veteran_pct' },
-  { key: 'psd', metric: 'dq:psd', pctKey: 'DQ_PSD_pct' },
-  { key: 'relhoh', metric: 'dq:relhoh', pctKey: 'DQ_RelHoH_pct' },
-  { key: 'coc', metric: 'dq:coc', pctKey: 'DQ_CoC_pct' },
-  { key: 'disabling', metric: 'dq:disabling', pctKey: 'DQ_Disabling_pct' },
-  { key: 'chronic', metric: 'dq:chronic', pctKey: 'DQ_Chronic_pct' },
-  // Left-open enrollment suspects (pipeline/recompute_openstay.py) — a SNAPSHOT
-  // keyed to the latest complete month; no trend % exists for it.
-  { key: 'openstay', metric: 'dq:openstay', pctKey: 'DQ_OpenStay_pct' },
-  // PII (Q6a) — client-level, fix once per client. Deduped to unique clients in
-  // the ETL, so the count here is people-to-fix, while the trend % stays the
-  // APR's per-enrollment rate (same count-vs-% split as income).
-  { key: 'name', metric: 'dq:name', pctKey: 'DQ_Name_pct' },
-  { key: 'ssn', metric: 'dq:ssn', pctKey: 'DQ_SSN_pct' },
-  { key: 'dob', metric: 'dq:dob', pctKey: 'DQ_DOB_pct' },
-  { key: 'race', metric: 'dq:race', pctKey: 'DQ_Race_pct' },
-  { key: 'sex', metric: 'dq:sex', pctKey: 'DQ_Sex_pct' },
-];
+// Element registry (drill metric + trend % key) — shared with the DQ page's
+// overdue computation via lib/dq-elements.ts.
+const ELEMENTS = DQ_ELEMENTS;
 const TREND_MONTHS = 12;
 
 export async function GET(req: Request) {
@@ -114,15 +91,47 @@ export async function GET(req: Request) {
     detail: r.detail ?? null,
   }));
 
+  // ── Timeliness (dq_items ledger + HT due dates, 2026-08-14) ──────────────
+  // openAges: '<metric>|<pid>' → days since the unit first hit a fix-list
+  // capture (pid-level — the ledger tracks clients, not stays). dueDates:
+  // element metric → Homeless Trust campaign due date. Both degrade to empty
+  // when the run-once dq_timeliness.sql hasn't been applied yet.
+  // Open items page past PostgREST's 1000-row cap — one ES project already
+  // carries >1000 open units (observed: project 68 on 2026-08-14).
+  const openItems: { metric: string; pid: string; first_seen: string }[] = [];
+  for (let start = 0; ; start += 1000) {
+    const { data: pageRows } = await sb.from('dq_items')
+      .select('metric, pid, first_seen')
+      .eq('project_id', projectId).eq('status', 'open')
+      .order('metric').order('pid')
+      .range(start, start + 999);
+    openItems.push(...((pageRows ?? []) as typeof openItems));
+    if ((pageRows?.length ?? 0) < 1000) break;
+  }
+  const { data: dueRows } = await sb.from('dq_due_dates')
+    .select('metric, due_date').eq('project_id', projectId);
+  const dueRes = { data: dueRows };
+  const openAges: Record<string, number> = {};
+  const nowMs = Date.now();
+  for (const r of openItems) {
+    openAges[`${r.metric}|${r.pid}`] =
+      Math.max(0, Math.round((nowMs - +new Date(r.first_seen)) / 86400000));
+  }
+  const dueDates: Record<string, string> = Object.fromEntries(
+    ((dueRes.data ?? []) as { metric: string; due_date: string }[])
+      .map((r) => [r.metric, r.due_date]));
+
   // ── CSV export (?format=csv) — a real server download, NOT a browser blob.
   // Blob downloads break under the county's Web Isolation (its scanning proxy
   // 500s them); a plain GET with Content-Disposition survives it.
   if (sp.get('format') === 'csv') {
-    const lines = ['error,client_id,enrollment_id,entry_date'];
+    const lines = ['error,client_id,enrollment_id,entry_date,days_open'];
     const noDetail = (id: string): DetailRow => ({ pid: id, entry: null, eid: null });
+    const age = (metric: string, pid: string) => openAges[`${metric}|${pid}`] ?? '';
     for (const c of categories) {
+      const metric = ELEMENTS.find((e) => e.key === c.key)?.metric ?? `dq:${c.key}`;
       const rows = c.detail ?? c.ids.map(noDetail);
-      for (const d of rows) lines.push(`${c.key},${d.pid},${d.eid ?? ''},${d.entry ?? ''}`);
+      for (const d of rows) lines.push(`${c.key},${d.pid},${d.eid ?? ''},${d.entry ?? ''},${age(metric, d.pid)}`);
     }
     for (const f of eva) {
       // readable error key ('overlapping_stays', 'duplicate_enrollment', …) —
@@ -130,7 +139,7 @@ export async function GET(req: Request) {
       // check ids keep the eva_<id> fallback.
       const slug = EVA_BY_ID.get(f.id)?.slug ?? `eva_${f.id}`;
       const rows = f.detail ?? f.ids.map(noDetail);
-      for (const d of rows) lines.push(`${slug},${d.pid},${d.eid ?? ''},${d.entry ?? ''}`);
+      for (const d of rows) lines.push(`${slug},${d.pid},${d.eid ?? ''},${d.entry ?? ''},${age(`eva:${f.id}`, d.pid)}`);
     }
     return new NextResponse(lines.join('\r\n'), {
       headers: {
@@ -141,5 +150,8 @@ export async function GET(req: Request) {
     });
   }
 
-  return NextResponse.json({ project_id: projectId, period, categories, eva, evaPeriod });
+  return NextResponse.json({
+    project_id: projectId, period, categories, eva, evaPeriod,
+    openAges, dueDates, canSetDue: viewer.isAdmin,
+  });
 }

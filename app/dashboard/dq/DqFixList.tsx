@@ -85,6 +85,117 @@ interface Category {
   trend: { period: string; pct: number | null }[];
 }
 
+/** Due-date chip + admin editor for one category (project + element).
+ *  Campaign-level (Homeless Trust sets it; agencies see it). Overdue = past
+ *  due with records still on the list. */
+function DueControl({ metric, due, remaining, canSet, onSet }: {
+  metric: string; due: string | null; remaining: number; canSet: boolean;
+  onSet: (metric: string, due: string | null) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(due ?? '');
+  const [busy, setBusy] = useState(false);
+  if (!due && !canSet) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const overdue = !!due && remaining > 0 && due! < today;
+  const commit = async (d: string | null) => {
+    setBusy(true);
+    try { await onSet(metric, d); setEditing(false); } finally { setBusy(false); }
+  };
+  if (editing) {
+    return (
+      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 8 }}>
+        <input type="date" className="finput" style={{ padding: '2px 6px', fontSize: 12 }}
+          value={val} onChange={(e) => setVal(e.target.value)} disabled={busy} />
+        <button className="btn" style={{ padding: '2px 8px', fontSize: 11 }} disabled={busy || !val}
+          onClick={() => commit(val)}>Set</button>
+        {due && <button className="btn" style={{ padding: '2px 8px', fontSize: 11 }} disabled={busy}
+          onClick={() => commit(null)}>Clear</button>}
+        <button className="btn" style={{ padding: '2px 8px', fontSize: 11 }} disabled={busy}
+          onClick={() => setEditing(false)}>✕</button>
+      </span>
+    );
+  }
+  const col = overdue ? 'var(--danger)' : 'var(--muted)';
+  return (
+    <span
+      role={canSet ? 'button' : undefined}
+      title={canSet ? 'Homeless Trust due date — click to change' : 'Homeless Trust due date'}
+      onClick={canSet ? () => { setVal(due ?? ''); setEditing(true); } : undefined}
+      style={{
+        marginLeft: 8, fontSize: 11, fontWeight: 700, color: col,
+        border: `1px solid ${col}`, borderRadius: 999, padding: '1px 8px',
+        cursor: canSet ? 'pointer' : 'default', whiteSpace: 'nowrap',
+      }}>
+      {due ? `${overdue ? '⚑ overdue — was ' : 'due '}${due}` : '+ due date'}
+    </span>
+  );
+}
+
+interface Comment {
+  id: number; metric: string; author: string; author_name: string;
+  is_admin: boolean; body: string; created_at: string;
+}
+
+/** Record-anchored notes for one category (project + element) — the
+ *  agency ↔ Homeless Trust loop ("re-entered the source record" / "confirmed,
+ *  watching Friday's refresh"). Anchored and auditable, not a DM system. */
+function Thread({ metric, comments, viewerId, onPost, onDelete }: {
+  metric: string; comments: Comment[]; viewerId: string | null;
+  onPost: (metric: string, body: string) => Promise<boolean>;
+  onDelete: (id: number) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState('');
+  const [busy, setBusy] = useState(false);
+  const post = async () => {
+    if (!val.trim() || busy) return;
+    setBusy(true);
+    try { if (await onPost(metric, val.trim())) setVal(''); } finally { setBusy(false); }
+  };
+  return (
+    <div style={{ display: 'inline-block', marginLeft: 8 }}>
+      <button className="btn dqfx-copy" style={{ marginTop: 0 }} onClick={() => setOpen((o) => !o)}>
+        💬 Notes{comments.length ? ` (${comments.length})` : ''}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, display: 'grid', gap: 8, maxWidth: 640 }}>
+          {comments.map((c) => (
+            <div key={c.id} style={{ fontSize: 13, lineHeight: 1.45 }}>
+              <span style={{ fontWeight: 600 }}>{c.author_name}</span>
+              {c.is_admin && (
+                <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: 'var(--accent)',
+                  border: '1px solid var(--accent)', borderRadius: 999, padding: '0 6px' }}>
+                  Homeless Trust
+                </span>
+              )}
+              <span className="bnl-sub" style={{ marginLeft: 6 }}>
+                {new Date(c.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+              </span>
+              {viewerId === c.author && (
+                <button className="bnl-sub" title="Delete this note"
+                  style={{ marginLeft: 6, background: 'none', border: 'none', cursor: 'pointer' }}
+                  onClick={() => onDelete(c.id)}>✕</button>
+              )}
+              <div>{c.body}</div>
+            </div>
+          ))}
+          {comments.length === 0 && (
+            <div className="bnl-sub">No notes yet — leave one for this category.</div>
+          )}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input className="finput" style={{ flex: 1, fontSize: 13 }} maxLength={2000}
+              placeholder="Add a note — what was fixed, what's blocking…"
+              value={val} onChange={(e) => setVal(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && post()} disabled={busy} />
+            <button className="btn" onClick={post} disabled={busy || !val.trim()}>Post</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Missing-% over time. Lower is better, so a falling line is good — colored green
  *  when the latest point is at/under the previous, amber/red when rising. */
 function TrendSpark({ trend }: { trend: { period: string; pct: number | null }[] }) {
@@ -117,6 +228,14 @@ export default function DqFixList({
   const [eva, setEva] = useState<EvaFinding[]>([]);
   const [evaPeriod, setEvaPeriod] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Timeliness (dq_items ledger): '<metric>|<pid>' → days open; due dates per
+  // element metric; canSetDue = the viewer is a Homeless Trust admin.
+  const [openAges, setOpenAges] = useState<Record<string, number>>({});
+  const [dueDates, setDueDates] = useState<Record<string, string>>({});
+  const [canSetDue, setCanSetDue] = useState(false);
+  // Record-anchored notes (dq_comments) — one thread per category.
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [viewerId, setViewerId] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -128,10 +247,56 @@ export default function DqFixList({
         setCats(j.categories as Category[]);
         setEva((j.eva ?? []) as EvaFinding[]);
         setEvaPeriod(j.evaPeriod ?? null);
+        setOpenAges((j.openAges ?? {}) as Record<string, number>);
+        setDueDates((j.dueDates ?? {}) as Record<string, string>);
+        setCanSetDue(!!j.canSetDue);
       })
       .catch(() => { if (live) setErr('Could not load the fix-list.'); });
+    fetch(`/api/comments?project=${projectId}`)
+      .then((r) => (r.ok ? r.json() : { comments: [], viewerId: null }))
+      .then((j) => {
+        if (!live) return;
+        setComments((j.comments ?? []) as Comment[]);
+        setViewerId((j.viewerId ?? null) as string | null);
+      })
+      .catch(() => { /* threads are additive — the fix-list still renders */ });
     return () => { live = false; };
   }, [projectId, period]);
+
+  const postComment = async (metric: string, body: string): Promise<boolean> => {
+    const r = await fetch('/api/comments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: projectId, metric, body }),
+    });
+    if (!r.ok) return false;
+    const j = await r.json();
+    setComments((c) => [...c, j.comment as Comment]);
+    return true;
+  };
+  const deleteComment = async (id: number) => {
+    const r = await fetch(`/api/comments?id=${id}`, { method: 'DELETE' });
+    if (r.ok) setComments((c) => c.filter((x) => x.id !== id));
+  };
+  const threadFor = (metric: string) => comments.filter((c) => c.metric === metric);
+
+  const setDue = async (metric: string, due: string | null) => {
+    const r = await fetch('/api/dq-due', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: projectId, metric, due }),
+    });
+    if (r.ok) {
+      setDueDates((d) => {
+        const n = { ...d };
+        if (due == null) delete n[metric]; else n[metric] = due;
+        return n;
+      });
+    }
+  };
+  // Chip meta line: entry date + how long the unit has been on the list.
+  const chipSuffix = (metric: string, pid: string, entry: string | null) => {
+    const a = openAges[`${metric}|${pid}`];
+    return [entry, a != null ? `${a}d open` : null].filter(Boolean).join(' · ') || null;
+  };
 
   const byKey = useMemo(
     () => new Map((cats ?? []).map((c) => [c.key, c])), [cats],
@@ -199,13 +364,16 @@ export default function DqFixList({
                     <div>
                       <span className="dqfx-count">{rowCount(cat)}</span>
                       <b>{e.label}</b>
+                      <DueControl metric={`dq:${e.key}`} due={dueDates[`dq:${e.key}`] ?? null}
+                        remaining={rowCount(cat)} canSet={canSetDue} onSet={setDue} />
                     </div>
                     <TrendSpark trend={cat!.trend} />
                   </div>
                   <div className="dqfx-fix">→ {e.fix}</div>
                   <div className="dr-ids">
                     {(cat!.detail ?? cat!.ids.map((id) => ({ pid: id, entry: null }))).map((d, i) => (
-                      <CopyId key={`${d.pid}-${i}`} pid={d.pid} suffix={d.entry} />
+                      <CopyId key={`${d.pid}-${i}`} pid={d.pid}
+                        suffix={chipSuffix(`dq:${e.key}`, d.pid, d.entry)} />
                     ))}
                   </div>
                   <button className="btn dqfx-copy" onClick={(ev) => {
@@ -213,6 +381,8 @@ export default function DqFixList({
                     const el = ev.currentTarget; el.textContent = 'Copied ✓';
                     setTimeout(() => { el.textContent = '⧉ Copy these IDs'; }, 1200);
                   }}>⧉ Copy these IDs</button>
+                  <Thread metric={`dq:${e.key}`} comments={threadFor(`dq:${e.key}`)}
+                    viewerId={viewerId} onPost={postComment} onDelete={deleteComment} />
                 </div>
               ))}
 
@@ -239,6 +409,8 @@ export default function DqFixList({
                               marginLeft: 8, fontSize: 11, fontWeight: 700, color: sevColor,
                               border: `1px solid ${sevColor}`, borderRadius: 999, padding: '1px 8px',
                             }}>{sev.label}</span>
+                            <DueControl metric={`eva:${f.id}`} due={dueDates[`eva:${f.id}`] ?? null}
+                              remaining={f.ids.length} canSet={canSetDue} onSet={setDue} />
                           </div>
                         </div>
                         <div className="bnl-sub" style={{ marginTop: 4 }}>{check.meaning}</div>
@@ -246,7 +418,8 @@ export default function DqFixList({
                         <div className="bnl-sub" style={{ marginTop: 2 }}>Affects: {check.breaks}</div>
                         <div className="dr-ids">
                           {(f.detail ?? f.ids.map((id) => ({ pid: id, entry: null }))).map((d, i) => (
-                            <CopyId key={`${d.pid}-${i}`} pid={d.pid} suffix={d.entry} />
+                            <CopyId key={`${d.pid}-${i}`} pid={d.pid}
+                              suffix={chipSuffix(`eva:${f.id}`, d.pid, d.entry)} />
                           ))}
                         </div>
                         <button className="btn dqfx-copy" onClick={(ev) => {
@@ -254,6 +427,8 @@ export default function DqFixList({
                           const el = ev.currentTarget; el.textContent = 'Copied ✓';
                           setTimeout(() => { el.textContent = '⧉ Copy these IDs'; }, 1200);
                         }}>⧉ Copy these IDs</button>
+                        <Thread metric={`eva:${f.id}`} comments={threadFor(`eva:${f.id}`)}
+                          viewerId={viewerId} onPost={postComment} onDelete={deleteComment} />
                       </div>
                     );
                   })}

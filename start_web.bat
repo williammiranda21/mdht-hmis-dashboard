@@ -41,13 +41,15 @@ if not exist node_modules (
 echo.
 echo Starting the dev server. When you see "Ready", open:
 echo.
-echo     http://localhost:3000
+echo     http://localhost:3011
 echo.
 echo A browser tab will open automatically in 8 seconds.
 echo Keep THIS window open - closing it stops the server. Ctrl+C to stop.
 echo.
-start "" cmd /c "timeout /t 8 >nul & start http://localhost:3000"
-call npm run dev
+REM Port 3011 = the demo port (see CLAUDE.md). Only ONE dev server may run on
+REM this folder at a time - two corrupt .next and kill page interactivity.
+start "" cmd /c "timeout /t 8 >nul & start http://localhost:3011"
+call npm run dev -- -p 3011
 
 echo.
 echo Server stopped.

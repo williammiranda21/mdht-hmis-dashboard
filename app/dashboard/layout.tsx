@@ -3,6 +3,7 @@ import Link from 'next/link';
 import ThemeToggle from '../../components/ThemeToggle';
 import TabNav from '../../components/TabNav';
 import UserMenu from '../../components/UserMenu';
+import AnnouncementBar, { type Announcement } from '../../components/AnnouncementBar';
 import { getViewer, supabaseServer } from '../../lib/supabase-server';
 
 /** '2026-08-10' → '8/10/2026' without a Date parse (timezone-safe). */
@@ -21,16 +22,25 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // (cohort_access RLS lets a user read only their own rows; a missing table
   // — cohort_tasks.sql not run — just returns an error → false).
   let cohortAccess = false;
+  // Active admin broadcast (announcements table; comments.sql not run → null).
+  let announcement: Announcement | null = null;
   if (viewer?.isApproved) {
     const sb = supabaseServer();
-    const [metaRes, accessRes] = await Promise.all([
+    const today = new Date().toISOString().slice(0, 10);
+    const [metaRes, accessRes, annRes] = await Promise.all([
       sb.from('meta').select('value').eq('key', 'export_end').maybeSingle(),
       viewer.isAdmin
         ? Promise.resolve({ data: null })
         : sb.from('cohort_access').select('cohort_id').limit(1),
+      sb.from('announcements')
+        .select('id, body, details, kind, created_at, expires_on')
+        .or(`expires_on.is.null,expires_on.gte.${today}`)
+        .order('created_at', { ascending: false })
+        .limit(1).maybeSingle(),
     ]);
     exportEnd = (metaRes.data?.value as string | null) ?? null;
     cohortAccess = ((accessRes.data as unknown[] | null)?.length ?? 0) > 0;
+    announcement = (annRes && 'data' in annRes ? annRes.data : null) as Announcement | null;
   }
 
   // Signed in but not approved yet (or switched off): show the status screen
@@ -95,7 +105,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <Suspense fallback={<nav className="tabnav" />}>
           <TabNav isAdmin={viewer?.isAdmin ?? false} cohortAccess={cohortAccess} />
         </Suspense>
-        <div className="foot">HMIS Performance Dashboard<br />Data refreshed from HMIS</div>
+        <div className="foot">
+          HMIS Performance Dashboard<br />Data refreshed from HMIS<br />
+          <Link href="/dashboard/announcements" style={{ color: 'inherit' }}>Announcements →</Link>
+        </div>
       </aside>
       <div className="mainc">
         <header className="hdr">
@@ -118,7 +131,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
           )}
           <ThemeToggle />
         </header>
-        <div className="wrap">{children}</div>
+        <div className="wrap">
+          <AnnouncementBar initial={announcement} isAdmin={viewer?.isAdmin ?? false} />
+          {children}
+        </div>
       </div>
     </div>
   );

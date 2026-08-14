@@ -31,6 +31,9 @@ type Props = {
   /** Month the check columns describe — equals `period` on monthly views;
    *  quarterly/fiscal fall back to the latest complete month. */
   evaPeriod?: string;
+  /** project_id → metrics past their Homeless Trust due date with records
+   *  still on the list (computed server-side in page.tsx). */
+  overdue?: Record<number, string[]>;
 };
 
 /** Compact severity chips (high-priority / error / warning) for one category. */
@@ -62,6 +65,7 @@ const TOGGLE_COLS: { k: string; label: string }[] = [
   { k: 'movein', label: 'Move-In Missing' },
   { k: 'annual', label: 'Annual Income' },
   { k: 'integrity', label: 'Record Integrity' },
+  { k: 'fixtime', label: 'Fix timeliness' },
   { k: 'household', label: 'Household checks' },
   { k: 'dates', label: 'Date checks' },
   { k: 'dupes', label: 'Duplicates' },
@@ -100,7 +104,7 @@ function PctCell({ pct, thr, sub }: { pct: number | null; thr: number; sub?: str
 
 type SortKey = 'name' | 'type_name' | string;
 
-export default function DqView({ periods, granularity, period, rows, evaCounts, evaPeriod, focusProject = null }: Props) {
+export default function DqView({ periods, granularity, period, rows, evaCounts, evaPeriod, focusProject = null, overdue = {} }: Props) {
   // Check-column tooltips carry the fallback month on non-monthly views.
   const evaWhen = granularity === 'monthly' ? '' : ` · shown for ${evaPeriod ?? 'the latest complete month'} (checks are monthly)`;
   const router = useRouter();
@@ -310,6 +314,8 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
                   title="APR Q6c row 4 — income at the annual assessment missing/unknown/conflicting, of adult/HoH stayers due one (HoH anniversary ±30d)">Annual Income % {car('DQ_Annual_pct')}</th>}
                 {vis('integrity') && <th className={th('DQ_Integrity_Score', true)} onClick={() => toggleSort('DQ_Integrity_Score')}
                   title="LOCAL category (no APR Q6 row), included in Overall — Eva-derived checks not counted anywhere else in the score: duplicate enrollments, future-dated exits, entered before born, homelessness start after entry, children-only households. Warnings 75 (entry after creation) and 143 (age >100) are worklist-only by design; household-head and overlapping-stay issues are already scored under Q6b. Unique clients failing any, per period.">Integrity {car('DQ_Integrity_Score')}</th>}
+                {vis('fixtime') && <th className={th('DQ_FixMedian', true)} onClick={() => toggleSort('DQ_FixMedian')}
+                  title="Provider responsiveness — median days from an error appearing on the fix-list to the record's actual DateUpdated clean date (last 180 days of fixes). Sub-line: fixes counted · units open 30+ days.">Fix time {car('DQ_FixMedian')}</th>}
                 {vis('household') && <th title={`Household checks — no/multiple head of household, missing relationship, children-only (clients flagged, by severity)${evaWhen}`}>Household</th>}
                 {vis('dates') && <th title={`Date checks — future exits, exit before entry, future entries, DOB conflicts, move-in outside the stay, homelessness start after entry (clients flagged, by severity)${evaWhen}`}>Dates</th>}
                 {vis('dupes') && <th title={`Duplicate enrollments — same client, project, and entry date (clients flagged)${evaWhen}`}>Duplicates</th>}
@@ -331,6 +337,12 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
                             onClick={() => setFixRow(r)}
                             onKeyDown={(e) => e.key === 'Enter' && setFixRow(r)}>{r.name}</span>
                         : <span className="nm">{r.name}</span>}
+                      {(overdue[r.project_id]?.length ?? 0) > 0 && (
+                        <span style={{ marginLeft: 6, color: 'var(--danger)', fontWeight: 700, fontSize: 12 }}
+                          title={`Past a Homeless Trust due date with records still to fix: ${overdue[r.project_id].join(', ')}`}>
+                          ⚑
+                        </span>
+                      )}
                     </td>
                     <td><span className="ty">{r.type_name}</span></td>
                     <td className="num"><Gauge score={d.DQ_Score} /></td>
@@ -343,6 +355,13 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
                       : <td className="num" style={{ color: 'var(--muted)' }}>N/A</td>)}
                     {vis('annual') && <PctCell pct={d.DQ_Annual_pct} thr={20} sub={d.DQ_AnnualDue ? `${d.DQ_AnnualBad || 0} of ${d.DQ_AnnualDue} due` : null} />}
                     {vis('integrity') && <td className="num"><ScorePill v={d.DQ_Integrity_Score} /></td>}
+                    {vis('fixtime') && (
+                      <td className="num">
+                        {d.DQ_FixMedian == null
+                          ? <span style={{ color: 'var(--muted)' }}>{(d.DQ_FixN ?? 0) === 0 ? '—' : 'N/A'}</span>
+                          : <>{d.DQ_FixMedian}d<div className="dqsub">{d.DQ_FixN ?? 0} fixed{(d.DQ_Open30 ?? 0) > 0 ? ` · ${d.DQ_Open30} open 30d+` : ''}</div></>}
+                      </td>
+                    )}
                     {vis('household') && <td><ChecksCell c={evaCounts?.[r.project_id]?.['Household']} /></td>}
                     {vis('dates') && <td><ChecksCell c={evaCounts?.[r.project_id]?.['Dates']} /></td>}
                     {vis('dupes') && <td><ChecksCell c={evaCounts?.[r.project_id]?.['Duplicates']} /></td>}
