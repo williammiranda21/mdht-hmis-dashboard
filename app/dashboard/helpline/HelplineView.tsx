@@ -412,6 +412,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
         </table></div>
       </div>
 
+      <Reporting cases={cases} teams={teams} />
+
       {isAdmin && <TeamZones teams={teams} busy={busy} onSave={(id, zones, factors) =>
         run(async () => db().from('outreach_teams').update({ zones, factors }).eq('id', id))} />}
     </>
@@ -435,6 +437,107 @@ function FragmentRow({ left, children }: { left: React.ReactNode; children: Reac
         </tr>
       ) : null}
     </>
+  );
+}
+
+/** Median of a numeric list; null when empty. */
+function median(xs: number[]): number | null {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+/**
+ * Per-team performance table (user ask 2026-08-19): assigned / open /
+ * confirmed / verified-enrolled / no-locate / declined, plus median hours
+ * from call to assignment. Computed from the loaded cases (newest 500) —
+ * when volume outgrows that, this moves server-side; the columns won't change.
+ */
+function Reporting({ cases, teams }: { cases: HlCase[]; teams: Team[] }) {
+  const rows = useMemo(() => {
+    const byTeam = new Map<number | null, HlCase[]>();
+    for (const c of cases) {
+      const k = c.team_id ?? null;
+      byTeam.set(k, [...(byTeam.get(k) ?? []), c]);
+    }
+    const mk = (label: string, list: HlCase[]) => {
+      const assignHrs = list
+        .filter((c) => c.assigned_at)
+        .map((c) => (new Date(c.assigned_at!).getTime() - new Date(c.created_at).getTime()) / 3_600_000)
+        .filter((h) => h >= 0);
+      return {
+        label,
+        total: list.length,
+        open: list.filter((c) => OPEN_STATUSES.includes(c.status)).length,
+        confirmed: list.filter((c) => c.status === 'confirmed').length,
+        enrolled: list.filter((c) => c.verified_entry).length,
+        noLocate: list.filter((c) => c.status === 'no_locate').length,
+        declined: list.filter((c) => c.status === 'declined').length,
+        medAssign: median(assignHrs),
+      };
+    };
+    const out = teams
+      .map((t) => mk(t.name, byTeam.get(t.id) ?? []))
+      .filter((r) => r.total > 0)
+      .sort((a, b) => b.total - a.total);
+    const unassigned = byTeam.get(null) ?? [];
+    if (unassigned.length) out.push(mk('(never assigned)', unassigned));
+    out.push({ ...mk('All teams', cases), label: 'All teams' });
+    return out;
+  }, [cases, teams]);
+
+  function downloadCsv() {
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const head = ['team', 'cases', 'open_now', 'confirmed_homeless', 'verified_enrolled',
+      'no_locate', 'declined', 'median_hours_to_assignment'];
+    const body = rows.map((r) => [r.label, r.total, r.open, r.confirmed, r.enrolled,
+      r.noLocate, r.declined, r.medAssign == null ? '' : r.medAssign.toFixed(1)].map(esc).join(','));
+    const blob = new Blob([[head.join(','), ...body].join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `helpline_teams_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  return (
+    <div className="panel" style={{ marginTop: 18 }}>
+      <div className="panel-h">
+        <div>
+          <h3>Team reporting</h3>
+          <div className="meta">Latest {fmtInt(cases.length)} cases · confirmed → enrolled is the
+            promise; median call→assignment is the dispatch speed</div>
+        </div>
+        <button className="tbtn" onClick={downloadCsv}>⬇ CSV</button>
+      </div>
+      <div className="scroll"><table className="bnl-table">
+        <thead><tr>
+          <th>Team</th><th className="num">Cases</th><th className="num">Open now</th>
+          <th className="num">Confirmed</th><th className="num">Enrolled ✓</th>
+          <th className="num">No-locate</th><th className="num">Declined</th>
+          <th className="num">Call → assigned</th>
+        </tr></thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label} style={{ cursor: 'default',
+              ...(r.label === 'All teams' ? { fontWeight: 700 } : {}) }}>
+              <td className={r.label === 'All teams' ? 'bnl-nm' : undefined}>{r.label}</td>
+              <td className="num">{fmtInt(r.total)}</td>
+              <td className="num">{r.open ? fmtInt(r.open) : <span className="bnl-sub">—</span>}</td>
+              <td className="num">{r.confirmed ? fmtInt(r.confirmed) : <span className="bnl-sub">—</span>}</td>
+              <td className="num" style={r.enrolled ? { color: 'var(--accent)', fontWeight: 700 } : undefined}>
+                {r.enrolled ? fmtInt(r.enrolled) : <span className="bnl-sub">—</span>}</td>
+              <td className="num">{r.noLocate ? fmtInt(r.noLocate) : <span className="bnl-sub">—</span>}</td>
+              <td className="num">{r.declined ? fmtInt(r.declined) : <span className="bnl-sub">—</span>}</td>
+              <td className="num">{r.medAssign == null ? <span className="bnl-sub">—</span>
+                : r.medAssign < 1 ? `${Math.round(r.medAssign * 60)}m`
+                : `${r.medAssign.toFixed(1)}h`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table></div>
+    </div>
   );
 }
 
