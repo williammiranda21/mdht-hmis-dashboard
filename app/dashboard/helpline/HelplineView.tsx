@@ -42,6 +42,8 @@ export interface HlCase {
 export interface Team {
   id: number; name: string; project_id: number | null;
   zones: string[]; factors: string[]; active: boolean;
+  /** named workers + dispatch contact (City district sub-teams carry these) */
+  members?: string | null; dispatch?: string | null;
 }
 interface Candidate {
   pid: string; name: string; dob: string | null; score: number; why: string[];
@@ -374,7 +376,9 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
           <div key={team.id} style={{ padding: '0 12px 8px' }}>
             <div style={{ fontWeight: 700, color: 'var(--strong)', padding: '8px 6px 4px', fontSize: 13.5 }}>
               {team.name} <span className="bnl-sub">· {fmtInt(openByTeam.get(team.id) ?? 0)} open
-              {team.zones.length ? ` · covers ${team.zones.join(', ')}` : ' · no zones set'}</span>
+              {team.zones.length ? ` · covers ${team.zones.join(', ')}` : ' · no zones set'}
+              {team.members ? ` · ${team.members}` : ''}
+              {team.dispatch ? ` · dispatch: ${team.dispatch}` : ''}</span>
             </div>
             <div className="scroll"><table className="bnl-table">
               <thead><tr><th>Case</th><th>Status</th><th>Outreach trail</th>

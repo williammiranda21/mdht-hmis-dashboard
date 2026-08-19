@@ -188,6 +188,13 @@ export default function CallIntakeForm({ me }: { me: string }) {
           <option value="">Choose the area…</option>
           {AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
         </select>
+        <div className="bnl-sub" style={{ marginTop: 4 }}>
+          Inside the City of Miami, pick the Commission District (city teams route by district).{' '}
+          <a href="https://www.miami.gov/My-Government/City-Officials/Find-My-Commissioner-District-Map"
+            target="_blank" rel="noreferrer" style={{ color: 'var(--secondary)' }}>
+            Unsure? City district lookup →</a>{' '}
+          Miami Shores / North Miami / North Miami Beach / Aventura route by municipality, never district.
+        </div>
 
         <L>Address or intersection — as exact as they can give</L>
         <div style={{ display: 'flex', gap: 8 }}>

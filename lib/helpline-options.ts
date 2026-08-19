@@ -9,6 +9,12 @@
  *  Municipalities + the Miami neighborhoods outreach actually dispatches by.
  *  Additions are safe; renames strand old rows — migrate when renaming. */
 export const AREAS = [
+  // City of Miami Commission Districts — the City's outreach sub-teams route
+  // by these (per the district assignment doc). Until polygon lookup lands,
+  // the operator verifies via the City's Find-My-District map (linked on the
+  // intake form). Outside-city areas route by municipality, never district.
+  'Miami District 1', 'Miami District 2', 'Miami District 3',
+  'Miami District 4', 'Miami District 5', 'Government Center',
   'Downtown Miami', 'Overtown', 'Little Havana', 'Little Haiti', 'Wynwood',
   'Allapattah', 'Brickell', 'Coconut Grove', 'Liberty City', 'Brownsville',
   'Miami Beach', 'North Miami', 'North Miami Beach', 'Miami Gardens',

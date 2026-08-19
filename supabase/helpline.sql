@@ -64,6 +64,30 @@ select v.name, v.pid from (values
 ) as v(pid, name)
 where not exists (select 1 from outreach_teams t where t.project_id = v.pid);
 
+-- ── City of Miami district sub-teams (2026-08-19, from the City's district-
+-- based outreach assignment document). One provider, six numbered teams, each
+-- owning a Commission District ("District 5 & Government Center" overlaps
+-- Team 8 on purpose — the suggestion engine load-balances multiple hits).
+-- Outside-city areas the City serves (Miami Shores, North Miami, North Miami
+-- Beach, Aventura) route by MUNICIPALITY, never by district (per the doc);
+-- their teams are TBD in the doc, so they are not seeded.
+-- project_id is NULL until the user confirms which HMIS project these teams
+-- enroll under (MHAP CE Consolidation vs City of Miami MOA).
+alter table outreach_teams add column if not exists members  text;
+alter table outreach_teams add column if not exists dispatch text;
+
+insert into outreach_teams (name, zones, members)
+select v.name, v.zones, v.members from (values
+  ('City of Miami — Team 4 (District 1)', array['Miami District 1'], 'Laura Martinez & Willie Rachel'),
+  ('City of Miami — Team 5 (District 2)', array['Miami District 2'], 'Christian Candelier & Latrayveia Offord'),
+  ('City of Miami — Team 6 (District 3)', array['Miami District 3'], 'Lizeth Santana & Calvin Leno'),
+  ('City of Miami — Team 7 (District 4)', array['Miami District 4'], 'Giancarlo Venturini & Damara Logan'),
+  ('City of Miami — Team 8 (District 5)', array['Miami District 5'], 'Ricky Leath & Christopher Hall'),
+  ('City of Miami — Team 9 (District 5 & Government Center)',
+     array['Miami District 5','Government Center'], 'Pedro Rodriguez & Irisi Williamson')
+) as v(name, zones, members)
+where not exists (select 1 from outreach_teams t where t.name = v.name);
+
 -- ── Cases (PII — caller names, phones, locations) ─────────────────────────────
 create table if not exists helpline_cases (
   id             bigint generated always as identity primary key,
