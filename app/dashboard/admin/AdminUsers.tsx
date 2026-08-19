@@ -17,6 +17,9 @@ export interface AdminProfile {
   bnlAccess: boolean;
   status: 'pending' | 'approved' | 'disabled';
   createdAt: string;
+  /** auth.users.last_sign_in_at — stamped on fresh sign-ins only (a session
+   *  kept alive by token refresh does NOT update it). Floor, not "last seen". */
+  lastSignInAt: string | null;
   projectIds: number[];
 }
 export interface ProjectOption { id: number; name: string; type: string }
@@ -107,6 +110,21 @@ export default function AdminUsers({
       : s === 'pending' ? <span className="pill warn">pending</span>
       : <span className="pill bad">disabled</span>;
 
+  // Idle accounts jump out (the user reviews this list to reclaim seats):
+  // recent = plain text · 14d+ idle = warn pill · never signed in = bad pill.
+  function lastSignInCell(r: AdminProfile) {
+    if (!r.lastSignInAt) {
+      return <span className="pill bad" title="Has never signed in">never</span>;
+    }
+    const d = new Date(r.lastSignInAt);
+    const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+    const label = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days}d ago`;
+    const title = `Last sign-in ${d.toLocaleString()} — sessions kept alive by token refresh don't update this`;
+    return days >= 14
+      ? <span className="pill warn" title={title}>{label}</span>
+      : <span title={title}>{label}</span>;
+  }
+
   function Row({ r }: { r: AdminProfile }) {
     const isMe = r.id === me;
     return (
@@ -119,6 +137,7 @@ export default function AdminUsers({
           </td>
           <td>{r.agency || <span style={{ color: 'var(--faint)' }}>—</span>}</td>
           <td>{statusPill(r.status)}</td>
+          <td style={{ whiteSpace: 'nowrap' }}>{lastSignInCell(r)}</td>
           <td className="num">
             {r.isAdmin ? (
               <span className="pill good" title="Admins see every project — grants aren't used">
@@ -160,7 +179,7 @@ export default function AdminUsers({
         </tr>
         {openFor === r.id && (
           <tr>
-            <td colSpan={5} style={{ background: 'var(--rowhover)' }}>
+            <td colSpan={6} style={{ background: 'var(--rowhover)' }}>
               <ProjectPicker
                 projects={projects}
                 initial={r.projectIds}
@@ -223,7 +242,7 @@ export default function AdminUsers({
           <div className="scroll">
             <table>
               <thead>
-                <tr><th>User</th><th>Agency</th><th>Status</th><th className="num">Scope</th><th className="num">Actions</th></tr>
+                <tr><th>User</th><th>Agency</th><th>Status</th><th title="From Supabase Auth. Fresh sign-ins only — an open session kept alive by token refresh doesn't update it.">Last sign-in</th><th className="num">Scope</th><th className="num">Actions</th></tr>
               </thead>
               <tbody>{pending.map((r) => <Row key={r.id} r={r} />)}</tbody>
             </table>
@@ -247,13 +266,13 @@ export default function AdminUsers({
         <div className="scroll">
           <table>
             <thead>
-              <tr><th>User</th><th>Agency</th><th>Status</th><th className="num">Scope</th><th className="num">Actions</th></tr>
+              <tr><th>User</th><th>Agency</th><th>Status</th><th title="From Supabase Auth. Fresh sign-ins only — an open session kept alive by token refresh doesn't update it.">Last sign-in</th><th className="num">Scope</th><th className="num">Actions</th></tr>
             </thead>
             <tbody>
               {shown.map((r) => <Row key={r.id} r={r} />)}
-              {!others.length && <tr><td colSpan={5} className="empty">No approved accounts yet.</td></tr>}
+              {!others.length && <tr><td colSpan={6} className="empty">No approved accounts yet.</td></tr>}
               {others.length > 0 && !shown.length && (
-                <tr><td colSpan={5} className="empty">No accounts match “{q.trim()}”.</td></tr>
+                <tr><td colSpan={6} className="empty">No accounts match “{q.trim()}”.</td></tr>
               )}
             </tbody>
           </table>

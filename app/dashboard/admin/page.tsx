@@ -1,4 +1,5 @@
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
+import { supabaseAdmin } from '../../../lib/supabase';
 import AdminUsers, { type AdminProfile, type ProjectOption } from './AdminUsers';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,22 @@ export default async function AdminPage() {
       </div>
     );
   }
+
+  // Last sign-in per account, from Supabase Auth (auth.users isn't reachable
+  // through RLS, so this needs the service role — safe here because the page
+  // already returned above for non-admins). CAVEAT: only a fresh sign-in
+  // stamps last_sign_in_at; a session kept alive by token refresh does not.
+  // Treat it as a floor on activity, not a live "last seen".
+  const lastSignIn = new Map<string, string | null>();
+  try {
+    const admin = supabaseAdmin();
+    for (let page = 1; page <= 10; page++) {
+      const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+      if (error || !data?.users?.length) break;
+      data.users.forEach((u) => lastSignIn.set(u.id, u.last_sign_in_at ?? null));
+      if (data.users.length < 200) break;
+    }
+  } catch { /* auth unreachable — the column just shows "—" */ }
 
   const supabase = supabaseServer();
   const [{ data: profiles }, { data: grants }, { data: projects }] = await Promise.all([
@@ -51,6 +68,7 @@ export default async function AdminPage() {
     bnlAccess: Boolean(p.bnl_access),
     status: p.status,
     createdAt: p.created_at,
+    lastSignInAt: lastSignIn.get(p.id) ?? null,
     projectIds: byUser.get(p.id) ?? [],
   }));
 
