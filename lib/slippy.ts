@@ -30,6 +30,34 @@ export function toPx(lat: number, lng: number, f: { left: number; top: number; z
   return { x: px - f.left, y: py - f.top };
 }
 
+// ── point-in-polygon (ray cast) for the GIS boundary layers ─────────────────
+type Geometry = { type: string; coordinates: any };
+export type GeoFC = { features: { properties?: Record<string, unknown>; geometry: Geometry }[] };
+
+function inRing(lng: number, lat: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [x1, y1] = ring[i]; const [x2, y2] = ring[j];
+    if ((y1 > lat) !== (y2 > lat) && lng < ((x2 - x1) * (lat - y1)) / (y2 - y1) + x1) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Properties of every feature whose (outer-ring) polygon contains the point. */
+export function featuresAt(lng: number, lat: number, geo: GeoFC): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const f of geo.features) {
+    const g = f.geometry;
+    const hit = g.type === 'Polygon' ? inRing(lng, lat, g.coordinates[0])
+      : g.type === 'MultiPolygon' ? g.coordinates.some((p: number[][][]) => inRing(lng, lat, p[0]))
+      : false;
+    if (hit) out.push(f.properties ?? {});
+  }
+  return out;
+}
+
 export function tilesFor(lat: number, lng: number, z: number, w: number, h: number): TilePlacement[] {
   const n = 2 ** z;
   const rad = (lat * Math.PI) / 180;

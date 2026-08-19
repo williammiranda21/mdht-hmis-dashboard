@@ -7,6 +7,17 @@ import { supabaseBrowser } from '../../../../lib/supabase-browser';
 import {
   AREAS, SLEEPING_OPTIONS, HOUSEHOLD_OPTIONS, FACTORS, priorityOf, priorityBand,
 } from '../../../../lib/helpline-options';
+import { featuresAt, type GeoFC } from '../../../../lib/slippy';
+
+// District boundary files, fetched once per session (same-origin static).
+let _cityGeo: GeoFC | null | undefined;
+let _countyGeo: GeoFC | null | undefined;
+async function loadGeo(file: string): Promise<GeoFC | null> {
+  try {
+    const r = await fetch(file);
+    return r.ok ? ((await r.json()) as GeoFC) : null;
+  } catch { return null; }
+}
 
 interface PriorCase {
   id: number; created_at: string; status: string;
@@ -38,6 +49,8 @@ export default function CallIntakeForm({ me }: { me: string }) {
   const [prior, setPrior] = useState<PriorCase[]>([]);
   const [geo, setGeo] = useState<GeoHit[] | 'loading' | null>(null);
   const [pin, setPin] = useState<GeoHit | null>(null);
+  const [countyDist, setCountyDist] = useState<string | null>(null);
+  const [distNote, setDistNote] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
 
   // Repeat-caller check: same number, any prior case. Debounced on the digits.
@@ -69,6 +82,38 @@ export default function CallIntakeForm({ me }: { me: string }) {
     }
   }
 
+  /** Pin picked → detect districts (point-in-polygon on the same files the
+   *  call map draws). Inside the city: area auto-sets to the Commission
+   *  District, per the routing doc — no lookup-map trip. Outside: the
+   *  operator's municipality pick stands. County district is stamped either
+   *  way for reporting. Operator can always override the area afterward. */
+  async function pickPin(g: GeoHit) {
+    setPin(g);
+    if (_cityGeo === undefined) _cityGeo = await loadGeo('/gis/districts.geojson');
+    if (_countyGeo === undefined) _countyGeo = await loadGeo('/gis/county_districts.geojson');
+    const notes: string[] = [];
+    const city = _cityGeo ? featuresAt(g.lng, g.lat, _cityGeo) : [];
+    if (city.length) {
+      const d = String(city[0].COMDISTID ?? '');
+      const areaVal = d === '' ? '' : `Miami District ${d}`;
+      if (areaVal && (AREAS as readonly string[]).includes(areaVal)) {
+        set('area')(areaVal);
+        notes.push(`inside City of Miami — District ${d} (area set automatically)`);
+      }
+    } else if (_cityGeo) {
+      notes.push('outside City of Miami — pick the municipality as the area');
+    }
+    const county = _countyGeo ? featuresAt(g.lng, g.lat, _countyGeo) : [];
+    if (county.length) {
+      const cd = `County District ${county[0].ID ?? '?'}`;
+      setCountyDist(cd);
+      notes.push(`${cd}${county[0].COMMNAME ? ` (${county[0].COMMNAME})` : ''}`);
+    } else {
+      setCountyDist(null);
+    }
+    setDistNote(notes.length ? notes.join(' · ') : null);
+  }
+
   const pts = priorityOf(factors, f.household || null, f.sleeping || null);
   const band = priorityBand(pts);
 
@@ -83,6 +128,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
     const row: Record<string, unknown> = { created_by: me, priority: pts, factors };
     for (const [k, v] of Object.entries(f)) if (v.trim()) row[k] = v.trim();
     if (pin) { row.lat = pin.lat; row.lng = pin.lng; }
+    if (countyDist) row.county_district = countyDist;
     const db = supabaseBrowser();
     const { data, error } = await db.from('helpline_cases').insert(row).select('id').single();
     if (!error && data) {
@@ -208,11 +254,18 @@ export default function CallIntakeForm({ me }: { me: string }) {
         {Array.isArray(geo) && geo.length === 0 && (
           <div className="bnl-sub" style={{ marginTop: 4 }}>No match — the typed address still saves; refine or skip.</div>
         )}
+        {distNote && (
+          <div style={{ background: 'var(--accent-light)', border: '1px solid var(--accent)',
+            borderRadius: 8, padding: '7px 12px', fontSize: 12.5, marginTop: 6,
+            color: 'var(--strong)' }}>
+            📍 {distNote}
+          </div>
+        )}
         {Array.isArray(geo) && geo.map((g) => (
           <button key={g.label} type="button" className="tbtn"
             style={{ display: 'block', marginTop: 6, textAlign: 'left', width: '100%',
               ...(pin?.label === g.label ? { borderColor: 'var(--secondary)', color: 'var(--strong)' } : {}) }}
-            onClick={() => setPin(g)}>
+            onClick={() => pickPin(g)}>
             {pin?.label === g.label ? '✓ ' : ''}{g.label}
             <span className="bnl-sub"> · {g.lat.toFixed(5)}, {g.lng.toFixed(5)}</span>
           </button>

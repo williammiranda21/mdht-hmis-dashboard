@@ -139,7 +139,8 @@ export default async function DispatchSheet({ params }: { params: { id: string }
       <div className="loc">
         <div className="big">{c.address || c.landmark || c.area || 'Location not captured'}</div>
         <div className="grid" style={{ marginTop: 6 }}>
-          {c.area && <><span className="k">Area</span><span className="v">{c.area}</span></>}
+          {c.area && <><span className="k">Area</span><span className="v">{c.area}
+            {c.county_district ? ` · ${c.county_district}` : ''}</span></>}
           {c.address && c.landmark && <><span className="k">Landmark</span><span className="v">{c.landmark}</span></>}
           {c.lat != null && c.lng != null && (
             <><span className="k">Coordinates</span>

@@ -35,6 +35,7 @@ export interface HlCase {
   last_attempt: string | null;
   contacts: number;
   last_contact: string | null;
+  county_district: string | null;
   matched_pid: string | null;
   confirmed_at: string | null;
   verified_entry: string | null;
@@ -246,7 +247,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
             textUnderlineOffset: 3, color: 'var(--strong)' }}>{nameOf(c)}</button>{' '}
         <b style={{ color: bandColor(band), fontSize: 11 }}>{band}</b>
         <div className="bnl-sub" style={{ lineHeight: 1.6 }}>
-          {c.area ?? 'area unknown'}{c.address ? ` · ${c.address}` : ''}{c.landmark ? ` · ${c.landmark}` : ''}
+          {c.area ?? 'area unknown'}{c.county_district ? ` · ${c.county_district}` : ''}{c.address ? ` · ${c.address}` : ''}{c.landmark ? ` · ${c.landmark}` : ''}
           {c.sleeping ? ` · ${c.sleeping}` : ''}{c.household && c.household !== 'Alone' ? ` · ${c.household}` : ''}
           {c.factors.length > 0 && <> · {c.factors.join(', ')}</>}
           {(c.phone_callback || c.phone_line) && <> · ☎ {c.phone_callback ?? c.phone_line}</>}

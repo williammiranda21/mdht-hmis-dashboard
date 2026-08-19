@@ -139,6 +139,11 @@ create table if not exists helpline_cases (
 alter table helpline_cases add column if not exists contacts int not null default 0;
 alter table helpline_cases add column if not exists last_contact date;
 
+-- Auto-detected Miami-Dade County Commission District (point-in-polygon from
+-- the case pin) — the "homeless persons by MDC commission district" reporting
+-- cut. City district lives in `area` ('Miami District N') per the routing doc.
+alter table helpline_cases add column if not exists county_district text;
+
 -- Outreach events join the call log (user catch: counters can't say WHICH try
 -- succeeded — the trail can). kinds: initial/followup = phone calls in;
 -- attempt/contact = outreach going out.
