@@ -16,12 +16,17 @@ import { useState } from 'react';
 
 export interface ProjectOpt { id: number; name: string; type?: string | null }
 
-export default function ProjectPicker({ options, selected, onChange, title }: {
+export default function ProjectPicker({ options, selected, onChange, title, mode, onModeChange }: {
   options: ProjectOpt[];
   selected: number[];
   onChange: (next: number[]) => void;
   /** button tooltip, e.g. "Filter the roster to one or more projects" */
   title?: string;
+  /** Optional include/exclude support: pass BOTH `mode` and `onModeChange` to
+   *  render the Include/Exclude toggle. 'in' = only selected · 'out' = all
+   *  except selected. Pages that don't pass them keep include-only behavior. */
+  mode?: 'in' | 'out';
+  onModeChange?: (m: 'in' | 'out') => void;
 }) {
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
   const [q, setQ] = useState('');
@@ -35,9 +40,13 @@ export default function ProjectPicker({ options, selected, onChange, title }: {
           const rect = e.currentTarget.getBoundingClientRect();
           setAnchor({ x: rect.left, y: rect.bottom });
         }}>
-        {selected.length === 1
-          ? (options.find((o) => o.id === selected[0])?.name ?? '1 selected').slice(0, 26)
-          : selected.length ? `${selected.length} projects` : 'All'} {anchor ? '▴' : '▾'}
+        {(() => {
+          if (!selected.length) return 'All';
+          const not = mode === 'out' ? 'Not: ' : '';
+          return selected.length === 1
+            ? not + (options.find((o) => o.id === selected[0])?.name ?? '1 selected').slice(0, 24)
+            : `${not}${selected.length} projects`;
+        })()} {anchor ? '▴' : '▾'}
       </button>
 
       {/* Popover — fixed + anchored to the button (panels clip overflow),
@@ -66,6 +75,23 @@ export default function ProjectPicker({ options, selected, onChange, title }: {
               boxShadow: '0 12px 32px rgba(0,0,0,0.4)',
             }}>
               <div style={{ padding: '10px 12px 8px' }}>
+                {mode !== undefined && onModeChange && (
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 8 }} role="radiogroup"
+                    aria-label="Filter direction">
+                    {(['in', 'out'] as const).map((m) => (
+                      <button key={m} className="btn" aria-pressed={mode === m}
+                        onClick={() => onModeChange(m)}
+                        style={mode === m
+                          ? { color: 'var(--primary)', fontWeight: 700, borderColor: 'var(--primary)' }
+                          : undefined}
+                        title={m === 'in'
+                          ? 'Show only the selected projects'
+                          : 'Show everything EXCEPT the selected projects (clients with no current project stay visible)'}>
+                        {m === 'in' ? 'Include selected' : 'Exclude selected'}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <input className="finput" autoFocus placeholder="Search projects…" value={q}
                   onChange={(e) => setQ(e.target.value)} style={{ width: '100%' }} />
               </div>
@@ -89,7 +115,9 @@ export default function ProjectPicker({ options, selected, onChange, title }: {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
                 borderTop: '1px solid rgba(148,163,184,0.2)' }}>
-                <span className="bnl-sub">{selected.length ? `${selected.length} selected` : 'showing all projects'}</span>
+                <span className="bnl-sub">{selected.length
+                  ? `${selected.length} selected${mode === 'out' ? ' · excluded from view' : ''}`
+                  : 'showing all projects'}</span>
                 <span style={{ flex: 1 }} />
                 {selected.length > 0 && (
                   <button className="btn" onClick={() => onChange([])}>Clear</button>

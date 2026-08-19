@@ -48,6 +48,10 @@ export interface RosterQuery {
   ref: string;
   /** comma-separated project_id list (multi-select); '' = all projects */
   projects: string;
+  /** how `projects` applies: 'in' = only these (default) · 'out' = all EXCEPT
+   *  these. Exclude keeps clients with NO current project — excluding a
+   *  project must not hide the unenrolled. */
+  projMode: 'in' | 'out';
 }
 
 /** Sortable columns. Whitelisted — never interpolate a user string into order(). */
@@ -78,6 +82,7 @@ export function parseRosterQuery(sp: URLSearchParams): RosterQuery {
     stage: (sp.get('stage') ?? '').trim(),
     ref: (sp.get('ref') ?? '').trim(),
     projects: (sp.get('projects') ?? '').trim(),
+    projMode: sp.get('projMode') === 'out' ? 'out' : 'in',
   };
 }
 
@@ -136,7 +141,14 @@ export async function queryRoster(
 
   if (p.projects) {
     const ids = p.projects.split(',').map((s) => Number(s)).filter((n) => Number.isFinite(n));
-    if (ids.length) qb = qb.in('project_id', ids);
+    if (ids.length && p.projMode === 'out') {
+      // SQL `NOT IN` drops NULLs, but excluding a project must not hide
+      // clients with no current project — so admit nulls explicitly. ids are
+      // numbers (filtered above); safe to interpolate into the or() string.
+      qb = qb.or(`project_id.is.null,project_id.not.in.(${ids.join(',')})`);
+    } else if (ids.length) {
+      qb = qb.in('project_id', ids);
+    }
   }
   if (pidsIn) qb = qb.in('pid', pidsIn);
 

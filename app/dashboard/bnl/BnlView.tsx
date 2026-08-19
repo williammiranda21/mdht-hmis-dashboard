@@ -64,6 +64,8 @@ export default function BnlView({
   // the shared components/ProjectPicker (extracted from here 2026-08-12, now
   // also on Project Performance and Returns).
   const [selProjects, setSelProjects] = useState<number[]>([]);
+  // 'in' = only the selected projects · 'out' = everything except them
+  const [projMode, setProjMode] = useState<'in' | 'out'>('in');
   const [sortKey, setSortKey] = useState<SortKey>('days_homeless');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -100,9 +102,9 @@ export default function BnlView({
 
   const params = useCallback((offset: number) => new URLSearchParams({
     pop, status: fStatus, flag: fFlag, asmt: fAsmt, stage: fStage, ref: fRef,
-    projects: selProjects.join(','), q: qDebounced,
+    projects: selProjects.join(','), projMode, q: qDebounced,
     sort: sortKey, dir: sortDir, offset: String(offset), limit: String(PAGE),
-  }), [pop, fStatus, fFlag, fAsmt, fStage, fRef, selProjects, qDebounced, sortKey, sortDir]);
+  }), [pop, fStatus, fFlag, fAsmt, fStage, fRef, selProjects, projMode, qDebounced, sortKey, sortDir]);
 
   // Which request is current. A slow response for an old filter must not
   // overwrite a newer one — without this, typing fast can leave stale rows.
@@ -383,6 +385,7 @@ export default function BnlView({
             <div className="fgroup">
               <span className="flabel">Projects</span>
               <ProjectPicker options={projectOpts} selected={selProjects}
+                mode={projMode} onModeChange={setProjMode}
                 onChange={setSelProjects}
                 title="Filter the roster to one or more projects" />
             </div>
