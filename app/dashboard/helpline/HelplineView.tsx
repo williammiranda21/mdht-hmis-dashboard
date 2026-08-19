@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
@@ -123,6 +123,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
   const [openId, setOpenId] = useState<number | null>(null);
   const [cands, setCands] = useState<Record<number, Candidate[] | 'loading'>>({});
   const [mapId, setMapId] = useState<number | null>(null);
+  const [drawerC, setDrawerC] = useState<HlCase | null>(null);
   const [q, setQ] = useState('');
   // All-cases filters + sort (user ask 2026-08-19)
   const [fStatus, setFStatus] = useState('');
@@ -235,7 +236,11 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
       <td>
         <span className="bnl-sub" title="Case number — use this when referencing the case"
           style={{ fontVariantNumeric: 'tabular-nums' }}>#{c.id}</span>{' '}
-        <span className="bnl-nm">{nameOf(c)}</span>{' '}
+        <button className="bnl-nm" onClick={() => setDrawerC(c)}
+          title="Open the case drawer — full details, notes, and history"
+          style={{ background: 'none', border: 'none', padding: 0, font: 'inherit',
+            cursor: 'pointer', textDecoration: 'underline dotted',
+            textUnderlineOffset: 3, color: 'var(--strong)' }}>{nameOf(c)}</button>{' '}
         <b style={{ color: bandColor(band), fontSize: 11 }}>{band}</b>
         <div className="bnl-sub" style={{ lineHeight: 1.6 }}>
           {c.area ?? 'area unknown'}{c.address ? ` · ${c.address}` : ''}{c.landmark ? ` · ${c.landmark}` : ''}
@@ -562,6 +567,12 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
           </tbody>
         </table></div>
       </div>
+
+      {drawerC && (
+        <CaseDrawer c={cases.find((x) => x.id === drawerC.id) ?? drawerC}
+          teamName={drawerC.team_id != null ? (teamById.get(drawerC.team_id)?.name ?? null) : null}
+          events={events[drawerC.id]} me={me} onClose={() => setDrawerC(null)} />
+      )}
 
       <Reporting cases={cases} teams={teams} events={events} />
 
@@ -897,4 +908,146 @@ function TeamZones({ teams, busy, onSave }: {
 
 function FragmentZoneRow({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
+}
+
+
+/**
+ * Case drawer — the whole record in one overlay (BNL drawer pattern): who,
+ * where (with map), situation, assignment, outreach trail, enrollment
+ * verification, and the full call log with an append-only note composer
+ * (notes are immutable helpline_calls events, same rule as BNL notes).
+ */
+function CaseDrawer({ c, teamName, events, me, onClose }: {
+  c: HlCase; teamName: string | null;
+  events?: { at: string; kind: string }[];
+  me: string; onClose: () => void;
+}) {
+  const [log, setLog] = useState<{ received_at: string; kind: string; notes: string | null }[] | null>(null);
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    const { data } = await supabaseBrowser().from('helpline_calls')
+      .select('received_at, kind, notes')
+      .eq('case_id', c.id)
+      .order('received_at', { ascending: false })
+      .limit(50);
+    setLog((data ?? []) as any);
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setLog(null); load(); }, [c.id]);
+
+  async function addNote() {
+    const text = body.trim();
+    if (!text || busy) return;
+    setBusy(true); setErr(null);
+    const { error } = await supabaseBrowser().from('helpline_calls')
+      .insert({ case_id: c.id, operator: me, kind: 'followup', notes: text });
+    setBusy(false);
+    if (error) { setErr(error.message); return; }
+    setBody('');
+    load();
+  }
+
+  const band = priorityBand(c.priority);
+  const stamp = (iso: string) => new Date(iso).toLocaleString(undefined,
+    { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const KIND_LBL: Record<string, string> = {
+    initial: '☎ initial call', followup: '📝 note / call-back',
+    attempt: '✗ contact attempt (failed)', contact: '✓ contacted',
+  };
+  const Row = ({ k, children }: { k: string; children: React.ReactNode }) => (
+    <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '2px 14px', fontSize: 13 }}>
+      <span className="bnl-sub" style={{ paddingTop: 2 }}>{k}</span>
+      <span style={{ color: 'var(--text)' }}>{children}</span>
+    </div>
+  );
+
+  return (
+    <div className="bnl-ov" onClick={onClose}>
+      <div className="bnl-modal" onClick={(e) => e.stopPropagation()} role="dialog"
+        aria-label={`Case ${c.id}`} style={{ maxWidth: 820 }}>
+        <button className="bnl-x" onClick={onClose} aria-label="Close">✕</button>
+        <h3>#{c.id} {nameOf(c)}{' '}
+          <b style={{ color: bandColor(band), fontSize: 13 }}>{band}</b></h3>
+        <div style={{ margin: '4px 0 10px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <ChipDated c={c} />
+          <span className="bnl-sub">called {stamp(c.created_at)}</span>
+          {teamName && <span className="bnl-fp bnl-fp-par">{teamName}</span>}
+          <span style={{ flex: 1 }} />
+          <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank">🖨 Sheet</Link>
+          {c.matched_pid && (
+            <Link className="tbtn" href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}>BNL →</Link>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gap: 3 }}>
+          <Row k="Reach them">
+            <b>{c.phone_callback || c.phone_line || '—'}</b>
+            {c.phone_callback && c.phone_line && c.phone_callback !== c.phone_line && (
+              <span className="bnl-sub"> · called from {c.phone_line}</span>
+            )}
+          </Row>
+          {(c.dob || c.ssn4) && (
+            <Row k="Identity">{c.dob ?? ''}{c.dob && c.ssn4 ? ' · ' : ''}{c.ssn4 ? `SSN-4 ${c.ssn4}` : ''}</Row>
+          )}
+          <Row k="Location">
+            {[c.address, c.landmark, c.area].filter(Boolean).join(' · ') || '—'}
+            {c.lat != null && c.lng != null && (
+              <a style={{ color: 'var(--secondary)', marginLeft: 6 }} target="_blank" rel="noreferrer"
+                href={`https://maps.google.com/?q=${c.lat},${c.lng}`}>Google Maps →</a>
+            )}
+          </Row>
+          <Row k="Situation">
+            {[c.sleeping, c.household, ...(c.factors ?? [])].filter(Boolean).join(' · ') || '—'}
+            <span className="bnl-sub"> · priority {c.priority} pts</span>
+          </Row>
+          {c.matched_pid && <Row k="HMIS">record {c.matched_pid.slice(0, 12)}…</Row>}
+          <Row k="Outreach">
+            <Trail events={events} c={c} />
+          </Row>
+          {c.status === 'confirmed' && (
+            <Row k="Enrollment">
+              {c.verified_entry
+                ? <span style={{ color: 'var(--accent)', fontWeight: 700 }}>
+                    ✓ enrolled {c.verified_entry} — {c.verified_proj}</span>
+                : <span style={{ color: 'var(--danger)', fontWeight: 700 }}>
+                    not enrolled yet — confirmed {c.confirmed_at}</span>}
+            </Row>
+          )}
+        </div>
+
+        {c.lat != null && c.lng != null && (
+          <div style={{ marginTop: 10 }}>
+            <CaseMap lat={c.lat} lng={c.lng} zoom={17} width={760} height={240} />
+          </div>
+        )}
+
+        <div style={{ marginTop: 12 }}>
+          <div className="bnl-sub" style={{ fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: '.05em', marginBottom: 6 }}>Log &amp; notes</div>
+          {err && <div className="lerror" role="alert" style={{ marginBottom: 8 }}>{err}</div>}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            <input className="tinput" style={{ flex: 1 }} value={body} maxLength={2000}
+              placeholder="Add a note to this case — saved to the permanent log"
+              onChange={(e) => setBody(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') addNote(); }} />
+            <button className="btn primary" disabled={busy || !body.trim()} onClick={addNote}>
+              {busy ? 'Saving…' : 'Add note'}</button>
+          </div>
+          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+            {log === null && <div className="bnl-sub">Loading log…</div>}
+            {log?.map((k, i) => (
+              <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--hair)' }}>
+                <span className="bnl-sub">{stamp(k.received_at)} · {KIND_LBL[k.kind] ?? k.kind}</span>
+                {k.notes && <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{k.notes}</div>}
+              </div>
+            ))}
+            {log?.length === 0 && <div className="bnl-sub">No log entries yet.</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
