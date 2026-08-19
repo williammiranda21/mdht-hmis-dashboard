@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { tilesFor, frameFor, toPx, TILE } from '../../../lib/slippy';
 import type { HlCase } from './HelplineView';
 
@@ -16,7 +16,7 @@ import type { HlCase } from './HelplineView';
  * no code change. Tiles come through the gated /api/helpline/tile proxy.
  */
 
-const W = 960, H = 560;
+const H = 560;   // width is fluid — measured from the panel (user ask)
 const VIEWS = {
   county: { lat: 25.65, lng: -80.32, z: 10, label: 'County' },
   metro: { lat: 25.78, lng: -80.24, z: 12, label: 'Miami metro' },
@@ -70,6 +70,19 @@ export default function ReportMap({ cases, onOpen }: {
   cases: HlCase[]; onOpen: (c: HlCase) => void;
 }) {
   const [view, setView] = useState<ViewKey>('metro');
+  // Fluid width: track the panel's inner width so the map meets the borders.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [W, setW] = useState(960);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((es) => {
+      const w = Math.floor(es[0].contentRect.width);
+      if (w > 300) setW(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const [on, setOn] = useState<Record<LayerKey, boolean>>(
     { districts: false, county: false, zipcodes: false, tracts: false });
   const [geo, setGeo] = useState<Record<LayerKey, Geo | 'missing' | 'loading' | undefined>>(
@@ -151,8 +164,8 @@ export default function ReportMap({ cases, onOpen }: {
         ))}
       </div>
 
-      <div className="scroll" style={{ padding: '0 18px 16px' }}>
-        <div style={{ position: 'relative', width: W, height: H, maxWidth: 'none',
+      <div ref={wrapRef} style={{ padding: '0 18px 16px' }}>
+        <div style={{ position: 'relative', width: W, height: H, maxWidth: '100%',
           overflow: 'hidden', border: '1px solid var(--border)', borderRadius: 8, background: '#eef1f5' }}>
           {tiles.map((t) => (
             // eslint-disable-next-line @next/next/no-img-element
