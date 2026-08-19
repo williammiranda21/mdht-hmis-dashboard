@@ -30,6 +30,14 @@ export function toPx(lat: number, lng: number, f: { left: number; top: number; z
   return { x: px - f.left, y: py - f.top };
 }
 
+/** Inverse of project(): global pixels at zoom z → lat/lng. */
+export function unproject(px: number, py: number, z: number): { lat: number; lng: number } {
+  const n = 2 ** z;
+  const lng = (px / (n * TILE)) * 360 - 180;
+  const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * py) / (n * TILE)))) * 180) / Math.PI;
+  return { lat, lng };
+}
+
 // ── point-in-polygon (ray cast) for the GIS boundary layers ─────────────────
 type Geometry = { type: string; coordinates: any };
 export type GeoFC = { features: { properties?: Record<string, unknown>; geometry: Geometry }[] };
@@ -45,17 +53,16 @@ function inRing(lng: number, lat: number, ring: number[][]): boolean {
   return inside;
 }
 
+/** Does this feature's (outer-ring) polygon contain the point? */
+export function inFeature(lng: number, lat: number, g: Geometry): boolean {
+  return g.type === 'Polygon' ? inRing(lng, lat, g.coordinates[0])
+    : g.type === 'MultiPolygon' ? g.coordinates.some((p: number[][][]) => inRing(lng, lat, p[0]))
+    : false;
+}
+
 /** Properties of every feature whose (outer-ring) polygon contains the point. */
 export function featuresAt(lng: number, lat: number, geo: GeoFC): Record<string, unknown>[] {
-  const out: Record<string, unknown>[] = [];
-  for (const f of geo.features) {
-    const g = f.geometry;
-    const hit = g.type === 'Polygon' ? inRing(lng, lat, g.coordinates[0])
-      : g.type === 'MultiPolygon' ? g.coordinates.some((p: number[][][]) => inRing(lng, lat, p[0]))
-      : false;
-    if (hit) out.push(f.properties ?? {});
-  }
-  return out;
+  return geo.features.filter((f) => inFeature(lng, lat, f.geometry)).map((f) => f.properties ?? {});
 }
 
 export function tilesFor(lat: number, lng: number, z: number, w: number, h: number): TilePlacement[] {
