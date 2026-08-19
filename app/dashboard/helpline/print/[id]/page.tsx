@@ -67,6 +67,9 @@ export default async function DispatchSheet({ params }: { params: { id: string }
       .order('received_at', { ascending: true }).limit(10),
   ]);
   if (!c) return <div className="panel"><div className="empty">Case not found.</div></div>;
+  const { data: team } = c.team_id != null
+    ? await sb.from('outreach_teams').select('name').eq('id', c.team_id).maybeSingle()
+    : { data: null };
 
   const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Anonymous caller';
   const band = priorityBand(c.priority ?? 0);
@@ -124,6 +127,13 @@ export default async function DispatchSheet({ params }: { params: { id: string }
         </div>
         <span className="prio" style={{ color: band === 'HIGH' ? '#c22' : band === 'MED' ? '#a06a10' : '#5c6a7d' }}>
           {band}</span>
+      </div>
+
+      <div className="loc" style={{ marginTop: 0, display: 'flex', justifyContent: 'space-between',
+        alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+        <span><span className="k">Assigned to </span>
+          <span className="big">{team?.name ?? 'NOT YET ASSIGNED'}</span></span>
+        {c.assigned_at && <span className="k">assigned {fmt(c.assigned_at)}</span>}
       </div>
 
       <h2>Find them</h2>
