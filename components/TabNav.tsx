@@ -18,6 +18,8 @@ const TABS = [
   // Youth Connect: admins + yc_access grantees (Educate Tomorrow). Hidden from
   // everyone else — the page re-checks, hiding the tab is not the boundary.
   { href: '/dashboard/youth-intake', label: 'Youth Intake', icon: 'sprout', ycOnly: true },
+  // Helpline Triage: admins + helpline_access grantees (operators/Trust staff).
+  { href: '/dashboard/helpline', label: 'Helpline', icon: 'phone', hlOnly: true },
   { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy', adminOnly: true },
   { href: '/dashboard/deep-dive', label: 'Deep Dive', icon: 'search' },
   { href: '/dashboard/glossary', label: 'Glossary', icon: 'book' },
@@ -76,6 +78,9 @@ const ICONS: Record<string, JSX.Element> = {
       <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" />
     </>
   ),
+  phone: (
+    <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.13.96.36 1.9.7 2.8a2 2 0 0 1-.45 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.25a2 2 0 0 1 2.1-.45c.9.34 1.84.57 2.8.7A2 2 0 0 1 22 16.9z" />
+  ),
   sprout: (
     <>
       <path d="M12 21v-8" />
@@ -99,9 +104,10 @@ const ICONS: Record<string, JSX.Element> = {
 type Tab = (typeof TABS)[number];
 const isAdminTab = (t: Tab): boolean => 'adminOnly' in t && t.adminOnly === true;
 const isYcTab = (t: Tab): boolean => 'ycOnly' in t && t.ycOnly === true;
+const isHlTab = (t: Tab): boolean => 'hlOnly' in t && t.hlOnly === true;
 
-export default function TabNav({ isAdmin = false, cohortAccess = false, ycAccess = false }:
-    { isAdmin?: boolean; cohortAccess?: boolean; ycAccess?: boolean }) {
+export default function TabNav({ isAdmin = false, cohortAccess = false, ycAccess = false, hlAccess = false }:
+    { isAdmin?: boolean; cohortAccess?: boolean; ycAccess?: boolean; hlAccess?: boolean }) {
   const pathname = usePathname();
   const search = useSearchParams();
   const qs = search.toString();
@@ -124,7 +130,8 @@ export default function TabNav({ isAdmin = false, cohortAccess = false, ycAccess
   // grants. Admins keep it in the Admin section as before.
   const regular = TABS.filter((t) => (!isAdminTab(t)
     || (!isAdmin && cohortAccess && t.href === '/dashboard/admin/cohorts'))
-    && (!isYcTab(t) || isAdmin || ycAccess));
+    && (!isYcTab(t) || isAdmin || ycAccess)
+    && (!isHlTab(t) || isAdmin || hlAccess));
   const admin = TABS.filter(isAdminTab);
 
   return (

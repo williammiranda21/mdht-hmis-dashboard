@@ -62,6 +62,9 @@ export interface Viewer {
   /** May open Youth Connect (intake list, review queue, invites). Admins always
    *  qualify; non-admins via the `yc_access` grant. Mirrors can_see_yc() SQL. */
   canSeeYc: boolean;
+  /** May open Helpline Triage. Admins always; non-admins via `helpline_access`.
+   *  Mirrors can_see_helpline() SQL. */
+  canSeeHelpline: boolean;
 }
 
 /**
@@ -98,5 +101,6 @@ export async function getViewer(): Promise<Viewer | null> {
     isApproved,
     canSeeBnl: isAdmin || (isApproved && Boolean(data?.bnl_access)),
     canSeeYc: isAdmin || (isApproved && Boolean(data?.yc_access)),
+    canSeeHelpline: isAdmin || (isApproved && Boolean(data?.helpline_access)),
   };
 }

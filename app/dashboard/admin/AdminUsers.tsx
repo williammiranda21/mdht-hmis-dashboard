@@ -17,6 +17,8 @@ export interface AdminProfile {
   bnlAccess: boolean;
   /** Youth Connect (intake list + review + invites). Admins always have it. */
   ycAccess: boolean;
+  /** Helpline Triage (call intake + assignment). Admins always have it. */
+  hlAccess: boolean;
   status: 'pending' | 'approved' | 'disabled';
   createdAt: string;
   /** auth.users.last_sign_in_at — stamped on fresh sign-ins only (a session
@@ -97,6 +99,9 @@ export default function AdminUsers({
 
   const setYcAccess = (r: AdminProfile, yc: boolean) =>
     run(r.id, async () => db().from('profiles').update({ yc_access: yc }).eq('id', r.id));
+
+  const setHlAccess = (r: AdminProfile, hl: boolean) =>
+    run(r.id, async () => db().from('profiles').update({ helpline_access: hl }).eq('id', r.id));
 
   async function saveProjects(r: AdminProfile, ids: number[]) {
     await run(r.id, async () => {
@@ -183,6 +188,13 @@ export default function AdminUsers({
                 title="Youth Connect: intake list, review queue, invite links. Intended for Educate Tomorrow."
                 onClick={() => setYcAccess(r, !r.ycAccess)}>
                 {r.ycAccess ? 'Revoke Youth Intake' : 'Grant Youth Intake'}
+              </button>
+            )}
+            {!r.isAdmin && r.status === 'approved' && (
+              <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy === r.id}
+                title="Helpline Triage: call intake, triage queue, team assignment. For helpline operators and Trust staff."
+                onClick={() => setHlAccess(r, !r.hlAccess)}>
+                {r.hlAccess ? 'Revoke Helpline' : 'Grant Helpline'}
               </button>
             )}
             <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy === r.id}

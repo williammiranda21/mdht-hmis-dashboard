@@ -104,7 +104,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <div className="nav-label">Menu</div>
         <Suspense fallback={<nav className="tabnav" />}>
           <TabNav isAdmin={viewer?.isAdmin ?? false} cohortAccess={cohortAccess}
-            ycAccess={viewer?.canSeeYc ?? false} />
+            ycAccess={viewer?.canSeeYc ?? false} hlAccess={viewer?.canSeeHelpline ?? false} />
         </Suspense>
         <div className="foot">HMIS Performance Dashboard<br />Data refreshed from HMIS</div>
       </aside>

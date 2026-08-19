@@ -69,6 +69,7 @@ export default async function AdminPage() {
     isAdmin: Boolean(p.is_admin),
     bnlAccess: Boolean(p.bnl_access),
     ycAccess: Boolean(p.yc_access),
+    hlAccess: Boolean(p.helpline_access),
     status: p.status,
     createdAt: p.created_at,
     lastSignInAt: lastSignIn.get(p.id) ?? null,

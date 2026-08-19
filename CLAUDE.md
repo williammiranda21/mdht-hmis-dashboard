@@ -371,12 +371,33 @@ Load half, in order (`py hmis-web/pipeline/<script>` — use SYSTEM `py`, the ro
 10. `snapshot_cohorts.py` (cohort trend points — last, roster is final)
 11. `load_client_index.py` (Youth Connect match index — all Client.csv identifiers;
     service-role-only table, feeds /api/yc/match; any order among the recomputes)
+12. `verify_helpline.py` (Helpline enrollment verification: confirmed-homeless
+    cases checked against Enrollment.csv; exact name+DOB auto-link for unmatched
+    confirmed cases; after load_client_index)
 
 Skipping the load half leaves Supabase stale while local JSONs advance — the classic
 "which half ran" trap (§6). New SQL run-once files since 2026-07-31: `targets.sql`,
 `dq_snapshots.sql`, `user_dq.sql`, `cohorts.sql` (all already run in prod),
 `youth_connect.sql` (2026-08-19 — Youth Connect: youth_intakes/intake_invites/
 client_index + profiles.yc_access + can_see_yc()).
+
+### Helpline Triage (2026-08-19 — built, NOT yet pushed; user tests locally first)
+Homeless helpline → triage → outreach assignment → enrollment verification.
+Access = admins + `profiles.helpline_access`. Tables (supabase/helpline.sql,
+run-once): `helpline_cases` (one per person-episode: identity, area/address/
+lat-lng, factors, priority, team, outcome, verification), `helpline_calls`
+(immutable call events — repeat calls join the open case), `outreach_teams`
+(seeded from the 13 active SO projects; zones + factor tags drive the
+suggest-only assignment: factors outrank geography, load breaks ties).
+Surfaces: `/dashboard/helpline` (KPIs, triage queue, team board, all-cases +
+admin zone editor) · `/new` (call intake: repeat-caller banner by phone,
+priority computed live from lib/helpline-options.ts closed lists, geocoding
+via `/api/helpline/geocode` — server-side Nominatim, Miami-Dade-bounded, so
+county PCs never call out) · `/print/[id]` (one-page dispatch sheet, print
+CSS → browser Save-as-PDF, always light). HMIS matching via
+`/api/helpline/match` (same scorer + client_index as Youth Connect).
+Verification is data-read, never self-reported: `verify_helpline.py`
+(runbook step 12) stamps verified_entry/proj from Enrollment.csv.
 
 ### Youth Connect (2026-08-19)
 Youth intake + self-entry portal. Access = admins + `profiles.yc_access`
