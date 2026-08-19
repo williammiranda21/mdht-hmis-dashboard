@@ -78,6 +78,22 @@ function Chip({ s }: { s: CaseStatus }) {
   return <span className="bnl-chip" style={{ background: bg, color: fg }}>{label}</span>;
 }
 
+/** The date that MADE the current status — "contacted" with no date answers
+ *  half the question (user catch). */
+function statusDate(c: HlCase): string | null {
+  switch (c.status) {
+    case 'assigned': return c.assigned_at ? c.assigned_at.slice(0, 10) : null;
+    case 'attempted': return c.last_attempt;
+    case 'contacted': return c.last_contact;
+    case 'confirmed': return c.confirmed_at;
+    default: return null;
+  }
+}
+function ChipDated({ c }: { c: HlCase }) {
+  const d = statusDate(c);
+  return <><Chip s={c.status} />{d && <div className="bnl-sub" style={{ marginTop: 2 }}>{d}</div>}</>;
+}
+
 /** Suggested team: factor routing outranks geography; ties broken by fewer
  *  open cases. Suggest-only — the operator picks the team either way. */
 function suggestTeam(c: HlCase, teams: Team[], openByTeam: Map<number, number>): Team | null {
@@ -148,7 +164,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
     const attempts = c.attempts + 1;
     const strikeOut = attempts >= MAX_FAILED_ATTEMPTS && (c.contacts ?? 0) === 0
       && ['assigned', 'attempted'].includes(c.status);
-    await db().from('helpline_calls').insert({ case_id: c.id, operator: me, kind: 'attempt' });
+    const ev = await db().from('helpline_calls').insert({ case_id: c.id, operator: me, kind: 'attempt' });
+    if (ev.error) setError(`Per-try event not recorded (re-run supabase/helpline.sql): ${ev.error.message}`);
     return update(c.id, {
       status: strikeOut ? 'no_locate' : c.status === 'assigned' ? 'attempted' : c.status,
       attempts,
@@ -157,7 +174,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
   };
 
   const logContact = async (c: HlCase) => {
-    await db().from('helpline_calls').insert({ case_id: c.id, operator: me, kind: 'contact' });
+    const ev = await db().from('helpline_calls').insert({ case_id: c.id, operator: me, kind: 'contact' });
+    if (ev.error) setError(`Per-try event not recorded (re-run supabase/helpline.sql): ${ev.error.message}`);
     return update(c.id, {
       status: ['assigned', 'attempted'].includes(c.status) ? 'contacted' : c.status,
       contacts: (c.contacts ?? 0) + 1,
@@ -351,7 +369,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
                   <FragmentZoneRow key={c.id}>
                   <tr style={{ cursor: 'default' }}>
                     <CaseCell c={c} />
-                    <td style={{ whiteSpace: 'nowrap' }}><Chip s={c.status} /></td>
+                    <td style={{ whiteSpace: 'nowrap' }}><ChipDated c={c} /></td>
                     <td><Trail events={events[c.id]} c={c} /></td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       {(c.lat != null || c.address || c.landmark) && (
@@ -431,18 +449,18 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
             aria-label="Search cases" />
         </div>
         <div className="scroll"><table className="bnl-table">
-          <thead><tr><th>Caller</th><th>Called</th><th>Team</th><th>Status</th><th>Attempts</th><th>Enrollment</th><th style={{ textAlign: 'right' }}></th></tr></thead>
+          <thead><tr><th>Caller</th><th>Called</th><th>Team</th><th>Status</th><th>Outreach trail</th><th>Enrollment</th><th style={{ textAlign: 'right' }}></th></tr></thead>
           <tbody>
             {[...confirmed, ...done].filter((c) => !t || searchable(c).includes(t)).map((c) => (
               <tr key={c.id} style={{ cursor: 'default' }}>
                 <CaseCell c={c} />
                 <td style={{ whiteSpace: 'nowrap' }}>{when(c.created_at)}</td>
                 <td>{c.team_id != null ? (teamById.get(c.team_id)?.name ?? '?') : '—'}</td>
-                <td><Chip s={c.status} /></td>
-                <td style={{ whiteSpace: 'nowrap' }}>
-                  {/* how hard was this case worked — matters most on no-locates */}
-                  {c.attempts > 0
-                    ? <><b>×{c.attempts}</b>{c.last_attempt && <span className="bnl-sub"> · last {c.last_attempt}</span>}</>
+                <td><ChipDated c={c} /></td>
+                <td>
+                  {/* full ✗/✓ chronology — how hard was this case worked */}
+                  {c.attempts > 0 || (c.contacts ?? 0) > 0 || events[c.id]?.length
+                    ? <Trail events={events[c.id]} c={c} />
                     : <span className="bnl-sub"
                         style={c.status === 'no_locate' ? { color: 'var(--danger)', fontWeight: 700 } : undefined}
                         title={c.status === 'no_locate' ? 'Closed as could-not-locate with no attempt ever logged' : undefined}>
@@ -528,14 +546,20 @@ function Trail({ events, c }: { events?: { at: string; kind: string }[]; c: HlCa
       </span>
     );
   }
-  // pre-events fallback: totals only (old cases have no per-try records)
-  if (c.attempts > 0 || (c.contacts ?? 0) > 0) {
+  // Pre-events fallback: this case was worked before per-try tracking, so
+  // only totals exist. Say so instead of looking half-broken — and when the
+  // status implies a contact that was never date-stamped, admit that too.
+  const impliedContact = (c.contacts ?? 0) === 0
+    && ['contacted', 'confirmed'].includes(c.status);
+  if (c.attempts > 0 || (c.contacts ?? 0) > 0 || impliedContact) {
     return (
-      <span className="bnl-sub">
+      <span className="bnl-sub" title="Worked before per-try tracking (2026-08-19) — new ✗/✓ clicks record individual dated events">
         {c.attempts > 0 && <>✗ ×{c.attempts}{c.last_attempt ? ` (last ${c.last_attempt})` : ''}</>}
-        {c.attempts > 0 && (c.contacts ?? 0) > 0 && ' · '}
+        {c.attempts > 0 && ((c.contacts ?? 0) > 0 || impliedContact) && ' · '}
         {(c.contacts ?? 0) > 0 && <span style={{ color: 'var(--accent)' }}>
           ✓ ×{c.contacts}{c.last_contact ? ` (last ${c.last_contact})` : ''}</span>}
+        {impliedContact && <span style={{ color: 'var(--accent)' }}>✓ contacted, date not recorded</span>}
+        <span> · pre-tracking totals</span>
       </span>
     );
   }

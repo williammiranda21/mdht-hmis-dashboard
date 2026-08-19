@@ -55,7 +55,7 @@ export default async function DispatchSheet({ params }: { params: { id: string }
   const [{ data: c }, { data: calls }] = await Promise.all([
     sb.from('helpline_cases').select('*').eq('id', id).maybeSingle(),
     sb.from('helpline_calls').select('received_at, kind, notes').eq('case_id', id)
-      .order('received_at', { ascending: true }).limit(10),
+      .order('received_at', { ascending: true }).limit(40),
   ]);
   if (!c) return <div className="panel"><div className="empty">Case not found.</div></div>;
   const { data: team } = c.team_id != null
@@ -175,6 +175,22 @@ export default async function DispatchSheet({ params }: { params: { id: string }
         <span className="v">{c.matched_pid
           ? `Known client — record ${String(c.matched_pid).slice(0, 12)}… (history on the BNL)`
           : 'No confirmed HMIS match — may be new to the system'}</span>
+        {(() => {
+          const trail = (calls ?? []).filter((k: any) => k.kind === 'attempt' || k.kind === 'contact');
+          if (!trail.length) return null;
+          const d = (iso: string) => { const x = new Date(iso); return `${x.getMonth() + 1}/${x.getDate()}`; };
+          return (
+            <><span className="k">Outreach so far</span>
+              <span className="v" style={{ fontWeight: 600 }}>
+                {trail.map((k: any, i: number) => (
+                  <span key={i} style={{ marginRight: 8, whiteSpace: 'nowrap',
+                    color: k.kind === 'contact' ? '#0b8a5c' : '#c2333f' }}>
+                    {k.kind === 'contact' ? '✓' : '✗'} {d(k.received_at)}
+                  </span>
+                ))}
+              </span></>
+          );
+        })()}
       </div>
 
       {(() => {
