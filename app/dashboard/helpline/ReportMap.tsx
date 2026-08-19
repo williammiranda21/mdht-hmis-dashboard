@@ -89,6 +89,36 @@ export default function ReportMap({ cases, onOpen }: {
     return () => ro.disconnect();
   }, []);
 
+  // Wheel-to-zoom, anchored at the cursor. Native non-passive listener —
+  // React's onWheel is passive, so preventDefault (stopping page scroll while
+  // zooming) only works this way. State reads via ref so we bind once.
+  const mapRef = useRef<HTMLDivElement>(null);
+  const stateRef = useRef({ z, center, W });
+  stateRef.current = { z, center, W };
+  const lastWheel = useRef(0);
+  useEffect(() => {
+    const el = mapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const now = Date.now();
+      if (now - lastWheel.current < 110) return;   // one step per notch-ish
+      lastWheel.current = now;
+      const { z: cz, center: cc, W: cw } = stateRef.current;
+      const nz = Math.min(18, Math.max(9, cz + (e.deltaY < 0 ? 1 : -1)));
+      if (nz === cz) return;
+      const rect = el.getBoundingClientRect();
+      const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+      const f = frameFor(cc.lat, cc.lng, cz, cw, H);
+      const under = unproject(f.left + cx, f.top + cy, cz);   // point under cursor
+      const { px, py } = project(under.lat, under.lng, nz);
+      setZ(nz);
+      setCenter(unproject(px - cx + cw / 2, py - cy + H / 2, nz)); // keep it there
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
   // drag-to-pan (pointer events); a real drag suppresses the click behind it
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const draggedRef = useRef(false);
@@ -183,7 +213,7 @@ export default function ReportMap({ cases, onOpen }: {
           <div className="meta">
             {dots.length} of {shown.length} cases in range have coordinates
             {noGeo > 0 && <> · {noGeo} without a pin</>}
-            {' '}· drag to pan · double-click to zoom · click a boundary for its call count
+            {' '}· drag to pan · scroll or double-click to zoom · click a boundary for its call count
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -231,7 +261,7 @@ export default function ReportMap({ cases, onOpen }: {
       </div>
 
       <div ref={wrapRef} style={{ padding: '0 18px 16px' }}>
-        <div style={{ position: 'relative', width: W, height: H, maxWidth: '100%',
+        <div ref={mapRef} style={{ position: 'relative', width: W, height: H, maxWidth: '100%',
           overflow: 'hidden', border: '1px solid var(--border)', borderRadius: 8,
           background: '#eef1f5', cursor: 'grab', touchAction: 'none', userSelect: 'none' }}
           onPointerDown={onPointerDown} onPointerMove={onPointerMove}
