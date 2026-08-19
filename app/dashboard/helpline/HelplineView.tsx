@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
 import { fmtInt } from '../../../lib/format';
-import { priorityBand, type CaseStatus } from '../../../lib/helpline-options';
+import { AREAS, priorityBand, type CaseStatus } from '../../../lib/helpline-options';
 
 export interface HlCase {
   id: number;
@@ -387,9 +387,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
         </table></div>
       </div>
 
-      {isAdmin && <TeamZones teams={teams} busy={busy} onSave={async (id, zones, factors) => {
-        await run(async () => db().from('outreach_teams').update({ zones, factors }).eq('id', id));
-      }} />}
+      {isAdmin && <TeamZones teams={teams} busy={busy} onSave={(id, zones, factors) =>
+        run(async () => db().from('outreach_teams').update({ zones, factors }).eq('id', id))} />}
     </>
   );
 }
@@ -414,45 +413,147 @@ function FragmentRow({ left, children }: { left: React.ReactNode; children: Reac
   );
 }
 
-/** Admin-only zone/factor editor — how the geography suggestion learns the
- *  coverage map. Comma-separated for v1; values must match AREAS to route. */
+/** Routing tags a team can carry — factor routing outranks geography. Fixed
+ *  list, same closed-domain rule as everything else. */
+const TEAM_TAGS: { key: string; label: string }[] = [
+  { key: 'veteran', label: 'Veterans' },
+  { key: 'youth', label: 'Youth 18–24' },
+  { key: 'family', label: 'Families with children' },
+];
+
+/**
+ * Admin-only coverage editor. Zones are TAP-CHIPS from the same AREAS list the
+ * intake form uses — a typed "hialeah" can never miss "Hialeah" because
+ * nothing is typed. Saving is explicit: the button only lights up when
+ * something changed, and a confirmation names exactly what was saved.
+ */
 function TeamZones({ teams, busy, onSave }: {
   teams: Team[]; busy: boolean;
-  onSave: (id: number, zones: string[], factors: string[]) => void;
+  onSave: (id: number, zones: string[], factors: string[]) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<Record<number, { z: string; f: string }>>({});
-  const val = (t: Team) => draft[t.id] ?? { z: t.zones.join(', '), f: t.factors.join(', ') };
+  const [editing, setEditing] = useState<number | null>(null);
+  const [zones, setZones] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  const startEdit = (t: Team) => {
+    setEditing(t.id);
+    setZones([...t.zones]);
+    setTags([...t.factors]);
+    setSaved(null);
+  };
+  const dirty = (t: Team) =>
+    JSON.stringify([...zones].sort()) !== JSON.stringify([...t.zones].sort())
+    || JSON.stringify([...tags].sort()) !== JSON.stringify([...t.factors].sort());
+
+  async function save(t: Team) {
+    const ok = await onSave(t.id, zones, tags);
+    if (ok) {
+      setSaved(`Saved — ${t.name} now covers ${zones.length ? zones.join(', ') : 'no areas'}`
+        + (tags.length ? ` · routes ${tags.map((k) => TEAM_TAGS.find((x) => x.key === k)?.label ?? k).join(', ')}` : ''));
+      setEditing(null);
+    }
+  }
+
   return (
     <div className="panel" style={{ marginTop: 18 }}>
       <div className="panel-h">
         <div>
           <h3>Team coverage (admin)</h3>
-          <div className="meta">Zones drive the geography suggestion · factor tags (veteran / youth / family) outrank it</div>
+          <div className="meta">Zones drive the geography suggestion · routing tags outrank it ·
+            pick from the same area list the intake uses</div>
         </div>
-        <button className="tbtn" onClick={() => setOpen(!open)}>{open ? 'Close' : 'Edit coverage'}</button>
+        <button className="tbtn" onClick={() => { setOpen(!open); setEditing(null); setSaved(null); }}>
+          {open ? 'Close' : 'Edit coverage'}</button>
       </div>
+      {saved && (
+        <div role="status" style={{ margin: '0 18px 12px', background: 'var(--accent-light)',
+          color: 'var(--accent)', borderRadius: 8, padding: '9px 14px', fontSize: 12.5, fontWeight: 600 }}>
+          ✓ {saved}
+        </div>
+      )}
       {open && (
         <div className="scroll"><table className="bnl-table">
-          <thead><tr><th>Team</th><th>Zones (comma-separated, must match the area list)</th><th>Factor tags</th><th></th></tr></thead>
+          <thead><tr><th>Team</th><th>Covers</th><th>Routing</th><th style={{ textAlign: 'right' }}></th></tr></thead>
           <tbody>
             {teams.map((t) => (
-              <tr key={t.id} style={{ cursor: 'default' }}>
-                <td className="bnl-nm" style={{ minWidth: 180 }}>{t.name}</td>
-                <td><input className="finput" style={{ width: '100%' }} value={val(t).z}
-                  onChange={(e) => setDraft((p) => ({ ...p, [t.id]: { ...val(t), z: e.target.value } }))} /></td>
-                <td style={{ minWidth: 140 }}><input className="finput" style={{ width: '100%' }} value={val(t).f}
-                  placeholder="veteran, youth, family"
-                  onChange={(e) => setDraft((p) => ({ ...p, [t.id]: { ...val(t), f: e.target.value } }))} /></td>
-                <td><button className="tbtn" disabled={busy}
-                  onClick={() => onSave(t.id,
-                    val(t).z.split(',').map((s) => s.trim()).filter(Boolean),
-                    val(t).f.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))}>Save</button></td>
-              </tr>
+              <FragmentZoneRow key={t.id}>
+                <tr style={{ cursor: 'default' }}>
+                  <td className="bnl-nm" style={{ minWidth: 180 }}>{t.name}</td>
+                  <td>{t.zones.length
+                    ? t.zones.map((z) => <span key={z} className="bnl-fp bnl-fp-par">{z}</span>)
+                    : <span className="bnl-sub">no zones — never suggested by geography</span>}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{t.factors.length
+                    ? t.factors.map((k) => <span key={k} className="bnl-fp bnl-fp-sch">
+                        {TEAM_TAGS.find((x) => x.key === k)?.label ?? k}</span>)
+                    : <span className="bnl-sub">—</span>}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button className="tbtn" disabled={busy}
+                      onClick={() => (editing === t.id ? setEditing(null) : startEdit(t))}>
+                      {editing === t.id ? 'Cancel' : 'Edit'}</button>
+                  </td>
+                </tr>
+                {editing === t.id ? (
+                  <tr style={{ cursor: 'default' }}>
+                    <td colSpan={4} style={{ background: 'var(--rowhover)' }}>
+                      <div style={{ padding: '8px 6px 14px' }}>
+                        <div className="bnl-sub" style={{ margin: '4px 0 6px', fontWeight: 700,
+                          textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                          Areas covered — tap to toggle ({zones.length} selected)</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {AREAS.map((a) => {
+                            const on = zones.includes(a);
+                            return (
+                              <button key={a} type="button" aria-pressed={on}
+                                onClick={() => setZones((p) => on ? p.filter((x) => x !== a) : [...p, a])}
+                                style={{ border: `1px solid ${on ? 'var(--secondary)' : 'var(--border)'}`,
+                                  background: on ? 'var(--primary-light)' : 'var(--card)',
+                                  color: on ? 'var(--strong)' : 'var(--muted)',
+                                  borderRadius: 16, padding: '5px 11px', fontSize: 12,
+                                  fontWeight: 600, cursor: 'pointer', font: 'inherit' }}>
+                                {on ? '✓ ' : ''}{a}</button>
+                            );
+                          })}
+                        </div>
+                        <div className="bnl-sub" style={{ margin: '12px 0 6px', fontWeight: 700,
+                          textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                          Routing — this team takes these callers countywide</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {TEAM_TAGS.map(({ key, label }) => {
+                            const on = tags.includes(key);
+                            return (
+                              <button key={key} type="button" aria-pressed={on}
+                                onClick={() => setTags((p) => on ? p.filter((x) => x !== key) : [...p, key])}
+                                style={{ border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+                                  background: on ? 'var(--accent-light)' : 'var(--card)',
+                                  color: on ? 'var(--strong)' : 'var(--muted)',
+                                  borderRadius: 16, padding: '5px 11px', fontSize: 12,
+                                  fontWeight: 600, cursor: 'pointer', font: 'inherit' }}>
+                                {on ? '✓ ' : ''}{label}</button>
+                            );
+                          })}
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                          <button className="btn primary" style={{ padding: '6px 16px', fontSize: 12.5 }}
+                            disabled={busy || !dirty(t)} onClick={() => save(t)}>
+                            {dirty(t) ? 'Save changes' : 'No changes'}</button>
+                          <button className="tbtn" style={{ marginLeft: 8 }}
+                            onClick={() => setEditing(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+              </FragmentZoneRow>
             ))}
           </tbody>
         </table></div>
       )}
     </div>
   );
+}
+
+function FragmentZoneRow({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
 }
