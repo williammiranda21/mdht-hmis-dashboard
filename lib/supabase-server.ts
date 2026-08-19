@@ -59,6 +59,9 @@ export interface Viewer {
    * queries would come back empty.
    */
   canSeeBnl: boolean;
+  /** May open Youth Connect (intake list, review queue, invites). Admins always
+   *  qualify; non-admins via the `yc_access` grant. Mirrors can_see_yc() SQL. */
+  canSeeYc: boolean;
 }
 
 /**
@@ -76,7 +79,10 @@ export async function getViewer(): Promise<Viewer | null> {
   if (!user) return null;
   const { data } = await supabase
     .from('profiles')
-    .select('display_name, agency, is_admin, bnl_access, status, email')
+    // '*' on purpose: naming yc_access explicitly would ERROR (and lock every
+    // viewer out as "pending") on a database where youth_connect.sql hasn't
+    // run yet. With '*', a missing column simply reads undefined → false.
+    .select('*')
     .eq('id', user.id)
     .maybeSingle();
   const status = (data?.status as ViewerStatus) ?? 'pending';
@@ -91,5 +97,6 @@ export async function getViewer(): Promise<Viewer | null> {
     status,
     isApproved,
     canSeeBnl: isAdmin || (isApproved && Boolean(data?.bnl_access)),
+    canSeeYc: isAdmin || (isApproved && Boolean(data?.yc_access)),
   };
 }

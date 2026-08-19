@@ -46,7 +46,9 @@ export default async function AdminPage() {
   const [{ data: profiles }, { data: grants }, { data: projects }] = await Promise.all([
     supabase
       .from('profiles')
-      .select('id, email, display_name, agency, is_admin, bnl_access, status, created_at')
+      // '*' so a database where youth_connect.sql (yc_access) hasn't run yet
+      // doesn't error the whole console — missing columns read undefined.
+      .select('*')
       .order('created_at', { ascending: false }),
     supabase.from('user_projects').select('user_id, project_id'),
     supabase.from('projects').select('project_id, name, type_name').order('name'),
@@ -66,6 +68,7 @@ export default async function AdminPage() {
     agency: p.agency,
     isAdmin: Boolean(p.is_admin),
     bnlAccess: Boolean(p.bnl_access),
+    ycAccess: Boolean(p.yc_access),
     status: p.status,
     createdAt: p.created_at,
     lastSignInAt: lastSignIn.get(p.id) ?? null,

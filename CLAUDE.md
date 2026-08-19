@@ -369,7 +369,24 @@ Load half, in order (`py hmis-web/pipeline/<script>` — use SYSTEM `py`, the ro
 8. `snapshot_dq.py` (fixed-since-refresh ledger capture)
 9. `prune_stale_bnl.py` (BNL orphan prune)
 10. `snapshot_cohorts.py` (cohort trend points — last, roster is final)
+11. `load_client_index.py` (Youth Connect match index — all Client.csv identifiers;
+    service-role-only table, feeds /api/yc/match; any order among the recomputes)
 
 Skipping the load half leaves Supabase stale while local JSONs advance — the classic
 "which half ran" trap (§6). New SQL run-once files since 2026-07-31: `targets.sql`,
-`dq_snapshots.sql`, `user_dq.sql`, `cohorts.sql` (all already run in prod).
+`dq_snapshots.sql`, `user_dq.sql`, `cohorts.sql` (all already run in prod),
+`youth_connect.sql` (2026-08-19 — Youth Connect: youth_intakes/intake_invites/
+client_index + profiles.yc_access + can_see_yc()).
+
+### Youth Connect (2026-08-19)
+Youth intake + self-entry portal. Access = admins + `profiles.yc_access`
+(granted to Educate Tomorrow). Surfaces: PUBLIC `/yc/[token]` (invite-tokened
+self-entry, no account; the app's only unauthenticated write, via
+`/api/yc/submit` service-role insert after token validation) ·
+`/dashboard/youth-intake` (review queue + intake list + invite links) ·
+`/dashboard/youth-intake/new` (staff intake with SSN-4 + internal case notes) ·
+BNL drawer "Youth Connect" section (components/YcSection.tsx — matched intake's
+contact/situation, for case conferencing). Matching is SUGGEST-ONLY
+(/api/yc/match: DOB/SSN-4/name-similarity against client_index; a person
+confirms). HMIS/WellSky stays the system of record — unmatched youth are
+flagged for HMIS entry, never written around.

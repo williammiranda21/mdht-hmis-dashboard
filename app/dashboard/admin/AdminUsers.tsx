@@ -15,6 +15,8 @@ export interface AdminProfile {
    *  Admins always have it (can_see_bnl() ORs the two), so this only matters
    *  for non-admins. The BNL contains real names — grant sparingly. */
   bnlAccess: boolean;
+  /** Youth Connect (intake list + review + invites). Admins always have it. */
+  ycAccess: boolean;
   status: 'pending' | 'approved' | 'disabled';
   createdAt: string;
   /** auth.users.last_sign_in_at — stamped on fresh sign-ins only (a session
@@ -92,6 +94,9 @@ export default function AdminUsers({
 
   const setBnlAccess = (r: AdminProfile, bnl: boolean) =>
     run(r.id, async () => db().from('profiles').update({ bnl_access: bnl }).eq('id', r.id));
+
+  const setYcAccess = (r: AdminProfile, yc: boolean) =>
+    run(r.id, async () => db().from('profiles').update({ yc_access: yc }).eq('id', r.id));
 
   async function saveProjects(r: AdminProfile, ids: number[]) {
     await run(r.id, async () => {
@@ -171,6 +176,13 @@ export default function AdminUsers({
                 title="By-Name List contains real client names. Grant only to staff who need it."
                 onClick={() => setBnlAccess(r, !r.bnlAccess)}>
                 {r.bnlAccess ? 'Revoke BNL access' : 'Grant BNL access'}
+              </button>
+            )}
+            {!r.isAdmin && r.status === 'approved' && (
+              <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy === r.id}
+                title="Youth Connect: intake list, review queue, invite links. Intended for Educate Tomorrow."
+                onClick={() => setYcAccess(r, !r.ycAccess)}>
+                {r.ycAccess ? 'Revoke Youth Intake' : 'Grant Youth Intake'}
               </button>
             )}
             <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy === r.id}

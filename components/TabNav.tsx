@@ -15,6 +15,9 @@ const TABS = [
   { href: '/dashboard/dq', label: 'Data Quality', icon: 'search' },
   { href: '/dashboard/utilization', label: 'Unit Utilization', icon: 'bed' },
   { href: '/dashboard/bnl', label: 'By-Name List', icon: 'lock' },
+  // Youth Connect: admins + yc_access grantees (Educate Tomorrow). Hidden from
+  // everyone else — the page re-checks, hiding the tab is not the boundary.
+  { href: '/dashboard/youth-intake', label: 'Youth Intake', icon: 'sprout', ycOnly: true },
   { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy', adminOnly: true },
   { href: '/dashboard/deep-dive', label: 'Deep Dive', icon: 'search' },
   { href: '/dashboard/glossary', label: 'Glossary', icon: 'book' },
@@ -73,6 +76,12 @@ const ICONS: Record<string, JSX.Element> = {
       <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" />
     </>
   ),
+  sprout: (
+    <>
+      <path d="M12 21v-8" />
+      <path d="M12 13c0-4-3-7-8-7 0 5 3 8 8 7zM12 11c0-3.5 2.5-6 8-6 0 4.5-2.5 7-8 6" />
+    </>
+  ),
   cohort: (
     <>
       <circle cx="8" cy="8" r="3" /><circle cx="16" cy="8" r="3" />
@@ -89,9 +98,10 @@ const ICONS: Record<string, JSX.Element> = {
 
 type Tab = (typeof TABS)[number];
 const isAdminTab = (t: Tab): boolean => 'adminOnly' in t && t.adminOnly === true;
+const isYcTab = (t: Tab): boolean => 'ycOnly' in t && t.ycOnly === true;
 
-export default function TabNav({ isAdmin = false, cohortAccess = false }:
-    { isAdmin?: boolean; cohortAccess?: boolean }) {
+export default function TabNav({ isAdmin = false, cohortAccess = false, ycAccess = false }:
+    { isAdmin?: boolean; cohortAccess?: boolean; ycAccess?: boolean }) {
   const pathname = usePathname();
   const search = useSearchParams();
   const qs = search.toString();
@@ -112,8 +122,9 @@ export default function TabNav({ isAdmin = false, cohortAccess = false }:
   // A non-admin who was granted specific cohorts (cohort_access) gets the
   // Cohorts tab in the main list — the page itself is RLS-scoped to their
   // grants. Admins keep it in the Admin section as before.
-  const regular = TABS.filter((t) => !isAdminTab(t)
-    || (!isAdmin && cohortAccess && t.href === '/dashboard/admin/cohorts'));
+  const regular = TABS.filter((t) => (!isAdminTab(t)
+    || (!isAdmin && cohortAccess && t.href === '/dashboard/admin/cohorts'))
+    && (!isYcTab(t) || isAdmin || ycAccess));
   const admin = TABS.filter(isAdminTab);
 
   return (

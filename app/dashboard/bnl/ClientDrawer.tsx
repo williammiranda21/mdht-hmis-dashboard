@@ -7,6 +7,7 @@ import {
 } from './types';
 import HistoryCard from './HistoryCard';
 import Notes from './Notes';
+import YcSection from '../../../components/YcSection';
 
 /**
  * The client card (drawer) — extracted from BnlView 2026-08-11 so the cohort
@@ -287,6 +288,11 @@ export default function ClientDrawer({ row, asOf, isAdmin = false, onClose, focu
             </div>
           ))}
         </div>
+        {/* Youth Connect: matched intake (self-reported contact + situation),
+            surfaced here because the BNL is the case-conferencing venue.
+            Renders nothing for viewers without yc_access or clients without
+            a matched intake. */}
+        <YcSection pid={row.pid} />
         {/* Last in the drawer: the record is read top-down (who they are →
             history → enrollments), and notes are what you add after reading. */}
         <Notes pid={row.pid} />

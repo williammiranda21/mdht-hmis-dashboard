@@ -9,7 +9,10 @@ import { NextResponse, type NextRequest } from 'next/server';
  * sign-in). This is defence in depth — RLS is the real boundary — but it keeps
  * unauthenticated users from ever rendering a page shell.
  */
-const PUBLIC_PATHS = ['/login', '/signup', '/auth/callback', '/forgot'];
+// /yc is the Youth Connect self-entry portal: youth open it from a tokened
+// invite link with no account. The token check happens server-side in the page
+// and in /api/yc/submit — the middleware just lets the request through.
+const PUBLIC_PATHS = ['/login', '/signup', '/auth/callback', '/forgot', '/yc', '/api/yc/submit'];
 
 export async function middleware(req: NextRequest) {
   let res = NextResponse.next({ request: { headers: req.headers } });
