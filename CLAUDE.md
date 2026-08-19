@@ -388,7 +388,13 @@ run-once): `helpline_cases` (one per person-episode: identity, area/address/
 lat-lng, factors, priority, team, outcome, verification), `helpline_calls`
 (immutable call events — repeat calls join the open case), `outreach_teams`
 (seeded from the 13 active SO projects; zones + factor tags drive the
-suggest-only assignment: factors outrank geography, load breaks ties).
+suggest-only assignment via the SHARED `suggestTeam` in lib/helpline-options.ts:
+factors outrank geography; geography = exact area first, then the pin-stamped
+County Commission District (`COUNTY_ZONES` fallback, so calls outside the City
+of Miami still route once teams carry county zones); fewest open cases breaks
+ties. The intake form shows the live suggestion with reason + optional
+assign-on-save; the call map's district counter names covering teams, or warns
+when a district is uncovered).
 Surfaces: `/dashboard/helpline` (KPIs, triage queue, team board, all-cases +
 admin zone editor) · `/new` (call intake: repeat-caller banner by phone,
 priority computed live from lib/helpline-options.ts closed lists, geocoding

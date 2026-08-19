@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../../../lib/supabase-browser';
 import {
   AREAS, SLEEPING_OPTIONS, HOUSEHOLD_OPTIONS, FACTORS, priorityOf, priorityBand,
+  suggestTeam, type RoutableTeam,
 } from '../../../../lib/helpline-options';
 import { featuresAt, type GeoFC } from '../../../../lib/slippy';
 
@@ -51,7 +52,29 @@ export default function CallIntakeForm({ me }: { me: string }) {
   const [pin, setPin] = useState<GeoHit | null>(null);
   const [countyDist, setCountyDist] = useState<string | null>(null);
   const [distNote, setDistNote] = useState<string | null>(null);
+  const [teams, setTeams] = useState<RoutableTeam[]>([]);
+  const [openBy, setOpenBy] = useState<Map<number, number>>(new Map());
+  const [assignNow, setAssignNow] = useState(false);
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
+
+  // Teams + their open-case load, once per form — feeds the live suggestion
+  // (same suggestTeam the triage queue uses, so the two always agree).
+  useEffect(() => {
+    (async () => {
+      const db = supabaseBrowser();
+      const [t, oc] = await Promise.all([
+        db.from('outreach_teams').select('id, name, zones, factors, active').eq('active', true),
+        db.from('helpline_cases').select('team_id')
+          .in('status', ['assigned', 'attempted', 'contacted']).not('team_id', 'is', null),
+      ]);
+      setTeams((t.data ?? []) as RoutableTeam[]);
+      const m = new Map<number, number>();
+      for (const r of (oc.data ?? []) as { team_id: number }[]) {
+        m.set(r.team_id, (m.get(r.team_id) ?? 0) + 1);
+      }
+      setOpenBy(m);
+    })();
+  }, []);
 
   // Repeat-caller check: same number, any prior case. Debounced on the digits.
   useEffect(() => {
@@ -116,6 +139,9 @@ export default function CallIntakeForm({ me }: { me: string }) {
 
   const pts = priorityOf(factors, f.household || null, f.sleeping || null);
   const band = priorityBand(pts);
+  const sug = teams.length ? suggestTeam(
+    { factors, household: f.household || null, area: f.area || null, county_district: countyDist },
+    teams, openBy) : null;
 
   async function submit() {
     if (busy) return;
@@ -129,6 +155,11 @@ export default function CallIntakeForm({ me }: { me: string }) {
     for (const [k, v] of Object.entries(f)) if (v.trim()) row[k] = v.trim();
     if (pin) { row.lat = pin.lat; row.lng = pin.lng; }
     if (countyDist) row.county_district = countyDist;
+    if (assignNow && sug) {
+      row.team_id = sug.team.id;
+      row.status = 'assigned';
+      row.assigned_at = new Date().toISOString();
+    }
     const db = supabaseBrowser();
     const { data, error } = await db.from('helpline_cases').insert(row).select('id').single();
     if (!error && data) {
@@ -302,9 +333,30 @@ export default function CallIntakeForm({ me }: { me: string }) {
           placeholder="What they said, callback window, safety context…"
           onChange={(e) => set('notes')(e.target.value)} />
 
+        {sug && (
+          <div style={{ background: 'var(--primary-soft)', border: '1px solid var(--primary-light)',
+            borderRadius: 8, padding: '10px 14px', fontSize: 12.5, marginTop: 14 }}>
+            <b style={{ color: 'var(--strong)' }}>Suggested team: {sug.team.name}</b>
+            <span className="bnl-sub"> · {sug.why} · {openBy.get(sug.team.id) ?? 0} open
+              case{(openBy.get(sug.team.id) ?? 0) === 1 ? '' : 's'}</span>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 7,
+              cursor: 'pointer', color: 'var(--text)' }}>
+              <input type="checkbox" checked={assignNow}
+                onChange={(e) => setAssignNow(e.target.checked)} />
+              Assign to this team on save — unchecked, the call lands in the triage queue
+            </label>
+          </div>
+        )}
+        {!sug && teams.length > 0 && (f.area || countyDist) && (
+          <div className="bnl-sub" style={{ marginTop: 14 }}>
+            No team covers {f.area || countyDist} yet — the call goes to the triage queue for
+            manual assignment. Admins set zones under Team coverage on the Helpline page.
+          </div>
+        )}
+
         <div style={{ marginTop: 14 }}>
           <button className="btn primary" disabled={busy} onClick={submit}>
-            {busy ? 'Saving…' : 'Save call'}
+            {busy ? 'Saving…' : assignNow && sug ? `Save + assign → ${sug.team.name}` : 'Save call'}
           </button>
         </div>
       </div>

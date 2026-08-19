@@ -26,6 +26,13 @@ export const AREAS = [
   'Unincorporated / other',
 ] as const;
 
+/** Miami-Dade County Commission Districts — the countywide zone layer.
+ *  Strings match the `County District N` stamp intake writes to
+ *  helpline_cases.county_district (point-in-polygon on the pin, IDs 1–13).
+ *  Teams carry these in the same zones[] as AREAS values; the suggestion
+ *  falls back to them when no team covers the specific area. */
+export const COUNTY_ZONES = Array.from({ length: 13 }, (_, i) => `County District ${i + 1}`);
+
 export const SLEEPING_OPTIONS = [
   'Street / outside',
   'Car',
@@ -75,3 +82,51 @@ export const CASE_STATUSES = [
   'declined', 'no_locate', 'closed',
 ] as const;
 export type CaseStatus = (typeof CASE_STATUSES)[number];
+
+/** The minimal shapes team suggestion needs — HelplineView's HlCase and Team
+ *  satisfy these, and the intake form builds them from live form state. */
+export interface RoutableCase {
+  factors: string[];
+  household: string | null;
+  area: string | null;
+  county_district: string | null;
+}
+export interface RoutableTeam {
+  id: number; name: string; zones: string[]; factors: string[]; active: boolean;
+}
+
+/**
+ * Suggested team + the reason — ONE implementation shared by the intake form
+ * and the triage queue, so the two can never disagree. Factor routing outranks
+ * geography (a veteran team takes veterans countywide). Geography is the
+ * specific area first, then the County Commission District stamped from the
+ * pin — so a call outside the City of Miami still gets a geographic suggestion
+ * once teams carry COUNTY_ZONES. Ties broken by fewer open cases.
+ * Suggest-only — the operator picks the team either way.
+ */
+export function suggestTeam<T extends RoutableTeam>(
+  c: RoutableCase, teams: T[], openByTeam: Map<number, number>,
+): { team: T; why: string } | null {
+  const active = teams.filter((t) => t.active);
+  const load = (t: T) => openByTeam.get(t.id) ?? 0;
+  const best = (xs: T[]) => [...xs].sort((a, b) => load(a) - load(b))[0];
+  const FACTOR_WHY: Record<string, string> = {
+    veteran: 'takes veteran callers countywide',
+    youth: 'takes youth callers countywide',
+    family: 'takes families with children countywide',
+  };
+  const matchTag = (t: T) => t.factors.find((f) =>
+    (f === 'veteran' && c.factors.includes('Veteran'))
+    || (f === 'youth' && c.factors.includes('Youth 18–24'))
+    || (f === 'family' && c.household === 'With children'));
+  const factorHit = active.filter((t) => matchTag(t) !== undefined);
+  if (factorHit.length) {
+    const team = best(factorHit);
+    return { team, why: FACTOR_WHY[matchTag(team)!] ?? 'routing tag match' };
+  }
+  const areaHit = active.filter((t) => c.area && t.zones.includes(c.area));
+  if (areaHit.length) return { team: best(areaHit), why: `covers ${c.area}` };
+  const countyHit = active.filter((t) => c.county_district && t.zones.includes(c.county_district));
+  if (countyHit.length) return { team: best(countyHit), why: `covers ${c.county_district}` };
+  return null;
+}

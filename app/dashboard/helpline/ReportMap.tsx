@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { tilesFor, frameFor, toPx, unproject, project, inFeature, TILE, type GeoFC } from '../../../lib/slippy';
-import type { HlCase } from './HelplineView';
+import type { HlCase, Team } from './HelplineView';
 
 /**
  * Reporting map — every geocoded case as a dot, navigable (drag to pan,
@@ -61,8 +61,21 @@ function featureName(props?: Record<string, unknown>): string {
   return dist != null ? `District ${dist}` : '';
 }
 
-export default function ReportMap({ cases, onOpen }: {
-  cases: HlCase[]; onOpen: (c: HlCase) => void;
+/** The zone string a boundary corresponds to in outreach_teams.zones —
+ *  city districts and county districts only (ZIPs/tracts don't route). */
+function zoneOf(key: LayerKey, props?: Record<string, unknown>): string | null {
+  if (!props) return null;
+  if (key === 'districts' && props.COMDISTID != null && props.COMDISTID !== '') {
+    return `Miami District ${props.COMDISTID}`;
+  }
+  if (key === 'county' && props.ID != null && props.ID !== '') {
+    return `County District ${props.ID}`;
+  }
+  return null;
+}
+
+export default function ReportMap({ cases, teams = [], onOpen }: {
+  cases: HlCase[]; teams?: Team[]; onOpen: (c: HlCase) => void;
 }) {
   const [center, setCenter] = useState<{ lat: number; lng: number }>(
     { lat: VIEWS.metro.lat, lng: VIEWS.metro.lng });
@@ -342,6 +355,22 @@ export default function ReportMap({ cases, onOpen }: {
                   {d.label}: <b style={{ color: 'var(--text)' }}>{selCounts.by[k]}</b>
                 </div>
               ))}
+              {(() => {
+                // which teams the suggestion would route this district to
+                const zone = sel ? zoneOf(sel.key, selFeature.properties) : null;
+                if (!zone || !teams.length) return null;
+                const cover = teams.filter((t) => t.active && t.zones.includes(zone));
+                return (
+                  <div className="bnl-sub" style={{ marginTop: 6, paddingTop: 6,
+                    borderTop: '1px solid var(--hair)', maxWidth: 230 }}>
+                    {cover.length
+                      ? <>Covered by <b style={{ color: 'var(--text)' }}>
+                          {cover.map((t) => t.name).join(', ')}</b></>
+                      : <span style={{ color: 'var(--warn)', fontWeight: 600 }}>
+                          No team covers {zone} — set it in Team coverage below</span>}
+                  </div>
+                );
+              })()}
             </div>
           )}
 

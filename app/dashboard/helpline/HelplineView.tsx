@@ -7,7 +7,7 @@ import { supabaseBrowser } from '../../../lib/supabase-browser';
 import { fmtInt } from '../../../lib/format';
 import CaseMap from '../../../components/CaseMap';
 import ReportMap from './ReportMap';
-import { AREAS, MAX_FAILED_ATTEMPTS, priorityBand, type CaseStatus } from '../../../lib/helpline-options';
+import { AREAS, COUNTY_ZONES, MAX_FAILED_ATTEMPTS, priorityBand, suggestTeam, type CaseStatus } from '../../../lib/helpline-options';
 
 export interface HlCase {
   id: number;
@@ -96,21 +96,6 @@ function statusDate(c: HlCase): string | null {
 function ChipDated({ c }: { c: HlCase }) {
   const d = statusDate(c);
   return <><Chip s={c.status} />{d && <div className="bnl-sub" style={{ marginTop: 2 }}>{d}</div>}</>;
-}
-
-/** Suggested team: factor routing outranks geography; ties broken by fewer
- *  open cases. Suggest-only — the operator picks the team either way. */
-function suggestTeam(c: HlCase, teams: Team[], openByTeam: Map<number, number>): Team | null {
-  const active = teams.filter((t) => t.active);
-  const load = (t: Team) => openByTeam.get(t.id) ?? 0;
-  const factorHit = active.filter((t) =>
-    t.factors.some((f) => (f === 'veteran' && c.factors.includes('Veteran'))
-      || (f === 'youth' && c.factors.includes('Youth 18–24'))
-      || (f === 'family' && c.household === 'With children')));
-  if (factorHit.length) return factorHit.sort((a, b) => load(a) - load(b))[0];
-  const zoneHit = active.filter((t) => c.area && t.zones.includes(c.area));
-  if (zoneHit.length) return zoneHit.sort((a, b) => load(a) - load(b))[0];
-  return null;
 }
 
 const OPEN_STATUSES: CaseStatus[] = ['assigned', 'attempted', 'contacted'];
@@ -293,9 +278,9 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
       <div style={{ whiteSpace: 'nowrap' }}>
         {sug && (
           <button className="btn primary" style={{ padding: '5px 12px', fontSize: 12 }}
-            disabled={busy} title={`Suggested: covers ${c.area ?? '?'} — ${openByTeam.get(sug.id) ?? 0} open cases`}
-            onClick={() => assign(c, sug.id)}>
-            Assign → {sug.name.length > 26 ? `${sug.name.slice(0, 24)}…` : sug.name}
+            disabled={busy} title={`Suggested: ${sug.why} — ${openByTeam.get(sug.team.id) ?? 0} open cases`}
+            onClick={() => assign(c, sug.team.id)}>
+            Assign → {sug.team.name.length > 26 ? `${sug.team.name.slice(0, 24)}…` : sug.team.name}
           </button>
         )}
         <select className="fselect" aria-label="Assign to team" defaultValue=""
@@ -336,7 +321,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
         <div className="panel-h">
           <div>
             <h3>Triage queue</h3>
-            <div className="meta">New calls, highest priority first · suggestion = factors, then geography, then load</div>
+            <div className="meta">New calls, highest priority first · suggestion = factors → area → county district · fewest open cases breaks ties</div>
           </div>
           <Link className="btn primary" href="/dashboard/helpline/new">☎ New call</Link>
         </div>
@@ -574,7 +559,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
         </table></div>
       </div>
 
-      <ReportMap cases={cases} onOpen={(c) => setDrawerC(c)} />
+      <ReportMap cases={cases} teams={teams} onOpen={(c) => setDrawerC(c)} />
 
       {drawerC && (
         <CaseDrawer c={cases.find((x) => x.id === drawerC.id) ?? drawerC}
@@ -821,8 +806,9 @@ function TeamZones({ teams, busy, onSave }: {
       <div className="panel-h">
         <div>
           <h3>Team coverage (admin)</h3>
-          <div className="meta">Zones drive the geography suggestion · routing tags outrank it ·
-            pick from the same area list the intake uses</div>
+          <div className="meta">Zones drive the geography suggestion — specific areas first, county
+            districts as the countywide fallback · routing tags outrank both ·
+            pick from the same lists the intake uses</div>
         </div>
         <button className="tbtn" onClick={() => { setOpen(!open); setEditing(null); setSaved(null); }}>
           {open ? 'Close' : 'Edit coverage'}</button>
@@ -863,6 +849,25 @@ function TeamZones({ teams, busy, onSave }: {
                           Areas covered — tap to toggle ({zones.length} selected)</div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                           {AREAS.map((a) => {
+                            const on = zones.includes(a);
+                            return (
+                              <button key={a} type="button" aria-pressed={on}
+                                onClick={() => setZones((p) => on ? p.filter((x) => x !== a) : [...p, a])}
+                                style={{ border: `1px solid ${on ? 'var(--secondary)' : 'var(--border)'}`,
+                                  background: on ? 'var(--primary-light)' : 'var(--card)',
+                                  color: on ? 'var(--strong)' : 'var(--muted)',
+                                  borderRadius: 16, padding: '5px 11px', fontSize: 12,
+                                  fontWeight: 600, cursor: 'pointer', font: 'inherit' }}>
+                                {on ? '✓ ' : ''}{a}</button>
+                            );
+                          })}
+                        </div>
+                        <div className="bnl-sub" style={{ margin: '12px 0 6px', fontWeight: 700,
+                          textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                          County Commission Districts — fallback when no team covers the specific
+                          area (auto-stamped on the case from the call&rsquo;s pin)</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {COUNTY_ZONES.map((a) => {
                             const on = zones.includes(a);
                             return (
                               <button key={a} type="button" aria-pressed={on}

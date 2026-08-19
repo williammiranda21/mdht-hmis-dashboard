@@ -30,7 +30,9 @@ grant execute on function public.can_see_helpline() to authenticated;
 -- ── Outreach teams ────────────────────────────────────────────────────────────
 -- Seeded from the active HMIS Street Outreach projects so an assignment can
 -- bind to a real ProjectID (closes the loop when the SO enrollment appears).
--- zones = areas covered (values from lib/helpline-options.ts AREAS);
+-- zones = areas covered (lib/helpline-options.ts AREAS values, plus
+-- COUNTY_ZONES 'County District 1'..'13' — the countywide fallback matched
+-- against helpline_cases.county_district when no team covers the exact area);
 -- factors = routing tags that outrank geography ('veteran','youth','family').
 create table if not exists outreach_teams (
   id         bigint generated always as identity primary key,
