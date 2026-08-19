@@ -331,7 +331,15 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
                         onClick={() => update(c.id, { status: 'confirmed', confirmed_at: new Date().toISOString().slice(0, 10) })}>
                         Confirmed homeless</button>
                       <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
-                        onClick={() => update(c.id, { status: 'no_locate' })}>No-locate</button>
+                        title="FINAL — closes the case and removes it from this board. “Couldn't find them today” is Log attempt, not this."
+                        onClick={() => {
+                          const warn = c.attempts === 0
+                            ? 'No attempts have been logged on this case.\n\n'
+                            : `${c.attempts} attempt${c.attempts === 1 ? '' : 's'} logged.\n\n`;
+                          if (confirm(`${warn}Close this case as COULD NOT LOCATE? It leaves the team board (it can be reopened from All cases).`)) {
+                            update(c.id, { status: 'no_locate' });
+                          }
+                        }}>Close · can&rsquo;t locate</button>
                     </td>
                   </tr>
                 ))}
@@ -354,7 +362,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
             aria-label="Search cases" />
         </div>
         <div className="scroll"><table className="bnl-table">
-          <thead><tr><th>Caller</th><th>Called</th><th>Team</th><th>Status</th><th>Enrollment</th><th style={{ textAlign: 'right' }}></th></tr></thead>
+          <thead><tr><th>Caller</th><th>Called</th><th>Team</th><th>Status</th><th>Attempts</th><th>Enrollment</th><th style={{ textAlign: 'right' }}></th></tr></thead>
           <tbody>
             {[...confirmed, ...done].filter((c) => !t || searchable(c).includes(t)).map((c) => (
               <tr key={c.id} style={{ cursor: 'default' }}>
@@ -362,6 +370,15 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
                 <td style={{ whiteSpace: 'nowrap' }}>{when(c.created_at)}</td>
                 <td>{c.team_id != null ? (teamById.get(c.team_id)?.name ?? '?') : '—'}</td>
                 <td><Chip s={c.status} /></td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  {/* how hard was this case worked — matters most on no-locates */}
+                  {c.attempts > 0
+                    ? <><b>×{c.attempts}</b>{c.last_attempt && <span className="bnl-sub"> · last {c.last_attempt}</span>}</>
+                    : <span className="bnl-sub"
+                        style={c.status === 'no_locate' ? { color: 'var(--danger)', fontWeight: 700 } : undefined}
+                        title={c.status === 'no_locate' ? 'Closed as could-not-locate with no attempt ever logged' : undefined}>
+                        {c.status === 'no_locate' ? 'none logged ⚠' : '—'}</span>}
+                </td>
                 <td>
                   {c.status !== 'confirmed' ? <span className="bnl-sub">—</span>
                     : c.verified_entry
@@ -376,11 +393,17 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
                     <Link className="tbtn" style={{ marginLeft: 6 }}
                       href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}>BNL →</Link>
                   )}
+                  {['no_locate', 'declined', 'closed'].includes(c.status) && (
+                    <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
+                      title="Back to the team board (keeps the team) — e.g. a new sighting or the caller called again"
+                      onClick={() => update(c.id, { status: c.team_id != null ? 'assigned' : 'new' })}>
+                      Reopen</button>
+                  )}
                 </td>
               </tr>
             ))}
             {!confirmed.length && !done.length && (
-              <tr><td colSpan={6} className="empty" style={{ cursor: 'default' }}>
+              <tr><td colSpan={7} className="empty" style={{ cursor: 'default' }}>
                 Cases appear here once outreach records an outcome.</td></tr>
             )}
           </tbody>

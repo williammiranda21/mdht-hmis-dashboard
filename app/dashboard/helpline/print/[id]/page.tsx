@@ -6,6 +6,40 @@ export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Dispatch Sheet' };
 
 /**
+ * Static map block — OSM tiles through our own proxy (/api/helpline/tile) so
+ * county PCs never call out, composed with plain slippy-map math and printed
+ * as ordinary positioned <img>s. No map library, nothing interactive.
+ */
+function MapBlock({ lat, lng }: { lat: number; lng: number }) {
+  const Z = 16, T = 256, W = 632, H = 340;
+  const n = 2 ** Z;
+  const rad = (lat * Math.PI) / 180;
+  // global pixel position of the pin at zoom Z
+  const px = ((lng + 180) / 360) * n * T;
+  const py = ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n * T;
+  const left = px - W / 2, top = py - H / 2;
+  const x0 = Math.floor(left / T), y0 = Math.floor(top / T);
+  const tiles: { x: number; y: number; sx: number; sy: number }[] = [];
+  for (let x = x0; x * T < left + W; x++) {
+    for (let y = y0; y * T < top + H; y++) {
+      if (x < 0 || y < 0 || x >= n || y >= n) continue;
+      tiles.push({ x, y, sx: x * T - left, sy: y * T - top });
+    }
+  }
+  return (
+    <div className="map" style={{ width: W, height: H }}>
+      {tiles.map((t) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img key={`${t.x}/${t.y}`} src={`/api/helpline/tile/${Z}/${t.x}/${t.y}`} alt=""
+          width={T} height={T} style={{ left: t.sx, top: t.sy }} />
+      ))}
+      <div className="pin" aria-hidden="true">📍</div>
+      <div className="attr">© OpenStreetMap contributors</div>
+    </div>
+  );
+}
+
+/**
  * One-page dispatch sheet for the outreach team — print it or save as PDF
  * (user directive 2026-08-19). Deliberately dependency-free: print CSS +
  * the browser's own Print-to-PDF, which works on county PCs where nothing
@@ -57,6 +91,14 @@ export default async function DispatchSheet({ params }: { params: { id: string }
         .ds .v{font-weight:600}
         .ds .big{font-size:16px;font-weight:800}
         .ds .loc{background:#f4f6fa;border:1px solid #d8dee8;border-radius:8px;padding:12px 16px;margin-top:6px}
+        .ds .map{position:relative;overflow:hidden;border:1px solid #d8dee8;border-radius:8px;
+          margin-top:10px;max-width:100%;background:#eef1f5;
+          -webkit-print-color-adjust:exact;print-color-adjust:exact}
+        .ds .map img{position:absolute;display:block;max-width:none}
+        .ds .pin{position:absolute;left:50%;top:50%;transform:translate(-50%,-92%);font-size:30px;
+          text-shadow:0 1px 2px rgba(0,0,0,.35);z-index:2}
+        .ds .attr{position:absolute;right:4px;bottom:2px;font-size:9px;color:#5c6a7d;z-index:2;
+          background:rgba(255,255,255,.75);padding:0 4px;border-radius:3px}
         .ds .note{white-space:pre-wrap}
         .ds .foot{margin-top:18px;padding-top:8px;border-top:1px solid #e4e8ef;color:#5c6a7d;font-size:11px}
         .ds .btnrow{margin:0 auto 14px;max-width:820px;text-align:right}
@@ -94,6 +136,13 @@ export default async function DispatchSheet({ params }: { params: { id: string }
           {maps && <><span className="k">Map</span><span className="v" style={{ fontWeight: 400 }}>
             <a href={maps} style={{ color: '#1a56db' }}>{maps}</a></span></>}
         </div>
+        {c.lat != null && c.lng != null && <MapBlock lat={c.lat} lng={c.lng} />}
+        {(c.lat == null || c.lng == null) && (c.address || c.landmark) && (
+          <div style={{ marginTop: 8, fontSize: 11.5, color: '#5c6a7d' }}>
+            No map pin — the call was saved without coordinates. Use 📍 Locate on the
+            intake next time to put the map on this sheet.
+          </div>
+        )}
       </div>
 
       <h2>Reach them</h2>
