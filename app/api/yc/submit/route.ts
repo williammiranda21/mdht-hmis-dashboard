@@ -63,6 +63,10 @@ export async function POST(req: Request) {
   // rather than rejected — a youth who skips DOB should still get through.
   const dob = String(p.dob ?? '').trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(dob)) row.dob = dob;
+  // SSN last-4 (optional, user call 2026-08-19): exactly 4 digits or dropped.
+  // Never a reason to reject — it only exists to sharpen HMIS matching.
+  const ssn4 = String(p.ssn4 ?? '').trim();
+  if (/^\d{4}$/.test(ssn4)) row.ssn4 = ssn4;
   if (!row.first_name && !row.contact) {
     return NextResponse.json(
       { error: 'a name or a way to reach you is needed' }, { status: 400 });

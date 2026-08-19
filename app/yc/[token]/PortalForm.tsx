@@ -14,7 +14,7 @@ export default function PortalForm({ token }: { token: string }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [f, setF] = useState({
-    first_name: '', last_name: '', dob: '', contact: '',
+    first_name: '', last_name: '', dob: '', ssn4: '', contact: '',
     sleeping: '', unsafe: '', school_work: '', website: '',
   });
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
@@ -62,6 +62,11 @@ export default function PortalForm({ token }: { token: string }) {
           <label className="yclabel" htmlFor="dob">Date of birth — helps us find your file, okay to skip</label>
           <input className="ycinp" id="dob" type="date" value={f.dob}
             onChange={(e) => set('dob')(e.target.value)} />
+          <label className="yclabel" htmlFor="s4">Last 4 of your Social — totally optional. If you&rsquo;ve
+            gotten help before, this finds your file so you don&rsquo;t start over.</label>
+          <input className="ycinp" id="s4" inputMode="numeric" autoComplete="off"
+            placeholder="••••" maxLength={4} value={f.ssn4}
+            onChange={(e) => set('ssn4')(e.target.value.replace(/\D/g, ''))} />
           {/* honeypot — invisible to people, tempting to bots */}
           <div className="ychoney" aria-hidden="true">
             <label>Website<input tabIndex={-1} autoComplete="off" value={f.website}
