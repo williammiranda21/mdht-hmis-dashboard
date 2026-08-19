@@ -124,6 +124,16 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
   const [cands, setCands] = useState<Record<number, Candidate[] | 'loading'>>({});
   const [mapId, setMapId] = useState<number | null>(null);
   const [q, setQ] = useState('');
+  // All-cases filters + sort (user ask 2026-08-19)
+  const [fStatus, setFStatus] = useState('');
+  const [fTeam, setFTeam] = useState('');           // '' all · 'none' · team id
+  const [fEnroll, setFEnroll] = useState('');       // '' all · 'verified' · 'gap'
+  const [sortKey, setSortKey] = useState<'name' | 'called' | 'team' | 'status' | 'trail' | 'enroll'>('called');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const setSort = (k: typeof sortKey) => {
+    if (k === sortKey) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(k); setSortDir(k === 'name' || k === 'team' || k === 'status' ? 'asc' : 'desc'); }
+  };
 
   const db = () => supabaseBrowser();
   const teamById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
@@ -448,10 +458,66 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
             value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 240 }}
             aria-label="Search cases" />
         </div>
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '0 18px 10px' }}>
+          <div className="fgroup"><span className="flabel">Status</span>
+            <select className="fselect" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+              <option value="">All</option>
+              <option value="confirmed">Confirmed homeless</option>
+              <option value="no_locate">Could not locate</option>
+              <option value="declined">Declined help</option>
+              <option value="closed">Closed</option>
+            </select></div>
+          <div className="fgroup"><span className="flabel">Team</span>
+            <select className="fselect" value={fTeam} onChange={(e) => setFTeam(e.target.value)}>
+              <option value="">All</option>
+              <option value="none">(never assigned)</option>
+              {teams.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
+            </select></div>
+          <div className="fgroup"><span className="flabel">Enrollment</span>
+            <select className="fselect" value={fEnroll} onChange={(e) => setFEnroll(e.target.value)}>
+              <option value="">All</option>
+              <option value="verified">✓ Verified enrolled</option>
+              <option value="gap">⚠ Enrollment gap</option>
+            </select></div>
+        </div>
         <div className="scroll"><table className="bnl-table">
-          <thead><tr><th>Caller</th><th>Called</th><th>Team</th><th>Status</th><th>Outreach trail</th><th>Enrollment</th><th style={{ textAlign: 'right' }}></th></tr></thead>
+          <thead><tr>
+            {([['name', 'Caller'], ['called', 'Called'], ['team', 'Team'], ['status', 'Status'],
+               ['trail', 'Outreach trail'], ['enroll', 'Enrollment']] as const).map(([k, lbl]) => (
+              <th key={k} onClick={() => setSort(k)} title="Click to sort"
+                className={sortKey === k ? 'sorted' : undefined} style={{ cursor: 'pointer' }}>
+                {lbl}{sortKey === k ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
+            ))}
+            <th style={{ textAlign: 'right' }}></th>
+          </tr></thead>
           <tbody>
-            {[...confirmed, ...done].filter((c) => !t || searchable(c).includes(t)).map((c) => (
+            {(() => {
+              const teamName = (c: HlCase) => c.team_id != null ? (teamById.get(c.team_id)?.name ?? '') : '';
+              const trailN = (c: HlCase) => (events[c.id]?.length ?? 0) || c.attempts + (c.contacts ?? 0);
+              // enrollment rank: gap (worst, aging first) < n/a < verified
+              const enrollVal = (c: HlCase) => c.status !== 'confirmed' ? 1
+                : c.verified_entry ? 2 : 0;
+              const cmp = (a: HlCase, b: HlCase): number => {
+                switch (sortKey) {
+                  case 'name': return nameOf(a).localeCompare(nameOf(b));
+                  case 'called': return a.created_at.localeCompare(b.created_at);
+                  case 'team': return teamName(a).localeCompare(teamName(b));
+                  case 'status': return a.status.localeCompare(b.status);
+                  case 'trail': return trailN(a) - trailN(b);
+                  case 'enroll': return enrollVal(a) - enrollVal(b)
+                    || (a.confirmed_at ?? '').localeCompare(b.confirmed_at ?? '');
+                }
+              };
+              return [...confirmed, ...done]
+                .filter((c) => !t || searchable(c).includes(t))
+                .filter((c) => !fStatus || c.status === fStatus)
+                .filter((c) => !fTeam || (fTeam === 'none' ? c.team_id == null : c.team_id === Number(fTeam)))
+                .filter((c) => !fEnroll
+                  || (fEnroll === 'verified' && Boolean(c.verified_entry))
+                  || (fEnroll === 'gap' && c.status === 'confirmed' && !c.verified_entry))
+                .sort((a, b) => sortDir === 'asc' ? cmp(a, b) : cmp(b, a));
+            })().map((c) => (
               <tr key={c.id} style={{ cursor: 'default' }}>
                 <CaseCell c={c} />
                 <td style={{ whiteSpace: 'nowrap' }}>{when(c.created_at)}</td>
