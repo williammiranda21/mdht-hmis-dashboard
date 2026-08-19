@@ -159,46 +159,51 @@ export default function AdminUsers({
               </button>
             )}
           </td>
-          <td className="num" style={{ whiteSpace: 'nowrap' }}>
-            {r.status !== 'approved' && (
+          {/* Actions wrap within the cell (no horizontal scroll). Access toggles
+              turn GREEN when granted, so an admin sees at a glance what each user
+              can reach — the green ones are their active accesses. */}
+          <td className="num">
+            <div className="au-actions">
+              {r.status !== 'approved' && (
+                <button className="tbtn" disabled={busy === r.id}
+                  onClick={() => setStatus(r, 'approved')}>Approve</button>
+              )}
+              {r.status === 'approved' && !isMe && (
+                <button className="tbtn" disabled={busy === r.id}
+                  onClick={() => setStatus(r, 'disabled')}>Disable</button>
+              )}
+              {!isMe && (
+                <button className={`tbtn${r.isAdmin ? ' tbtn-on' : ''}`} disabled={busy === r.id}
+                  onClick={() => setAdmin(r, !r.isAdmin)}>
+                  {r.isAdmin ? 'Revoke admin' : 'Make admin'}
+                </button>
+              )}
+              {/* Admins already have BNL access via can_see_bnl(), so this toggle
+                  would be a no-op for them — only show it for non-admins. */}
+              {!r.isAdmin && r.status === 'approved' && (
+                <button className={`tbtn${r.bnlAccess ? ' tbtn-on' : ''}`} disabled={busy === r.id}
+                  title="By-Name List contains real client names. Grant only to staff who need it."
+                  onClick={() => setBnlAccess(r, !r.bnlAccess)}>
+                  {r.bnlAccess ? 'Revoke BNL access' : 'Grant BNL access'}
+                </button>
+              )}
+              {!r.isAdmin && r.status === 'approved' && (
+                <button className={`tbtn${r.ycAccess ? ' tbtn-on' : ''}`} disabled={busy === r.id}
+                  title="Youth Connect: intake list, review queue, invite links. Intended for Educate Tomorrow."
+                  onClick={() => setYcAccess(r, !r.ycAccess)}>
+                  {r.ycAccess ? 'Revoke Youth Intake' : 'Grant Youth Intake'}
+                </button>
+              )}
+              {!r.isAdmin && r.status === 'approved' && (
+                <button className={`tbtn${r.hlAccess ? ' tbtn-on' : ''}`} disabled={busy === r.id}
+                  title="Helpline Triage: call intake, triage queue, team assignment. For helpline operators and Trust staff."
+                  onClick={() => setHlAccess(r, !r.hlAccess)}>
+                  {r.hlAccess ? 'Revoke Helpline' : 'Grant Helpline'}
+                </button>
+              )}
               <button className="tbtn" disabled={busy === r.id}
-                onClick={() => setStatus(r, 'approved')}>Approve</button>
-            )}
-            {r.status === 'approved' && !isMe && (
-              <button className="tbtn" disabled={busy === r.id}
-                onClick={() => setStatus(r, 'disabled')}>Disable</button>
-            )}
-            {!isMe && (
-              <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy === r.id}
-                onClick={() => setAdmin(r, !r.isAdmin)}>
-                {r.isAdmin ? 'Revoke admin' : 'Make admin'}
-              </button>
-            )}
-            {/* Admins already have BNL access via can_see_bnl(), so this toggle
-                would be a no-op for them — only show it for non-admins. */}
-            {!r.isAdmin && r.status === 'approved' && (
-              <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy === r.id}
-                title="By-Name List contains real client names. Grant only to staff who need it."
-                onClick={() => setBnlAccess(r, !r.bnlAccess)}>
-                {r.bnlAccess ? 'Revoke BNL access' : 'Grant BNL access'}
-              </button>
-            )}
-            {!r.isAdmin && r.status === 'approved' && (
-              <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy === r.id}
-                title="Youth Connect: intake list, review queue, invite links. Intended for Educate Tomorrow."
-                onClick={() => setYcAccess(r, !r.ycAccess)}>
-                {r.ycAccess ? 'Revoke Youth Intake' : 'Grant Youth Intake'}
-              </button>
-            )}
-            {!r.isAdmin && r.status === 'approved' && (
-              <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy === r.id}
-                title="Helpline Triage: call intake, triage queue, team assignment. For helpline operators and Trust staff."
-                onClick={() => setHlAccess(r, !r.hlAccess)}>
-                {r.hlAccess ? 'Revoke Helpline' : 'Grant Helpline'}
-              </button>
-            )}
-            <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy === r.id}
-              onClick={() => resetPassword(r)}>Reset password</button>
+                onClick={() => resetPassword(r)}>Reset password</button>
+            </div>
           </td>
         </tr>
         {openFor === r.id && (

@@ -213,6 +213,11 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
 .tools{display:flex;gap:8px}
 .tbtn{font:inherit;font-size:11.5px;font-weight:600;color:var(--muted);background:var(--card);border:1px solid var(--border-strong);border-radius:8px;padding:6px 10px;cursor:pointer}
 .tbtn:hover{border-color:var(--primary);color:var(--primary)}
+/* granted-access / active-toggle state — green so admins see what a user can reach */
+.tbtn-on{color:var(--accent);border-color:var(--accent);background:var(--accent-light)}
+.tbtn-on:hover{color:var(--accent);border-color:var(--accent)}
+/* admin account actions wrap within the cell instead of overflowing to a scroll */
+.au-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
 thead th.sortable{cursor:pointer;user-select:none}
 thead th .car{opacity:0;margin-left:4px;font-size:9px}
 thead th.sorted .car{opacity:1;color:var(--primary)}
