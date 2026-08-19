@@ -176,6 +176,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
     const band = priorityBand(c.priority);
     return (
       <td>
+        <span className="bnl-sub" title="Case number — use this when referencing the case"
+          style={{ fontVariantNumeric: 'tabular-nums' }}>#{c.id}</span>{' '}
         <span className="bnl-nm">{nameOf(c)}</span>{' '}
         <b style={{ color: bandColor(band), fontSize: 11 }}>{band}</b>
         <div className="bnl-sub" style={{ lineHeight: 1.6 }}>
