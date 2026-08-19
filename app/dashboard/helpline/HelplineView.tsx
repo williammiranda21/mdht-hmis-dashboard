@@ -497,7 +497,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
         </table></div>
       </div>
 
-      <Reporting cases={cases} teams={teams} />
+      <Reporting cases={cases} teams={teams} events={events} />
 
       {isAdmin && <TeamZones teams={teams} busy={busy} onSave={(id, zones, factors) =>
         run(async () => db().from('outreach_teams').update({ zones, factors }).eq('id', id))} />}
@@ -580,7 +580,9 @@ function median(xs: number[]): number | null {
  * from call to assignment. Computed from the loaded cases (newest 500) —
  * when volume outgrows that, this moves server-side; the columns won't change.
  */
-function Reporting({ cases, teams }: { cases: HlCase[]; teams: Team[] }) {
+function Reporting({ cases, teams, events }: {
+  cases: HlCase[]; teams: Team[]; events: Record<number, { at: string; kind: string }[]>;
+}) {
   const rows = useMemo(() => {
     const byTeam = new Map<number | null, HlCase[]>();
     for (const c of cases) {
@@ -592,6 +594,14 @@ function Reporting({ cases, teams }: { cases: HlCase[]; teams: Team[] }) {
         .filter((c) => c.assigned_at)
         .map((c) => (new Date(c.assigned_at!).getTime() - new Date(c.created_at).getTime()) / 3_600_000)
         .filter((h) => h >= 0);
+      // Assignment → FIRST outreach action (✗ or ✓, whichever came first).
+      // Needs per-try events, so pre-tracking cases don't contribute.
+      const firstTryHrs = list
+        .filter((c) => c.assigned_at && events[c.id]?.length)
+        .map((c) => (new Date(events[c.id][0].at).getTime() - new Date(c.assigned_at!).getTime()) / 3_600_000)
+        .filter((h) => h >= 0);
+      const avgFirstTry = firstTryHrs.length
+        ? firstTryHrs.reduce((a, b) => a + b, 0) / firstTryHrs.length : null;
       return {
         label,
         total: list.length,
@@ -601,6 +611,8 @@ function Reporting({ cases, teams }: { cases: HlCase[]; teams: Team[] }) {
         noLocate: list.filter((c) => c.status === 'no_locate').length,
         declined: list.filter((c) => c.status === 'declined').length,
         medAssign: median(assignHrs),
+        avgFirstTry,
+        firstTryN: firstTryHrs.length,
       };
     };
     const out = teams
@@ -616,9 +628,11 @@ function Reporting({ cases, teams }: { cases: HlCase[]; teams: Team[] }) {
   function downloadCsv() {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const head = ['team', 'cases', 'open_now', 'confirmed_homeless', 'verified_enrolled',
-      'no_locate', 'declined', 'median_hours_to_assignment'];
+      'no_locate', 'declined', 'median_hours_to_assignment',
+      'avg_hours_assignment_to_first_try', 'first_try_sample_n'];
     const body = rows.map((r) => [r.label, r.total, r.open, r.confirmed, r.enrolled,
-      r.noLocate, r.declined, r.medAssign == null ? '' : r.medAssign.toFixed(1)].map(esc).join(','));
+      r.noLocate, r.declined, r.medAssign == null ? '' : r.medAssign.toFixed(1),
+      r.avgFirstTry == null ? '' : r.avgFirstTry.toFixed(1), r.firstTryN].map(esc).join(','));
     const blob = new Blob([[head.join(','), ...body].join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -643,6 +657,8 @@ function Reporting({ cases, teams }: { cases: HlCase[]; teams: Team[] }) {
           <th className="num">Confirmed</th><th className="num">Enrolled ✓</th>
           <th className="num">No-locate</th><th className="num">Declined</th>
           <th className="num">Call → assigned</th>
+          <th className="num" title="Average time from team assignment to the FIRST outreach action (failed or successful) — per-try tracking only, so pre-upgrade cases don't count">
+            Assigned → 1st try (avg)</th>
         </tr></thead>
         <tbody>
           {rows.map((r) => (
@@ -659,6 +675,11 @@ function Reporting({ cases, teams }: { cases: HlCase[]; teams: Team[] }) {
               <td className="num">{r.medAssign == null ? <span className="bnl-sub">—</span>
                 : r.medAssign < 1 ? `${Math.round(r.medAssign * 60)}m`
                 : `${r.medAssign.toFixed(1)}h`}</td>
+              <td className="num">{r.avgFirstTry == null ? <span className="bnl-sub">—</span>
+                : <>{r.avgFirstTry < 1 ? `${Math.round(r.avgFirstTry * 60)}m`
+                    : r.avgFirstTry < 48 ? `${r.avgFirstTry.toFixed(1)}h`
+                    : `${(r.avgFirstTry / 24).toFixed(1)}d`}
+                    <span className="bnl-sub"> · n={r.firstTryN}</span></>}</td>
             </tr>
           ))}
         </tbody>
