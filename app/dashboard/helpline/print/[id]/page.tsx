@@ -11,10 +11,10 @@ export const metadata = { title: 'Dispatch Sheet' };
  * as ordinary positioned <img>s. No map library, nothing interactive.
  */
 function MapBlock({ lat, lng }: { lat: number; lng: number }) {
-  // z17 ≈ 1.2 m/px — building-level detail (user call: the team needs to see
-  // WHICH corner, not which neighborhood). The address line gives the wider
-  // context; the map's job is the last 100 meters.
-  const Z = 17, T = 256, W = 632, H = 340;
+  // z18 ≈ 0.6 m/px — individual buildings and lot corners (user pushed the
+  // zoom twice; the map's job is the last 50 meters, the address line above
+  // carries the wider context). OSM's max useful detail is z19.
+  const Z = 18, T = 256, W = 632, H = 340;
   const n = 2 ** Z;
   const rad = (lat * Math.PI) / 180;
   // global pixel position of the pin at zoom Z
