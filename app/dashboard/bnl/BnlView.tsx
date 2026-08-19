@@ -50,8 +50,12 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 export default function BnlView({
   initialRows, initialTotal, agg, ceMilestones = null, isAdmin = false, projectOpts = [],
+  deepLinkPid = '',
 }: { initialRows: BnlClient[]; initialTotal: number; agg: BnlAgg; ceMilestones?: CeMilestonesAgg | null; isAdmin?: boolean;
-     projectOpts?: { id: number; name: string; type: string | null }[] }) {
+     projectOpts?: { id: number; name: string; type: string | null }[];
+     /** ?pid= deep link (Youth Intake, worklists…): open this client's drawer
+      *  over the default roster on load. */
+     deepLinkPid?: string }) {
   const [pop, setPop] = useState<PopKey>('all');
   const [q, setQ] = useState('');
   const [fStatus, setFStatus] = useState('');
@@ -90,6 +94,26 @@ export default function BnlView({
     x: number; y: number; name: string; selfPid: string;
     members: NonNullable<BnlClient['hh_members']>;
   } | null>(null);
+
+  // ?pid= deep link: fetch that one client (own query — they may not be on the
+  // loaded page, or on any page of the current sort) and open the drawer over
+  // the roster. A pid that's not on the BNL anymore shows a notice instead of
+  // silently doing nothing — the link usually comes from a Youth Intake row.
+  const [deepMiss, setDeepMiss] = useState(false);
+  useEffect(() => {
+    if (!deepLinkPid) return;
+    let live = true;
+    fetch(`/api/bnl/roster?pid=${encodeURIComponent(deepLinkPid)}&limit=1`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((j: { rows: BnlClient[] }) => {
+        if (!live) return;
+        if (j.rows?.length) setDrill(j.rows[0]);
+        else setDeepMiss(true);
+      })
+      .catch(() => { if (live) setDeepMiss(true); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkPid]);
 
   // Debounced copy of the search box — only this triggers a fetch.
   const [qDebounced, setQDebounced] = useState('');
@@ -204,6 +228,15 @@ export default function BnlView({
         🔒 Confidential — contains client names. Data as of <b>{agg.as_of}</b>.
         <a className="btn" href={exportHref} style={{ marginLeft: 'auto' }}>⬇ CSV</a>
       </div>
+
+      {deepMiss && (
+        <div className="bnl-banner bnl-wide" role="status">
+          That client isn&rsquo;t on the By-Name List right now — usually they&rsquo;ve been housed
+          or aged off the roster. Their HMIS record still exists.
+          <button className="btn" style={{ marginLeft: 'auto' }}
+            onClick={() => setDeepMiss(false)}>Dismiss</button>
+        </div>
+      )}
 
       <div className="panel" style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
         <span className="flabel">Population</span>

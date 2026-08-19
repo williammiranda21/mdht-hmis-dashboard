@@ -8,10 +8,10 @@ import { SLEEPING_OPTIONS, UNSAFE_OPTIONS } from '../../../../lib/yc-options';
 
 /**
  * Staff-entered intake. Inserts through the viewer's own session — the
- * can_see_yc() RLS insert policy authorizes it. SSN-4 is collected only here
- * (not on the youth's own phone); case notes are internal-only and travel to
- * the review queue, the intake list, and the BNL drawer's Youth Connect
- * section.
+ * can_see_yc() RLS insert policy authorizes it. SSN-4 is optional on both
+ * doors (2026-08-19; the portal asks too, skippable); case notes are
+ * internal-only and travel to the review queue, the intake list, and the
+ * BNL drawer's Youth Connect section.
  */
 export default function StaffIntakeForm({ me }: { me: string }) {
   const router = useRouter();

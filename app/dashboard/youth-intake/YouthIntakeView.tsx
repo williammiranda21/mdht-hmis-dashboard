@@ -358,15 +358,39 @@ export default function YouthIntakeView({ me, intakes, invites, sqlMissing }: {
             style={{ minWidth: 240 }} aria-label="Search intakes" />
         </div>
         <div className="scroll"><table className="bnl-table">
-          <thead><tr><th>Youth</th><th>Intake</th><th>Status</th><th>HMIS id</th></tr></thead>
+          <thead><tr><th>Youth</th><th>Intake</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
           <tbody>
             {shown.map((r) => (
               <tr key={r.id} style={{ cursor: 'default' }}>
                 <td><span className="bnl-nm">{nameOf(r)}</span><Details r={r} /></td>
                 <td style={{ whiteSpace: 'nowrap' }}>{when(r.created_at)}
                   <div style={{ marginTop: 3 }}><SourceChip s={r.source} /></div></td>
-                <td><StatusChip s={r.status} /></td>
-                <td className="bnl-sub">{r.matched_pid ? `${r.matched_pid.slice(0, 10)}…` : '—'}</td>
+                <td><StatusChip s={r.status} />
+                  {r.matched_pid && <div className="bnl-sub" style={{ marginTop: 3 }}
+                    title="hashed HMIS PersonalID">{r.matched_pid.slice(0, 10)}…</div>}</td>
+                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  {r.status === 'matched' && (
+                    <>
+                      <Link className="btn primary" style={{ padding: '5px 14px', fontSize: 12.5 }}
+                        href={`/dashboard/bnl?pid=${encodeURIComponent(r.matched_pid ?? '')}`}
+                        title="Open this youth's client drawer on the By-Name List — the case-conferencing view">
+                        Open on BNL →
+                      </Link>
+                      <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
+                        title="Wrong person? Sends the intake back to the review queue and clears the link."
+                        onClick={() => setStatus(r, 'pending')}>Unmatch</button>
+                    </>
+                  )}
+                  {r.status === 'no_match' && (
+                    <button className="tbtn" disabled={busy}
+                      title="Send back to the review queue — e.g. after they've been entered in WellSky and a new export loaded"
+                      onClick={() => setStatus(r, 'pending')}>Re-check matches</button>
+                  )}
+                  {r.status === 'rejected' && (
+                    <button className="tbtn" disabled={busy}
+                      onClick={() => setStatus(r, 'pending')}>Restore</button>
+                  )}
+                </td>
               </tr>
             ))}
             {!rest.length && <tr><td colSpan={4} className="empty" style={{ cursor: 'default' }}>

@@ -22,7 +22,9 @@ export const dynamic = 'force-dynamic';
  *   • ONE page of table rows, with the slim column set
  * Everything else is fetched on demand. Do not reintroduce a full-roster select.
  */
-export default async function BnlPage() {
+export default async function BnlPage({ searchParams }: {
+  searchParams?: { pid?: string };
+}) {
   const viewer = await getViewer();
   if (!viewer) return null; // middleware redirects to /login
 
@@ -94,5 +96,6 @@ export default async function BnlPage() {
 
   return <BnlView initialRows={rows} initialTotal={pageRes.count ?? 0} agg={agg}
                   ceMilestones={ceMilestones} isAdmin={viewer.isAdmin}
-                  projectOpts={projectOpts} />;
+                  projectOpts={projectOpts}
+                  deepLinkPid={(searchParams?.pid ?? '').trim()} />;
 }
