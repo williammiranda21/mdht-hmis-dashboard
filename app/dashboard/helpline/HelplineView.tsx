@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
 import { fmtInt } from '../../../lib/format';
 import CaseMap from '../../../components/CaseMap';
+import ReportMap from './ReportMap';
 import { AREAS, MAX_FAILED_ATTEMPTS, priorityBand, type CaseStatus } from '../../../lib/helpline-options';
 
 export interface HlCase {
@@ -571,6 +572,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
           </tbody>
         </table></div>
       </div>
+
+      <ReportMap cases={cases} onOpen={(c) => setDrawerC(c)} />
 
       {drawerC && (
         <CaseDrawer c={cases.find((x) => x.id === drawerC.id) ?? drawerC}

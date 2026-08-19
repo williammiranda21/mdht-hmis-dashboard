@@ -8,6 +8,28 @@ export interface TilePlacement { x: number; y: number; z: number; sx: number; sy
 
 export const TILE = 256;
 
+/** Global pixel position of a lat/lng at zoom z. */
+export function project(lat: number, lng: number, z: number): { px: number; py: number } {
+  const n = 2 ** z;
+  const rad = (lat * Math.PI) / 180;
+  return {
+    px: ((lng + 180) / 360) * n * TILE,
+    py: ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n * TILE,
+  };
+}
+
+/** Frame (left/top in global pixels) of a w×h viewport centered on lat/lng. */
+export function frameFor(lat: number, lng: number, z: number, w: number, h: number) {
+  const { px, py } = project(lat, lng, z);
+  return { left: px - w / 2, top: py - h / 2, z, w, h };
+}
+
+/** Viewport-relative pixel position of a lat/lng within a frame. */
+export function toPx(lat: number, lng: number, f: { left: number; top: number; z: number }) {
+  const { px, py } = project(lat, lng, f.z);
+  return { x: px - f.left, y: py - f.top };
+}
+
 export function tilesFor(lat: number, lng: number, z: number, w: number, h: number): TilePlacement[] {
   const n = 2 ** z;
   const rad = (lat * Math.PI) / 180;
