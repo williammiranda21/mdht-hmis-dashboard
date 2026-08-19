@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '../../../../lib/supabase';
+import { SLEEPING_OPTIONS, UNSAFE_OPTIONS } from '../../../../lib/yc-options';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,6 +54,11 @@ export async function POST(req: Request) {
     const v = String(p[k] ?? '').trim();
     if (v) row[k] = v.slice(0, max);
   }
+  // Categorical fields hold ONE closed answer domain (lib/yc-options.ts) so
+  // reporting can group them. The form only offers these values; a crafted
+  // POST that sends anything else gets the field dropped, not the submission.
+  if (row.sleeping && !(SLEEPING_OPTIONS as readonly string[]).includes(String(row.sleeping))) delete row.sleeping;
+  if (row.unsafe && !(UNSAFE_OPTIONS as readonly string[]).includes(String(row.unsafe))) delete row.unsafe;
   // DOB arrives as YYYY-MM-DD from <input type="date">; anything else is dropped
   // rather than rejected — a youth who skips DOB should still get through.
   const dob = String(p.dob ?? '').trim();

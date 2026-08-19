@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { SLEEPING_OPTIONS, UNSAFE_OPTIONS } from '../../../lib/yc-options';
 
 /**
  * The youth-facing form: three short steps, plain language, everything except
@@ -76,9 +77,7 @@ export default function PortalForm({ token }: { token: string }) {
           <p className="ycsub">This helps us know how urgent things are.</p>
           <label className="yclabel">Where did you sleep last night?</label>
           <div className="ycopts">
-            {['Street / outside', 'Car', "Friend's place", 'Shelter', 'Other'].map((v) => (
-              <Chip key={v} group="sleeping" value={v} />
-            ))}
+            {SLEEPING_OPTIONS.map((v) => <Chip key={v} group="sleeping" value={v} />)}
           </div>
           <label className="yclabel" htmlFor="ct">Best way to reach you</label>
           <input className="ycinp" id="ct" value={f.contact} maxLength={200}
@@ -89,7 +88,7 @@ export default function PortalForm({ token }: { token: string }) {
             onChange={(e) => set('school_work')(e.target.value)} />
           <label className="yclabel">Anything feel unsafe right now?</label>
           <div className="ycopts">
-            {['Yes', 'No', 'Rather not say'].map((v) => <Chip key={v} group="unsafe" value={v} />)}
+            {UNSAFE_OPTIONS.map((v) => <Chip key={v} group="unsafe" value={v} />)}
           </div>
           <button className="yccta" type="button" onClick={() => setStep(2)}>Continue &rarr;</button>
           <button className="ycghost" type="button" onClick={() => setStep(0)}>&larr; Back</button>

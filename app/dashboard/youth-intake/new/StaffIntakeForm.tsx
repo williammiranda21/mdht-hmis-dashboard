@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../../../lib/supabase-browser';
+import { SLEEPING_OPTIONS, UNSAFE_OPTIONS } from '../../../../lib/yc-options';
 
 /**
  * Staff-entered intake. Inserts through the viewer's own session — the
@@ -48,6 +49,30 @@ export default function StaffIntakeForm({ me }: { me: string }) {
     </label>
   );
 
+  /* Same closed option lists as the youth portal (lib/yc-options.ts) — the
+     two doors must produce identical values or reporting can't group them.
+     Click again to clear; unanswered stores NULL, which IS the "unknown". */
+  const Chips = ({ group, options }: {
+    group: 'sleeping' | 'unsafe'; options: readonly string[];
+  }) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+      {options.map((v) => {
+        const on = f[group] === v;
+        return (
+          <button key={v} type="button" aria-pressed={on}
+            onClick={() => set(group)(on ? '' : v)}
+            style={{
+              border: `1px solid ${on ? 'var(--secondary)' : 'var(--border)'}`,
+              background: on ? 'var(--primary-light)' : 'transparent',
+              color: on ? 'var(--secondary)' : 'var(--muted)',
+              borderRadius: 20, padding: '7px 13px', fontSize: 12.5,
+              fontWeight: 600, cursor: 'pointer', font: 'inherit',
+            }}>{v}</button>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="panel" style={{ maxWidth: 640 }}>
       <div className="panel-h">
@@ -88,16 +113,13 @@ export default function StaffIntakeForm({ me }: { me: string }) {
         <L>Contact — phone / email / social</L>
         <input className="finput" style={{ width: '100%' }} value={f.contact} maxLength={200}
           placeholder="Anything the youth says works" onChange={(e) => set('contact')(e.target.value)} />
-        <L>Where are they staying tonight?</L>
-        <input className="finput" style={{ width: '100%' }} value={f.sleeping} maxLength={60}
-          placeholder="Street / car / doubled up / shelter / unknown"
-          onChange={(e) => set('sleeping')(e.target.value)} />
+        <L>Where did they sleep last night? — leave unselected if unknown</L>
+        <Chips group="sleeping" options={SLEEPING_OPTIONS} />
         <L>School / work</L>
         <input className="finput" style={{ width: '100%' }} value={f.school_work} maxLength={200}
           onChange={(e) => set('school_work')(e.target.value)} />
-        <L>Feels unsafe?</L>
-        <input className="finput" style={{ width: '100%' }} value={f.unsafe} maxLength={30}
-          placeholder="Yes / no / rather not say" onChange={(e) => set('unsafe')(e.target.value)} />
+        <L>Anything feel unsafe for them right now?</L>
+        <Chips group="unsafe" options={UNSAFE_OPTIONS} />
         <L>Case notes — internal-only, never shown to the youth</L>
         <textarea className="finput" rows={4} style={{ width: '100%', resize: 'vertical' }}
           value={f.notes} maxLength={4000}
