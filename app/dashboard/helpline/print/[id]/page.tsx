@@ -86,20 +86,22 @@ export default async function DispatchSheet({ params }: { params: { id: string }
     <main className="ds">
       <style dangerouslySetInnerHTML={{ __html: `
         .ds{max-width:820px;margin:0 auto;background:#fff;color:#1a202c;border:1px solid #d8dee8;
-          border-radius:8px;padding:28px 34px;font-size:13.5px;line-height:1.5}
+          border-radius:8px;padding:16px 34px 22px;font-size:13.5px;line-height:1.45}
         .ds *{box-sizing:border-box}
-        .ds .hd{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;
-          border-bottom:2px solid #1a202c;padding-bottom:10px;margin-bottom:14px}
-        .ds h1{font-size:19px;margin:0}
-        .ds .sub{color:#5c6a7d;font-size:12px}
-        .ds .prio{font-weight:800;font-size:15px;padding:4px 14px;border:2px solid currentColor;border-radius:6px}
-        .ds h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#5c6a7d;
-          margin:16px 0 5px;border-bottom:1px solid #e4e8ef;padding-bottom:3px}
+        .ds .hd{display:flex;justify-content:space-between;align-items:center;gap:14px;
+          border-bottom:2px solid #1a202c;padding-bottom:6px;margin-bottom:6px}
+        .ds h1{font-size:17px;margin:0;line-height:1.25}
+        .ds .sub{color:#5c6a7d;font-size:11.5px}
+        .ds .prio{font-weight:800;font-size:14px;padding:3px 12px;border:2px solid currentColor;border-radius:6px}
+        .ds .assign{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+          flex-wrap:wrap;font-size:13px;padding:5px 0 7px;border-bottom:1px solid #e4e8ef}
+        .ds h2{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:#5c6a7d;
+          margin:10px 0 4px;border-bottom:1px solid #e4e8ef;padding-bottom:2px}
         .ds .grid{display:grid;grid-template-columns:150px 1fr;gap:3px 16px}
         .ds .k{color:#5c6a7d;font-size:12px}
         .ds .v{font-weight:600}
         .ds .big{font-size:16px;font-weight:800}
-        .ds .loc{background:#f4f6fa;border:1px solid #d8dee8;border-radius:8px;padding:12px 16px;margin-top:6px}
+        .ds .loc{background:#f4f6fa;border:1px solid #d8dee8;border-radius:8px;padding:9px 14px;margin-top:4px}
         .ds .map{position:relative;overflow:hidden;border:1px solid #d8dee8;border-radius:8px;
           margin-top:10px;max-width:100%;background:#eef1f5;
           -webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -109,13 +111,18 @@ export default async function DispatchSheet({ params }: { params: { id: string }
         .ds .attr{position:absolute;right:4px;bottom:2px;font-size:9px;color:#5c6a7d;z-index:2;
           background:rgba(255,255,255,.75);padding:0 4px;border-radius:3px}
         .ds .note{white-space:pre-wrap}
-        .ds .foot{margin-top:18px;padding-top:8px;border-top:1px solid #e4e8ef;color:#5c6a7d;font-size:11px}
-        .ds .btnrow{margin:0 auto 14px;max-width:820px;text-align:right}
+        .ds .foot{margin-top:12px;padding-top:6px;border-top:1px solid #e4e8ef;color:#5c6a7d;font-size:10.5px}
+        .ds .btnrow{margin:0 auto 10px;max-width:820px;text-align:right}
         @media print{
           body{background:#fff !important;padding:0 !important}
-          .ds{border:none;border-radius:0;max-width:none;padding:10mm 12mm}
+          /* ONE PAGE is the contract: shrink type a step, cap the map, and
+             keep blocks unsplit. The notes section is already capped to the
+             latest 4 calls, so total height stays inside a letter page. */
+          .ds{border:none;border-radius:0;max-width:none;padding:2mm 6mm;font-size:12px;line-height:1.38}
+          .ds .map{height:300px !important}
+          .ds .loc,.ds .grid,.ds .assign{break-inside:avoid}
           .noprint, .sidenav, .hdr, .tabnav, nav, header{display:none !important}
-          @page{size:letter;margin:8mm}
+          @page{size:letter;margin:7mm}
         }
       ` }} />
       <div className="btnrow noprint">
@@ -132,10 +139,9 @@ export default async function DispatchSheet({ params }: { params: { id: string }
           {band}</span>
       </div>
 
-      <div className="loc" style={{ marginTop: 0, display: 'flex', justifyContent: 'space-between',
-        alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+      <div className="assign">
         <span><span className="k">Assigned to </span>
-          <span className="big">{team?.name ?? 'NOT YET ASSIGNED'}</span></span>
+          <b style={{ fontSize: 14 }}>{team?.name ?? 'NOT YET ASSIGNED'}</b></span>
         {c.assigned_at && <span className="k">assigned {fmt(c.assigned_at)}</span>}
       </div>
 
@@ -184,17 +190,24 @@ export default async function DispatchSheet({ params }: { params: { id: string }
           : 'No confirmed HMIS match — may be new to the system'}</span>
       </div>
 
-      {(calls ?? []).some((k: any) => k.notes) && (
-        <>
-          <h2>Call notes</h2>
-          {(calls ?? []).filter((k: any) => k.notes).map((k: any, i: number) => (
-            <div key={i} style={{ marginBottom: 6 }}>
-              <span className="k">{fmt(k.received_at)}{k.kind === 'followup' ? ' · call-back' : ''}</span>
-              <div className="note">{k.notes}</div>
-            </div>
-          ))}
-        </>
-      )}
+      {(() => {
+        // Latest 4 note-bearing calls, newest first — the one-page budget.
+        const noted = (calls ?? []).filter((k: any) => k.notes).reverse();
+        const shown = noted.slice(0, 4);
+        if (!shown.length) return null;
+        return (
+          <>
+            <h2>Call notes{noted.length > shown.length
+              ? ` — latest ${shown.length} of ${noted.length} (rest in the system)` : ''}</h2>
+            {shown.map((k: any, i: number) => (
+              <div key={i} style={{ marginBottom: 5 }}>
+                <span className="k">{fmt(k.received_at)}{k.kind === 'followup' ? ' · call-back' : ''}</span>
+                <div className="note">{k.notes}</div>
+              </div>
+            ))}
+          </>
+        );
+      })()}
 
       <div className="foot">
         Verify homelessness in person → record the outcome in the Helpline board → enter/enroll the
