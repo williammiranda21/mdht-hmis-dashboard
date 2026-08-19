@@ -14,7 +14,10 @@ function MapBlock({ lat, lng }: { lat: number; lng: number }) {
   // z18 ≈ 0.6 m/px — individual buildings and lot corners (user pushed the
   // zoom twice; the map's job is the last 50 meters, the address line above
   // carries the wider context). OSM's max useful detail is z19.
-  const Z = 18, T = 256, W = 632, H = 340;
+  // W spans the location box edge-to-edge (sheet 820 − sheet padding 68 −
+  // box padding 32 − borders ≈ 718). The pin is pinned at exact pixels, not
+  // 50%, so a clipped right edge on narrow paper can't drift it off target.
+  const Z = 18, T = 256, W = 718, H = 360;
   const n = 2 ** Z;
   const rad = (lat * Math.PI) / 180;
   // global pixel position of the pin at zoom Z
@@ -36,7 +39,7 @@ function MapBlock({ lat, lng }: { lat: number; lng: number }) {
         <img key={`${t.x}/${t.y}`} src={`/api/helpline/tile/${Z}/${t.x}/${t.y}`} alt=""
           width={T} height={T} style={{ left: t.sx, top: t.sy }} />
       ))}
-      <div className="pin" aria-hidden="true">📍</div>
+      <div className="pin" aria-hidden="true" style={{ left: W / 2, top: H / 2 }}>📍</div>
       <div className="attr">© OpenStreetMap contributors</div>
     </div>
   );
@@ -101,7 +104,7 @@ export default async function DispatchSheet({ params }: { params: { id: string }
           margin-top:10px;max-width:100%;background:#eef1f5;
           -webkit-print-color-adjust:exact;print-color-adjust:exact}
         .ds .map img{position:absolute;display:block;max-width:none}
-        .ds .pin{position:absolute;left:50%;top:50%;transform:translate(-50%,-92%);font-size:30px;
+        .ds .pin{position:absolute;transform:translate(-50%,-92%);font-size:30px;
           text-shadow:0 1px 2px rgba(0,0,0,.35);z-index:2}
         .ds .attr{position:absolute;right:4px;bottom:2px;font-size:9px;color:#5c6a7d;z-index:2;
           background:rgba(255,255,255,.75);padding:0 4px;border-radius:3px}
