@@ -63,12 +63,9 @@ function PortalStyles() {
       .ycwrap{min-height:100dvh;background:#eef1ef;display:flex;align-items:flex-start;
         justify-content:center;padding:22px 14px 60px;
         font-family:Inter,-apple-system,"Segoe UI",system-ui,sans-serif}
-      @media (prefers-color-scheme:dark){.ycwrap{background:#0f1512}}
       .yccard{width:100%;max-width:430px;background:#fff;border:1px solid #e2e8e4;
         border-radius:26px;padding:26px 22px;color:#1a202c;
         box-shadow:0 10px 30px rgba(16,42,34,.10)}
-      @media (prefers-color-scheme:dark){
-        .yccard{background:#17201b;border-color:#2a3630;color:#e7ece9}}
       .yclogo{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;
         justify-content:center;color:#fff;font-weight:800;font-size:18px;
         background:linear-gradient(135deg,#34d399,#10b981);box-shadow:0 4px 12px rgba(16,185,129,.3)}
@@ -82,11 +79,9 @@ function PortalStyles() {
       .yclabel{display:block;font-size:12.5px;font-weight:600;opacity:.7;margin:14px 0 5px}
       .ycinp{width:100%;box-sizing:border-box;background:transparent;border:1px solid #d4ddd7;
         border-radius:11px;padding:12px 13px;color:inherit;font-size:16px;font-family:inherit}
-      @media (prefers-color-scheme:dark){.ycinp{border-color:#2f3d36}}
       .ycopts{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
       .ycopt{border:1px solid #d4ddd7;background:transparent;color:inherit;border-radius:22px;
         padding:10px 15px;font-size:13.5px;font-weight:600;min-height:42px;cursor:pointer;font-family:inherit}
-      @media (prefers-color-scheme:dark){.ycopt{border-color:#2f3d36}}
       .ycopt[aria-pressed="true"]{background:rgba(16,185,129,.14);border-color:#10b981;color:#10b981}
       .yccta{display:block;width:100%;border:none;border-radius:12px;padding:14px;min-height:48px;
         margin-top:18px;background:linear-gradient(135deg,#34d399,#10b981);color:#fff;font-weight:700;
@@ -95,7 +90,6 @@ function PortalStyles() {
       .ycghost{display:block;width:100%;border:1px solid #d4ddd7;background:transparent;border-radius:12px;
         padding:12px;min-height:44px;margin-top:10px;color:inherit;opacity:.7;font-weight:600;font-size:14px;
         cursor:pointer;font-family:inherit}
-      @media (prefers-color-scheme:dark){.ycghost{border-color:#2f3d36}}
       .ycconsent{display:flex;gap:10px;align-items:flex-start;background:rgba(16,185,129,.1);
         border:1px solid rgba(16,185,129,.35);border-radius:12px;padding:12px;margin-top:16px;
         font-size:12.5px;line-height:1.5}
