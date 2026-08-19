@@ -25,7 +25,8 @@ const VIEWS = {
 type ViewKey = keyof typeof VIEWS;
 
 const LAYERS = [
-  { key: 'districts', label: 'Commission districts', file: '/gis/districts.geojson', stroke: 'var(--secondary)', width: 2 },
+  { key: 'districts', label: 'City of Miami districts', file: '/gis/districts.geojson', stroke: 'var(--secondary)', width: 2 },
+  { key: 'county', label: 'County districts', file: '/gis/county_districts.geojson', stroke: 'var(--accent)', width: 1.6 },
   { key: 'zipcodes', label: 'ZIP codes', file: '/gis/zipcodes.geojson', stroke: 'var(--warn)', width: 1.4 },
   { key: 'tracts', label: 'Census tracts', file: '/gis/census_tracts.geojson', stroke: 'var(--faint)', width: 0.8 },
 ] as const;
@@ -54,8 +55,12 @@ function ringsOf(geom: { type: string; coordinates: any }): number[][][] {
 }
 function featureName(props?: Record<string, unknown>): string {
   if (!props) return '';
+  // City file: COMDISTID + COMNAME · County file: ID + COMMNAME
+  const dist = props.COMDISTID ?? props.ID;
+  const who = props.COMNAME ?? props.COMMNAME;
+  if (dist != null && dist !== '') return `District ${dist}${who ? ` · ${who}` : ''}`;
   for (const k of ['NAME', 'name', 'DISTRICT', 'District', 'district', 'LABEL',
-    'ZIPCODE', 'ZIP', 'zip', 'GEOID', 'TRACT', 'COMMNAME', 'COMMISSIONER']) {
+    'ZIPCODE', 'ZIP', 'zip', 'GEOID', 'TRACT', 'COMMISSIONER']) {
     if (props[k] != null && props[k] !== '') return String(props[k]);
   }
   return '';
@@ -65,9 +70,10 @@ export default function ReportMap({ cases, onOpen }: {
   cases: HlCase[]; onOpen: (c: HlCase) => void;
 }) {
   const [view, setView] = useState<ViewKey>('metro');
-  const [on, setOn] = useState<Record<LayerKey, boolean>>({ districts: false, zipcodes: false, tracts: false });
+  const [on, setOn] = useState<Record<LayerKey, boolean>>(
+    { districts: false, county: false, zipcodes: false, tracts: false });
   const [geo, setGeo] = useState<Record<LayerKey, Geo | 'missing' | 'loading' | undefined>>(
-    { districts: undefined, zipcodes: undefined, tracts: undefined });
+    { districts: undefined, county: undefined, zipcodes: undefined, tracts: undefined });
 
   // lazy-load a layer's file the first time it's switched on
   useEffect(() => {
