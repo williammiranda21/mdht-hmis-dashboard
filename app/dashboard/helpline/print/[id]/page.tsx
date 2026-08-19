@@ -1,5 +1,6 @@
 import { supabaseServer, getViewer } from '../../../../../lib/supabase-server';
 import { priorityBand } from '../../../../../lib/helpline-options';
+import { tilesFor, TILE } from '../../../../../lib/slippy';
 import PrintButton from './PrintButton';
 
 export const dynamic = 'force-dynamic';
@@ -17,21 +18,8 @@ function MapBlock({ lat, lng }: { lat: number; lng: number }) {
   // W spans the location box edge-to-edge (sheet 820 − sheet padding 68 −
   // box padding 32 − borders ≈ 718). The pin is pinned at exact pixels, not
   // 50%, so a clipped right edge on narrow paper can't drift it off target.
-  const Z = 18, T = 256, W = 718, H = 360;
-  const n = 2 ** Z;
-  const rad = (lat * Math.PI) / 180;
-  // global pixel position of the pin at zoom Z
-  const px = ((lng + 180) / 360) * n * T;
-  const py = ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n * T;
-  const left = px - W / 2, top = py - H / 2;
-  const x0 = Math.floor(left / T), y0 = Math.floor(top / T);
-  const tiles: { x: number; y: number; sx: number; sy: number }[] = [];
-  for (let x = x0; x * T < left + W; x++) {
-    for (let y = y0; y * T < top + H; y++) {
-      if (x < 0 || y < 0 || x >= n || y >= n) continue;
-      tiles.push({ x, y, sx: x * T - left, sy: y * T - top });
-    }
-  }
+  const Z = 18, T = TILE, W = 718, H = 360;
+  const tiles = tilesFor(lat, lng, Z, W, H);
   return (
     <div className="map" style={{ width: W, height: H }}>
       {tiles.map((t) => (
@@ -167,16 +155,15 @@ export default async function DispatchSheet({ params }: { params: { id: string }
         )}
       </div>
 
-      <h2>Reach them</h2>
+      <h2>Who · situation · contact</h2>
       <div className="grid">
-        <span className="k">Callback number</span><span className="v big">{c.phone_callback || c.phone_line || '—'}</span>
-        {c.phone_callback && c.phone_line && c.phone_callback !== c.phone_line && (
-          <><span className="k">Called from</span><span className="v">{c.phone_line}</span></>
-        )}
-      </div>
-
-      <h2>Who &amp; situation</h2>
-      <div className="grid">
+        <span className="k">Callback ☎</span>
+        <span className="v" style={{ fontSize: 15, fontWeight: 800 }}>
+          {c.phone_callback || c.phone_line || '—'}
+          {c.phone_callback && c.phone_line && c.phone_callback !== c.phone_line && (
+            <span className="k" style={{ fontWeight: 400 }}> · called from {c.phone_line}</span>
+          )}
+        </span>
         <span className="k">Name</span><span className="v">{name}</span>
         {c.dob && <><span className="k">Date of birth</span><span className="v">{c.dob}</span></>}
         {c.sleeping && <><span className="k">Sleeping</span><span className="v">{c.sleeping}</span></>}

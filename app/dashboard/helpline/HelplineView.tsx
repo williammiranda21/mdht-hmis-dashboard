@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
 import { fmtInt } from '../../../lib/format';
+import CaseMap from '../../../components/CaseMap';
 import { AREAS, MAX_FAILED_ATTEMPTS, priorityBand, type CaseStatus } from '../../../lib/helpline-options';
 
 export interface HlCase {
@@ -94,14 +95,18 @@ function suggestTeam(c: HlCase, teams: Team[], openByTeam: Map<number, number>):
 
 const OPEN_STATUSES: CaseStatus[] = ['assigned', 'attempted', 'contacted'];
 
-export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: {
-  me: string; isAdmin: boolean; cases: HlCase[]; teams: Team[]; sqlMissing: boolean;
+export default function HelplineView({ me, isAdmin, cases, teams, events = {}, sqlMissing }: {
+  me: string; isAdmin: boolean; cases: HlCase[]; teams: Team[];
+  /** outreach trail per open case: chronological attempt/contact events */
+  events?: Record<number, { at: string; kind: string }[]>;
+  sqlMissing: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [cands, setCands] = useState<Record<number, Candidate[] | 'loading'>>({});
+  const [mapId, setMapId] = useState<number | null>(null);
   const [q, setQ] = useState('');
 
   const db = () => supabaseBrowser();
@@ -136,10 +141,14 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
   // a failed try after a successful contact never downgrades the case.
   // 3-strike rule: the Nth failed attempt with zero successful contacts
   // auto-closes as no_locate (Reopen stays one click away).
-  const logAttempt = (c: HlCase) => {
+  // Each ✗/✓ is an immutable EVENT (helpline_calls) so the board can show the
+  // chronology — which try succeeded, not just how many (user catch). The
+  // counters stay for auto-close math and the reporting table.
+  const logAttempt = async (c: HlCase) => {
     const attempts = c.attempts + 1;
     const strikeOut = attempts >= MAX_FAILED_ATTEMPTS && (c.contacts ?? 0) === 0
       && ['assigned', 'attempted'].includes(c.status);
+    await db().from('helpline_calls').insert({ case_id: c.id, operator: me, kind: 'attempt' });
     return update(c.id, {
       status: strikeOut ? 'no_locate' : c.status === 'assigned' ? 'attempted' : c.status,
       attempts,
@@ -147,12 +156,14 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
     });
   };
 
-  const logContact = (c: HlCase) =>
-    update(c.id, {
+  const logContact = async (c: HlCase) => {
+    await db().from('helpline_calls').insert({ case_id: c.id, operator: me, kind: 'contact' });
+    return update(c.id, {
       status: ['assigned', 'attempted'].includes(c.status) ? 'contacted' : c.status,
       contacts: (c.contacts ?? 0) + 1,
       last_contact: new Date().toISOString().slice(0, 10),
     });
+  };
 
   async function findMatches(id: number) {
     setOpenId(id);
@@ -333,15 +344,22 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
               {team.zones.length ? ` · covers ${team.zones.join(', ')}` : ' · no zones set'}</span>
             </div>
             <div className="scroll"><table className="bnl-table">
+              <thead><tr><th>Case</th><th>Status</th><th>Outreach trail</th>
+                <th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
                 {working.filter((c) => c.team_id === team.id).map((c) => (
-                  <tr key={c.id} style={{ cursor: 'default' }}>
+                  <FragmentZoneRow key={c.id}>
+                  <tr style={{ cursor: 'default' }}>
                     <CaseCell c={c} />
-                    <td style={{ whiteSpace: 'nowrap' }}><Chip s={c.status} />
-                      {c.attempts > 0 && <div className="bnl-sub">✗ tried ×{c.attempts}{c.last_attempt ? ` · ${c.last_attempt}` : ''}</div>}
-                      {(c.contacts ?? 0) > 0 && <div className="bnl-sub" style={{ color: 'var(--accent)' }}>
-                        ✓ contacted ×{c.contacts}{c.last_contact ? ` · ${c.last_contact}` : ''}</div>}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}><Chip s={c.status} /></td>
+                    <td><Trail events={events[c.id]} c={c} /></td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {(c.lat != null || c.address || c.landmark) && (
+                        <button className="tbtn" style={{ marginRight: 6 }}
+                          title="Show where to find them — location details + map, right here"
+                          onClick={() => setMapId(mapId === c.id ? null : c.id)}>
+                          {mapId === c.id ? 'Hide map' : '📍 Map'}</button>
+                      )}
                       <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank"
                         title="One-page dispatch sheet — print or save as PDF for the field team">🖨 Sheet</Link>
                       <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
@@ -367,6 +385,32 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
                         }}>Close · can&rsquo;t locate</button>
                     </td>
                   </tr>
+                  {mapId === c.id ? (
+                    <tr style={{ cursor: 'default' }}>
+                      <td colSpan={4} style={{ background: 'var(--rowhover)' }}>
+                        <div style={{ padding: '8px 6px 14px' }}>
+                          <div style={{ marginBottom: 8, fontSize: 13 }}>
+                            <b style={{ color: 'var(--strong)' }}>{c.address || c.landmark || c.area || 'No location captured'}</b>
+                            <div className="bnl-sub" style={{ lineHeight: 1.6 }}>
+                              {c.address && c.landmark && <>{c.landmark} · </>}
+                              {c.area && <>{c.area} · </>}
+                              {c.lat != null && c.lng != null && <>{c.lat.toFixed(5)}, {c.lng.toFixed(5)} · </>}
+                              <a style={{ color: 'var(--secondary)' }} target="_blank" rel="noreferrer"
+                                href={c.lat != null && c.lng != null
+                                  ? `https://maps.google.com/?q=${c.lat},${c.lng}`
+                                  : `https://maps.google.com/?q=${encodeURIComponent(`${c.address ?? c.landmark}, ${c.area ?? ''} FL`)}`}>
+                                Open in Google Maps →</a>
+                            </div>
+                          </div>
+                          {c.lat != null && c.lng != null
+                            ? <CaseMap lat={c.lat} lng={c.lng} zoom={17} width={640} height={280} />
+                            : <div className="bnl-sub">No coordinates on this case — the address above is
+                                all we have. Use 📍 Locate on intake to add a pin.</div>}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                  </FragmentZoneRow>
                 ))}
               </tbody>
             </table></div>
@@ -461,6 +505,41 @@ function FragmentRow({ left, children }: { left: React.ReactNode; children: Reac
       ) : null}
     </>
   );
+}
+
+/** Chronological ✗/✓ trail — answers "which try succeeded", not just how
+ *  many. Falls back to the counters for cases logged before events existed. */
+function Trail({ events, c }: { events?: { at: string; kind: string }[]; c: HlCase }) {
+  const fmt = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  };
+  if (events?.length) {
+    return (
+      <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 5 }}>
+        {events.map((e, i) => (
+          <span key={i} className="bnl-fp" style={e.kind === 'contact'
+            ? { background: 'var(--accent-light)', color: 'var(--accent)' }
+            : { background: 'var(--danger-light)', color: 'var(--danger)' }}
+            title={e.kind === 'contact' ? `Successful contact — try #${i + 1}` : `Failed attempt #${i + 1}`}>
+            {e.kind === 'contact' ? '✓' : '✗'} {fmt(e.at)}
+          </span>
+        ))}
+      </span>
+    );
+  }
+  // pre-events fallback: totals only (old cases have no per-try records)
+  if (c.attempts > 0 || (c.contacts ?? 0) > 0) {
+    return (
+      <span className="bnl-sub">
+        {c.attempts > 0 && <>✗ ×{c.attempts}{c.last_attempt ? ` (last ${c.last_attempt})` : ''}</>}
+        {c.attempts > 0 && (c.contacts ?? 0) > 0 && ' · '}
+        {(c.contacts ?? 0) > 0 && <span style={{ color: 'var(--accent)' }}>
+          ✓ ×{c.contacts}{c.last_contact ? ` (last ${c.last_contact})` : ''}</span>}
+      </span>
+    );
+  }
+  return <span className="bnl-sub">no outreach yet</span>;
 }
 
 /** Median of a numeric list; null when empty. */

@@ -115,6 +115,13 @@ create table if not exists helpline_cases (
 alter table helpline_cases add column if not exists contacts int not null default 0;
 alter table helpline_cases add column if not exists last_contact date;
 
+-- Outreach events join the call log (user catch: counters can't say WHICH try
+-- succeeded — the trail can). kinds: initial/followup = phone calls in;
+-- attempt/contact = outreach going out.
+alter table helpline_calls drop constraint if exists helpline_calls_kind_check;
+alter table helpline_calls add constraint helpline_calls_kind_check
+  check (kind in ('initial','followup','attempt','contact'));
+
 create index if not exists idx_hl_cases_status on helpline_cases (status, priority desc, created_at);
 create index if not exists idx_hl_cases_phone  on helpline_cases (phone_line);
 create index if not exists idx_hl_cases_pid    on helpline_cases (matched_pid);
@@ -131,7 +138,8 @@ create table if not exists helpline_calls (
   case_id     bigint not null references helpline_cases on delete cascade,
   received_at timestamptz not null default now(),
   operator    uuid references auth.users on delete set null,
-  kind        text not null default 'initial' check (kind in ('initial','followup')),
+  kind        text not null default 'initial'
+              check (kind in ('initial','followup','attempt','contact')),
   notes       text
 );
 create index if not exists idx_hl_calls_case on helpline_calls (case_id, received_at desc);
