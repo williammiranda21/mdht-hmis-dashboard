@@ -441,7 +441,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
         <div className="panel-h">
           <div>
             <h3>All cases</h3>
-            <div className="meta">Confirmed cases verify against each weekly HMIS export — the
+            <div className="meta">Confirmed cases verify against each HMIS export — the
               <b style={{ color: 'var(--danger)' }}> enrollment gap</b> list is the one to watch</div>
           </div>
           <input className="finput" placeholder="Search name, phone, area, notes…"
