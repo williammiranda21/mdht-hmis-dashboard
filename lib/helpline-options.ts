@@ -59,6 +59,11 @@ export function priorityBand(p: number): 'HIGH' | 'MED' | 'LOW' {
   return p >= 5 ? 'HIGH' : p >= 2 ? 'MED' : 'LOW';
 }
 
+/** Auto-close rule (user directive 2026-08-19): a case with this many FAILED
+ *  attempts and zero successful contacts closes itself as no_locate. Reopen
+ *  stays one click, and a successful contact at any point disarms the rule. */
+export const MAX_FAILED_ATTEMPTS = 3;
+
 export const CASE_STATUSES = [
   'new', 'assigned', 'attempted', 'contacted', 'confirmed',
   'declined', 'no_locate', 'closed',

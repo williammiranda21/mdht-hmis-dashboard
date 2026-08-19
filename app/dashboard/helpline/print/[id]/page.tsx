@@ -11,7 +11,10 @@ export const metadata = { title: 'Dispatch Sheet' };
  * as ordinary positioned <img>s. No map library, nothing interactive.
  */
 function MapBlock({ lat, lng }: { lat: number; lng: number }) {
-  const Z = 16, T = 256, W = 632, H = 340;
+  // z17 ≈ 1.2 m/px — building-level detail (user call: the team needs to see
+  // WHICH corner, not which neighborhood). The address line gives the wider
+  // context; the map's job is the last 100 meters.
+  const Z = 17, T = 256, W = 632, H = 340;
   const n = 2 ** Z;
   const rad = (lat * Math.PI) / 180;
   // global pixel position of the pin at zoom Z

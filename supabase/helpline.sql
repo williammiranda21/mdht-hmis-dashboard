@@ -96,8 +96,10 @@ create table if not exists helpline_cases (
   -- assignment
   team_id        bigint references outreach_teams on delete set null,
   assigned_at    timestamptz,
-  attempts       int not null default 0,
+  attempts       int not null default 0,   -- FAILED contact attempts
   last_attempt   date,
+  contacts       int not null default 0,   -- SUCCESSFUL contacts (separate fact —
+  last_contact   date,                     -- never overwritten by a failed try)
   -- HMIS linkage (suggest-only matching; a person confirms)
   matched_pid    text,
   matched_by     uuid references auth.users on delete set null,
@@ -108,6 +110,11 @@ create table if not exists helpline_cases (
   verified_proj  text,     -- project name of the verifying enrollment
   verified_at    timestamptz
 );
+-- Backfill for tables created before 2026-08-19 evening (attempts vs contacts
+-- split — a failed try and a successful contact are separate facts).
+alter table helpline_cases add column if not exists contacts int not null default 0;
+alter table helpline_cases add column if not exists last_contact date;
+
 create index if not exists idx_hl_cases_status on helpline_cases (status, priority desc, created_at);
 create index if not exists idx_hl_cases_phone  on helpline_cases (phone_line);
 create index if not exists idx_hl_cases_pid    on helpline_cases (matched_pid);

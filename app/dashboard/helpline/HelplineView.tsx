@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
 import { fmtInt } from '../../../lib/format';
-import { AREAS, priorityBand, type CaseStatus } from '../../../lib/helpline-options';
+import { AREAS, MAX_FAILED_ATTEMPTS, priorityBand, type CaseStatus } from '../../../lib/helpline-options';
 
 export interface HlCase {
   id: number;
@@ -31,6 +31,8 @@ export interface HlCase {
   assigned_at: string | null;
   attempts: number;
   last_attempt: string | null;
+  contacts: number;
+  last_contact: string | null;
   matched_pid: string | null;
   confirmed_at: string | null;
   verified_entry: string | null;
@@ -129,11 +131,27 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
   const assign = (c: HlCase, teamId: number) =>
     update(c.id, { team_id: teamId, status: 'assigned', assigned_at: new Date().toISOString() });
 
-  const logAttempt = (c: HlCase) =>
-    update(c.id, {
-      status: c.status === 'assigned' ? 'attempted' : c.status,
-      attempts: c.attempts + 1,
+  // Failed try and successful contact are SEPARATE facts (user call
+  // 2026-08-19): each bumps its own counter, and status only moves FORWARD —
+  // a failed try after a successful contact never downgrades the case.
+  // 3-strike rule: the Nth failed attempt with zero successful contacts
+  // auto-closes as no_locate (Reopen stays one click away).
+  const logAttempt = (c: HlCase) => {
+    const attempts = c.attempts + 1;
+    const strikeOut = attempts >= MAX_FAILED_ATTEMPTS && (c.contacts ?? 0) === 0
+      && ['assigned', 'attempted'].includes(c.status);
+    return update(c.id, {
+      status: strikeOut ? 'no_locate' : c.status === 'assigned' ? 'attempted' : c.status,
+      attempts,
       last_attempt: new Date().toISOString().slice(0, 10),
+    });
+  };
+
+  const logContact = (c: HlCase) =>
+    update(c.id, {
+      status: ['assigned', 'attempted'].includes(c.status) ? 'contacted' : c.status,
+      contacts: (c.contacts ?? 0) + 1,
+      last_contact: new Date().toISOString().slice(0, 10),
     });
 
   async function findMatches(id: number) {
@@ -320,14 +338,19 @@ export default function HelplineView({ me, isAdmin, cases, teams, sqlMissing }: 
                   <tr key={c.id} style={{ cursor: 'default' }}>
                     <CaseCell c={c} />
                     <td style={{ whiteSpace: 'nowrap' }}><Chip s={c.status} />
-                      {c.attempts > 0 && <div className="bnl-sub">×{c.attempts}{c.last_attempt ? ` · last ${c.last_attempt}` : ''}</div>}</td>
+                      {c.attempts > 0 && <div className="bnl-sub">✗ tried ×{c.attempts}{c.last_attempt ? ` · ${c.last_attempt}` : ''}</div>}
+                      {(c.contacts ?? 0) > 0 && <div className="bnl-sub" style={{ color: 'var(--accent)' }}>
+                        ✓ contacted ×{c.contacts}{c.last_contact ? ` · ${c.last_contact}` : ''}</div>}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank"
                         title="One-page dispatch sheet — print or save as PDF for the field team">🖨 Sheet</Link>
                       <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
-                        onClick={() => logAttempt(c)}>Log attempt</button>
+                        title={`Went out, couldn't reach them — bumps the tried counter. ${MAX_FAILED_ATTEMPTS} failed tries with no successful contact auto-closes the case as could-not-locate.`}
+                        onClick={() => logAttempt(c)}>
+                        ✗ Couldn&rsquo;t contact{(c.contacts ?? 0) === 0 && c.attempts === MAX_FAILED_ATTEMPTS - 1 ? ' (final)' : ''}</button>
                       <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
-                        onClick={() => update(c.id, { status: 'contacted' })}>Contacted</button>
+                        title="Reached them — bumps the contacted counter; failed tries never erase this"
+                        onClick={() => logContact(c)}>✓ Contacted</button>
                       <button className="btn primary" style={{ marginLeft: 6, padding: '5px 12px', fontSize: 12 }} disabled={busy}
                         title="Outreach verified this person is homeless — starts the enrollment-verification clock"
                         onClick={() => update(c.id, { status: 'confirmed', confirmed_at: new Date().toISOString().slice(0, 10) })}>
