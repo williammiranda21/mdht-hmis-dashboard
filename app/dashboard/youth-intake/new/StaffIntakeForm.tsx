@@ -89,39 +89,39 @@ export default function StaffIntakeForm({ me }: { me: string }) {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 200 }}>
             <L>First name</L>
-            <input className="finput" style={{ width: '100%' }} value={f.first_name} maxLength={80}
+            <input className="tinput" style={{ width: '100%' }} value={f.first_name} maxLength={80}
               onChange={(e) => set('first_name')(e.target.value)} />
           </div>
           <div style={{ flex: 1, minWidth: 200 }}>
             <L>Last name</L>
-            <input className="finput" style={{ width: '100%' }} value={f.last_name} maxLength={80}
+            <input className="tinput" style={{ width: '100%' }} value={f.last_name} maxLength={80}
               onChange={(e) => set('last_name')(e.target.value)} />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 200 }}>
             <L>Date of birth</L>
-            <input className="finput" style={{ width: '100%' }} type="date" value={f.dob}
+            <input className="tinput" style={{ width: '100%' }} type="date" value={f.dob}
               onChange={(e) => set('dob')(e.target.value)} />
           </div>
           <div style={{ flex: 1, minWidth: 200 }}>
             <L>SSN — last 4 (optional, sharpens HMIS matching)</L>
-            <input className="finput" style={{ width: '100%' }} value={f.ssn4} maxLength={4}
+            <input className="tinput" style={{ width: '100%' }} value={f.ssn4} maxLength={4}
               inputMode="numeric" onChange={(e) => set('ssn4')(e.target.value.replace(/\D/g, ''))} />
           </div>
         </div>
         <L>Contact — phone / email / social</L>
-        <input className="finput" style={{ width: '100%' }} value={f.contact} maxLength={200}
+        <input className="tinput" style={{ width: '100%' }} value={f.contact} maxLength={200}
           placeholder="Anything the youth says works" onChange={(e) => set('contact')(e.target.value)} />
         <L>Where did they sleep last night? — leave unselected if unknown</L>
         <Chips group="sleeping" options={SLEEPING_OPTIONS} />
         <L>School / work</L>
-        <input className="finput" style={{ width: '100%' }} value={f.school_work} maxLength={200}
+        <input className="tinput" style={{ width: '100%' }} value={f.school_work} maxLength={200}
           onChange={(e) => set('school_work')(e.target.value)} />
         <L>Anything feel unsafe for them right now?</L>
         <Chips group="unsafe" options={UNSAFE_OPTIONS} />
         <L>Case notes — internal-only, never shown to the youth</L>
-        <textarea className="finput" rows={4} style={{ width: '100%', resize: 'vertical' }}
+        <textarea className="tinput" rows={4} style={{ width: '100%', resize: 'vertical' }}
           value={f.notes} maxLength={4000}
           placeholder="How they presented, immediate needs, who referred them, follow-up plan…"
           onChange={(e) => set('notes')(e.target.value)} />

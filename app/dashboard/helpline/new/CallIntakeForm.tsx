@@ -135,12 +135,12 @@ export default function CallIntakeForm({ me }: { me: string }) {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 180 }}>
             <L>Number they called from</L>
-            <input className="finput" style={{ width: '100%' }} value={f.phone_line} maxLength={25}
+            <input className="tinput" style={{ width: '100%' }} value={f.phone_line} maxLength={25}
               placeholder="Caller ID" onChange={(e) => set('phone_line')(e.target.value)} />
           </div>
           <div style={{ flex: 1, minWidth: 180 }}>
             <L>Callback number — if different</L>
-            <input className="finput" style={{ width: '100%' }} value={f.phone_callback} maxLength={25}
+            <input className="tinput" style={{ width: '100%' }} value={f.phone_callback} maxLength={25}
               placeholder="“But reach me at…”" onChange={(e) => set('phone_callback')(e.target.value)} />
           </div>
         </div>
@@ -162,22 +162,22 @@ export default function CallIntakeForm({ me }: { me: string }) {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 160 }}>
             <L>First name</L>
-            <input className="finput" style={{ width: '100%' }} value={f.first_name} maxLength={80}
+            <input className="tinput" style={{ width: '100%' }} value={f.first_name} maxLength={80}
               onChange={(e) => set('first_name')(e.target.value)} />
           </div>
           <div style={{ flex: 1, minWidth: 160 }}>
             <L>Last name</L>
-            <input className="finput" style={{ width: '100%' }} value={f.last_name} maxLength={80}
+            <input className="tinput" style={{ width: '100%' }} value={f.last_name} maxLength={80}
               onChange={(e) => set('last_name')(e.target.value)} />
           </div>
           <div style={{ flex: 1, minWidth: 140 }}>
             <L>DOB — helps HMIS match</L>
-            <input className="finput" style={{ width: '100%' }} type="date" value={f.dob}
+            <input className="tinput" style={{ width: '100%' }} type="date" value={f.dob}
               onChange={(e) => set('dob')(e.target.value)} />
           </div>
           <div style={{ flex: 0.7, minWidth: 110 }}>
             <L>SSN-4 — optional</L>
-            <input className="finput" style={{ width: '100%' }} value={f.ssn4} maxLength={4} inputMode="numeric"
+            <input className="tinput" style={{ width: '100%' }} value={f.ssn4} maxLength={4} inputMode="numeric"
               onChange={(e) => set('ssn4')(e.target.value.replace(/\D/g, ''))} />
           </div>
         </div>
@@ -191,7 +191,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
 
         <L>Address or intersection — as exact as they can give</L>
         <div style={{ display: 'flex', gap: 8 }}>
-          <input className="finput" style={{ flex: 1 }} value={f.address} maxLength={160}
+          <input className="tinput" style={{ flex: 1 }} value={f.address} maxLength={160}
             placeholder="e.g. 401 NW 2nd Ave · or NW 36th St & 17th Ave"
             onChange={(e) => { set('address')(e.target.value); setGeo(null); setPin(null); }} />
           <button className="tbtn" type="button" disabled={geo === 'loading'} onClick={geocode}
@@ -212,7 +212,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
         ))}
 
         <L>Landmark / how to find them</L>
-        <input className="finput" style={{ width: '100%' }} value={f.landmark} maxLength={200}
+        <input className="tinput" style={{ width: '100%' }} value={f.landmark} maxLength={200}
           placeholder="“Amelia Earhart Park, by the north lot — blue tent”"
           onChange={(e) => set('landmark')(e.target.value)} />
 
@@ -237,7 +237,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
         </div>
 
         <L>Call notes</L>
-        <textarea className="finput" rows={3} style={{ width: '100%', resize: 'vertical' }}
+        <textarea className="tinput" rows={3} style={{ width: '100%', resize: 'vertical' }}
           value={f.notes} maxLength={4000}
           placeholder="What they said, callback window, safety context…"
           onChange={(e) => set('notes')(e.target.value)} />

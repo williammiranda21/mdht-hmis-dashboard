@@ -196,6 +196,11 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2392A0B8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><path d='M21 21l-4-4'/></svg>");background-repeat:no-repeat;background-position:left 11px center}
 .finput:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
 .finput::placeholder{color:var(--faint)}
+/* Plain data-entry input — .finput is the SEARCH box (magnifier icon +
+   170px min-width) and overflows tight form rows when misused for fields. */
+.tinput{font:inherit;font-size:13.5px;color:var(--text);background:var(--card);border:1px solid var(--border-strong);border-radius:10px;padding:9px 12px;width:100%;min-width:0}
+.tinput:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
+.tinput::placeholder{color:var(--faint)}
 .switch{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text);padding-bottom:9px;user-select:none}
 .switch .tk{width:38px;height:22px;border-radius:999px;background:var(--primary);position:relative;transition:background .15s;flex:none}
 .switch .tk::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .18s;box-shadow:0 1px 2px rgba(0,0,0,.3)}
