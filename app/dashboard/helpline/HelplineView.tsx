@@ -7,7 +7,10 @@ import { supabaseBrowser } from '../../../lib/supabase-browser';
 import { fmtInt } from '../../../lib/format';
 import CaseMap from '../../../components/CaseMap';
 import ReportMap from './ReportMap';
-import { AREAS, COUNTY_ZONES, MAX_FAILED_ATTEMPTS, priorityBand, suggestTeam, type CaseStatus } from '../../../lib/helpline-options';
+import { AREAS, COUNTY_ZONES, DEFAULT_RULES, EMERGENCY_SLEEPING, FACTORS, HOUSEHOLD_OPTIONS,
+  MAX_FAILED_ATTEMPTS, SLEEPING_OPTIONS, agingPts, priorityBand, priorityOf, suggestTeam,
+  type CaseStatus, type PriorityRules } from '../../../lib/helpline-options';
+import { fetchPriorityRules, invalidatePriorityRules } from '../../../lib/priority-rules';
 import { fetchCustomAreas } from '../../../lib/custom-areas';
 import ReferOut, { type ReferralResource } from '../../../components/ReferOut';
 
@@ -41,6 +44,8 @@ export interface HlCase {
   /** external resource this call was referred to (SOP refer-out; null unless
    *  status referred_out or an info-only referral was logged) */
   referred_to: string | null;
+  /** admin pin-to-top (helpline_priority.sql; undefined before it runs) */
+  pinned?: boolean | null;
   matched_pid: string | null;
   confirmed_at: string | null;
   verified_entry: string | null;
@@ -139,6 +144,26 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
   const [fEnroll, setFEnroll] = useState('');       // '' all · 'verified' · 'gap'
   const [sortKey, setSortKey] = useState<'name' | 'called' | 'team' | 'status' | 'trail' | 'enroll'>('called');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  // Admin-tuned priority policy — effective queue order recomputes LIVE from
+  // each case's stored answers + the current rules, so a weight change
+  // re-ranks instantly. Reporting keeps the intake-time stored priority.
+  const [rules, setRules] = useState<PriorityRules>(DEFAULT_RULES);
+  useEffect(() => { fetchPriorityRules().then(setRules); }, []);
+  const [qSort, setQSort] = useState<'priority' | 'oldest' | 'newest'>('priority');
+  // chronic flags for HMIS-matched open cases — privacy-safe definer fn
+  // returns only {case_id, chronic}; empty until helpline_priority.sql runs
+  const [chronicIds, setChronicIds] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabaseBrowser().rpc('helpline_hmis_flags');
+        if (!error && Array.isArray(data)) {
+          setChronicIds(new Set((data as { case_id: number; chronic: boolean }[])
+            .filter((r) => r.chronic).map((r) => Number(r.case_id))));
+        }
+      } catch { /* pre-SQL — no boost */ }
+    })();
+  }, [cases]);
   const [tab, setTabState] = useState<HlTab>('queue');
   useEffect(() => {
     const t = localStorage.getItem(HL_TAB_KEY) as HlTab | null;
@@ -180,7 +205,25 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
     run(async () => db().from('helpline_cases').update(patch).eq('id', id));
 
   const assign = (c: HlCase, teamId: number) =>
-    update(c.id, { team_id: teamId, status: 'assigned', assigned_at: new Date().toISOString() });
+    update(c.id, {
+      team_id: teamId, status: 'assigned', assigned_at: new Date().toISOString(),
+      // a pin is a queue device — assignment clears it (skip pre-SQL rows)
+      ...(c.pinned != null ? { pinned: false } : {}),
+    });
+
+  // Admin pin-to-top: the reason is required and lands in the permanent log.
+  const togglePin = async (c: HlCase) => {
+    if (c.pinned) {
+      await db().from('helpline_calls').insert({ case_id: c.id, operator: me,
+        kind: 'followup', notes: 'Unpinned from the top of the queue.' });
+      return update(c.id, { pinned: false });
+    }
+    const reason = prompt('Pin to the top of the queue — reason (goes in the case log):');
+    if (!reason?.trim()) return;
+    await db().from('helpline_calls').insert({ case_id: c.id, operator: me,
+      kind: 'followup', notes: `Pinned to top of queue — ${reason.trim()}` });
+    return update(c.id, { pinned: true });
+  };
 
   // SOP refer-out from triage: terminal closes the case as referred_out;
   // info-only logs that the script was read but keeps the case in the queue
@@ -268,6 +311,33 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
   const confirmMatch = (c: HlCase, pid: string) =>
     update(c.id, { matched_pid: pid, matched_by: me, matched_at: new Date().toISOString() });
 
+  // prior-call counts by phone (last 7 digits) — feeds the repeat-call knob
+  const priorCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of cases) {
+      const k = (c.phone_callback || c.phone_line || '').replace(/\D/g, '').slice(-7);
+      if (k) m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  }, [cases]);
+
+  /** Effective queue score = live base (current rules over stored answers)
+   *  + waiting-time aging + emergency boost + repeat-call boost. The BAND is
+   *  promoted by the total (user-approved); reporting keeps stored priority. */
+  const eff = (c: HlCase) => {
+    const base = priorityOf(c.factors, c.household, c.sleeping, rules);
+    const aging = agingPts(c.created_at, rules);
+    const emerg = rules.emergency.active
+      && (EMERGENCY_SLEEPING as readonly string[]).includes(c.sleeping ?? '')
+      ? rules.emergency.pts : 0;
+    const k = (c.phone_callback || c.phone_line || '').replace(/\D/g, '').slice(-7);
+    const rep = rules.repeatCall > 0 && k
+      ? rules.repeatCall * Math.min(3, Math.max(0, (priorCounts.get(k) ?? 1) - 1)) : 0;
+    const chron = chronicIds.has(c.id) ? rules.hmisChronic : 0;
+    const pts = base + aging + emerg + rep + chron;
+    return { base, aging, extra: emerg + rep + chron, pts, band: priorityBand(pts, rules) };
+  };
+
   const triage = cases.filter((c) => c.status === 'new');
   const working = cases.filter((c) => OPEN_STATUSES.includes(c.status));
   const confirmed = cases.filter((c) => c.status === 'confirmed');
@@ -290,10 +360,11 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
     </div>
   );
 
-  function CaseCell({ c }: { c: HlCase }) {
-    const band = priorityBand(c.priority);
+  function CaseCell({ c, e }: { c: HlCase; e?: { base: number; aging: number; extra: number; pts: number; band: string } }) {
+    const band = e ? e.band : priorityBand(c.priority, rules);
     return (
-      <td>
+      <td style={{ minWidth: 280 }}>
+        {c.pinned && <span title="Pinned to the top of the queue by an admin">📌 </span>}
         <span className="bnl-sub" title="Case number — use this when referencing the case"
           style={{ fontVariantNumeric: 'tabular-nums' }}>#{c.id}</span>{' '}
         <button className="bnl-nm" onClick={() => setDrawerC(c)}
@@ -301,7 +372,13 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
           style={{ background: 'none', border: 'none', padding: 0, font: 'inherit',
             cursor: 'pointer', textDecoration: 'underline dotted',
             textUnderlineOffset: 3, color: 'var(--strong)' }}>{nameOf(c)}</button>{' '}
-        <b style={{ color: bandColor(band), fontSize: 11 }}>{band}</b>
+        <b style={{ color: bandColor(band), fontSize: 11 }}
+          title={e ? `${e.base} pts at intake${e.aging ? ` · +${e.aging} for waiting` : ''}${e.extra ? ` · +${e.extra} event/repeat boost` : ''}` : undefined}>
+          {band}</b>
+        {e && (e.aging > 0 || e.extra > 0) && (
+          <span className="bnl-sub" title="Waiting-time and event boosts — transparent math, hover the band">
+            {' '}+{e.aging + e.extra}</span>
+        )}
         <div className="bnl-sub" style={{ lineHeight: 1.6 }}>
           {c.area ?? 'area unknown'}{c.county_district ? ` · ${c.county_district}` : ''}{c.address ? ` · ${c.address}` : ''}{c.landmark ? ` · ${c.landmark}` : ''}
           {c.sleeping ? ` · ${c.sleeping}` : ''}{c.household && c.household !== 'Alone' ? ` · ${c.household}` : ''}
@@ -344,28 +421,37 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
     );
   }
 
+  // Compact, wrapping control cluster — a nowrap one-liner here starved the
+  // Caller column of the whole table's width (user report 2026-08-20).
   function AssignControls({ c }: { c: HlCase }) {
     const sug = suggestTeam(c, teams, openByTeam);
     return (
-      <div style={{ whiteSpace: 'nowrap' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end',
+        maxWidth: 260, marginLeft: 'auto' }}>
         {sug && (
-          <button className="btn primary" style={{ padding: '5px 12px', fontSize: 12 }}
-            disabled={busy} title={`Suggested: ${sug.why} — ${openByTeam.get(sug.team.id) ?? 0} open cases`}
+          <button className="btn primary" style={{ padding: '5px 12px', fontSize: 12,
+            maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            disabled={busy} title={`Suggested: ${sug.why} — ${openByTeam.get(sug.team.id) ?? 0} open cases · full name: ${sug.team.name}`}
             onClick={() => assign(c, sug.team.id)}>
-            Assign → {sug.team.name.length > 26 ? `${sug.team.name.slice(0, 24)}…` : sug.team.name}
+            Assign → {sug.team.name.length > 22 ? `${sug.team.name.slice(0, 20)}…` : sug.team.name}
           </button>
         )}
         <select className="fselect" aria-label="Assign to team" defaultValue=""
-          style={{ marginLeft: 6, minWidth: 120, padding: '5px 26px 5px 9px', fontSize: 12 }}
+          style={{ width: sug ? 118 : 150, padding: '5px 22px 5px 9px', fontSize: 12 }}
           onChange={(e) => { if (e.target.value) assign(c, Number(e.target.value)); }}>
-          <option value="" disabled>{sug ? 'Other team…' : 'Assign team…'}</option>
+          <option value="" disabled>{sug ? 'Other…' : 'Assign team…'}</option>
           {teams.filter((x) => x.active).map((x) => (
             <option key={x.id} value={x.id}>{x.name} ({openByTeam.get(x.id) ?? 0} open)</option>
           ))}
         </select>
-        <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
+        <button className="tbtn" disabled={busy}
           title="SOP refer-out (prevention · veterans · DV · youth · other-provider areas) — shows the script first"
           onClick={() => setReferFor(c)}>↗ Refer</button>
+        {isAdmin && (
+          <button className="tbtn" disabled={busy}
+            title={c.pinned ? 'Unpin from the top of the queue' : 'Pin to the top of the queue — reason goes in the case log'}
+            onClick={() => togglePin(c)}>{c.pinned ? '📌 Unpin' : '📌 Pin'}</button>
+        )}
       </div>
     );
   }
@@ -422,18 +508,50 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
         <div className="panel-h">
           <div>
             <h3>Call queue</h3>
-            <div className="meta">New calls, highest priority first · suggestion = factors → area → county district · fewest open cases breaks ties</div>
+            <div className="meta">New calls · priority = intake points + waiting time{rules.emergency.active ? ' + event boost' : ''} · suggestion = factors → area → county district</div>
           </div>
+          <div className="fgroup"><span className="flabel">Sort</span>
+            <select className="fselect" value={qSort} onChange={(e2) => setQSort(e2.target.value as typeof qSort)}>
+              <option value="priority">Priority</option>
+              <option value="oldest">Oldest first</option>
+              <option value="newest">Newest first</option>
+            </select></div>
         </div>
+        {rules.emergency.active && (
+          <div className="lerror" role="alert" style={{ margin: '0 18px 10px' }}>
+            ⚠ {rules.emergency.label || 'Emergency event'} active — +{rules.emergency.pts} pts
+            for callers sleeping outside or in a car (set by an admin in Priority rules).
+          </div>
+        )}
+        {(() => {
+          const n = rules.slaHours == null ? 0
+            : triage.filter((c) => hoursSince(c.created_at) >= (rules.slaHours as number)).length;
+          return n > 0 ? (
+            <div className="bnl-sub" style={{ padding: '0 18px 8px', color: 'var(--danger)', fontWeight: 700 }}>
+              ⚑ {fmtInt(n)} call{n === 1 ? '' : 's'} past the {rules.slaHours}h response target
+            </div>
+          ) : null;
+        })()}
         {triage.length > 0 && (
           <div className="scroll"><table className="bnl-table">
             <thead><tr><th>Called</th><th>Caller</th><th>HMIS</th><th style={{ textAlign: 'right' }}>Assignment</th></tr></thead>
             <tbody>
-              {triage.map((c) => (
+              {[...triage.map((c) => ({ c, e: eff(c) }))]
+                .sort((a, b) => {
+                  const pin = Number(b.c.pinned ?? false) - Number(a.c.pinned ?? false);
+                  if (pin) return pin;
+                  if (qSort === 'oldest') return a.c.created_at.localeCompare(b.c.created_at);
+                  if (qSort === 'newest') return b.c.created_at.localeCompare(a.c.created_at);
+                  return b.e.pts - a.e.pts || a.c.created_at.localeCompare(b.c.created_at);
+                })
+                .map(({ c, e }) => {
+                const hrs = hoursSince(c.created_at);
+                const late = rules.slaHours != null && hrs >= (rules.slaHours as number);
+                return (
                 <FragmentRow key={c.id} left={<>{when(c.created_at)}
-                  <div className="bnl-sub" style={hoursSince(c.created_at) >= 24 ? { color: 'var(--danger)', fontWeight: 700 } : undefined}>
-                    {hoursSince(c.created_at)}h ago{hoursSince(c.created_at) >= 24 ? ' ⚠' : ''}</div></>}>
-                  <CaseCell c={c} />
+                  <div className="bnl-sub" style={late ? { color: 'var(--danger)', fontWeight: 700 } : undefined}>
+                    {hrs}h ago{late ? ' ⚠' : ''}</div></>}>
+                  <CaseCell c={c} e={e} />
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {c.matched_pid
                       ? <span className="pill" style={{ background: 'var(--accent-light)', color: 'var(--accent)', borderRadius: 20, padding: '3px 11px', fontSize: 11, fontWeight: 700 }}>linked</span>
@@ -443,7 +561,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
                   <td style={{ textAlign: 'right' }}><AssignControls c={c} /></td>
                   {openId === c.id ? <MatchPanel c={c} /> : null}
                 </FragmentRow>
-              ))}
+                );
+              })}
             </tbody>
           </table></div>
         )}
@@ -688,11 +807,17 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
           onClose={() => setReferFor(null)} />
       )}
 
-      {shownTab === 'admin' && isAdmin && <TeamAdmin teams={teams} busy={busy}
-        onCreate={(name) => run(async () => db().from('outreach_teams')
-          .insert({ name, zones: [], factors: [] }))}
-        onSave={(id, patch) => run(async () => db().from('outreach_teams')
-          .update(patch).eq('id', id))} />}
+      {shownTab === 'admin' && isAdmin && (
+        <>
+          <PriorityRulesAdmin me={me} rules={rules}
+            onSaved={() => { invalidatePriorityRules(); fetchPriorityRules(true).then(setRules); }} />
+          <TeamAdmin teams={teams} busy={busy}
+            onCreate={(name) => run(async () => db().from('outreach_teams')
+              .insert({ name, zones: [], factors: [] }))}
+            onSave={(id, patch) => run(async () => db().from('outreach_teams')
+              .update(patch).eq('id', id))} />
+        </>
+      )}
     </>
   );
 }
@@ -889,6 +1014,161 @@ function Reporting({ cases, teams, events }: {
           ))}
         </tbody>
       </table></div>
+    </div>
+  );
+}
+
+/**
+ * Admin priority-rules editor (helpline_priority.sql, single row id=1).
+ * Every knob the queue scoring reads: per-answer point weights, band
+ * thresholds, waiting-time aging (entered in DAYS), repeat-call and
+ * HMIS-chronic boosts, SLA target, and the emergency event toggle. Saves
+ * write an immutable audit row — priorities drive dispatch decisions.
+ */
+function PriorityRulesAdmin({ me, rules, onSaved }: {
+  me: string; rules: PriorityRules; onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [w, setW] = useState<PriorityRules>(rules);
+  useEffect(() => { if (!open) setW(rules); }, [rules, open]);
+  const [log, setLog] = useState<{ changed_at: string; change: string }[] | null>(null);
+  useEffect(() => {
+    if (!open || log !== null) return;
+    supabaseBrowser().from('helpline_priority_log')
+      .select('changed_at, change').order('changed_at', { ascending: false }).limit(5)
+      .then(({ data }) => setLog((data ?? []) as { changed_at: string; change: string }[]));
+  }, [open, log]);
+
+  const num = (v: number, set: (n: number) => void, width = 52) => (
+    <input className="tinput" type="number" value={v} step={1}
+      style={{ width, textAlign: 'center', padding: '4px 6px' }}
+      onChange={(e2) => set(Number(e2.target.value) || 0)} />
+  );
+  const wRow = (label: string, v: number, set: (n: number) => void) => (
+    <div key={label} style={{ display: 'flex', justifyContent: 'space-between',
+      alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+      <span style={{ color: 'var(--muted)' }}>{label}</span>{num(v, set)}
+    </div>
+  );
+
+  async function save() {
+    setBusy(true); setErr(null); setSaved(false);
+    const payload = {
+      id: 1,
+      weights: { factors: w.factors, household: w.household, sleeping: w.sleeping,
+        repeat_call: w.repeatCall, hmis_chronic: w.hmisChronic },
+      bands: w.bands,
+      aging: w.aging,
+      sla_hours: w.slaHours,
+      emergency: w.emergency,
+      updated_at: new Date().toISOString(),
+      updated_by: me,
+    };
+    const db2 = supabaseBrowser();
+    const { error } = await db2.from('helpline_priority').upsert(payload);
+    if (!error) {
+      await db2.from('helpline_priority_log').insert({
+        changed_by: me,
+        change: JSON.stringify({ weights: payload.weights, bands: w.bands, aging: w.aging,
+          sla_hours: w.slaHours, emergency: w.emergency }),
+      });
+    }
+    setBusy(false);
+    if (error) { setErr(`${error.message} — run supabase/helpline_priority.sql if this is a missing-table error.`); return; }
+    setSaved(true); setLog(null); onSaved();
+  }
+
+  const preview = priorityOf(['Fleeing DV'], null, 'Street / outside', w);
+  return (
+    <div className="panel" style={{ marginBottom: 18 }}>
+      <div className="panel-h">
+        <div>
+          <h3>Priority rules (admin)</h3>
+          <div className="meta">Point weights, waiting-time escalation, boosts, response target,
+            emergency mode · changes re-rank the queue instantly · every save is logged</div>
+        </div>
+        <button className="tbtn" onClick={() => { setOpen(!open); setSaved(false); }}>
+          {open ? 'Close' : 'Edit rules'}</button>
+      </div>
+      {open && (
+        <div style={{ padding: '0 18px 16px' }}>
+          {err && <div className="lerror" role="alert" style={{ marginBottom: 10 }}>{err}</div>}
+          {saved && <div role="status" style={{ marginBottom: 10, background: 'var(--accent-light)',
+            color: 'var(--accent)', borderRadius: 8, padding: '8px 12px', fontSize: 12.5,
+            fontWeight: 600 }}>✓ Saved — the queue is already using the new rules.</div>}
+          <div className="bnl-sub" style={{ fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: '.05em', margin: '4px 0 6px' }}>Points per answer</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+            gap: '4px 22px' }}>
+            {FACTORS.map((f2) => wRow(f2.key, w.factors[f2.key] ?? 0,
+              (n) => setW({ ...w, factors: { ...w.factors, [f2.key]: n } })))}
+            {HOUSEHOLD_OPTIONS.map((h) => wRow(`Household: ${h}`, w.household[h] ?? 0,
+              (n) => setW({ ...w, household: { ...w.household, [h]: n } })))}
+            {SLEEPING_OPTIONS.map((s) => wRow(`Slept: ${s}`, w.sleeping[s] ?? 0,
+              (n) => setW({ ...w, sleeping: { ...w.sleeping, [s]: n } })))}
+          </div>
+          <div className="bnl-sub" style={{ fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: '.05em', margin: '14px 0 6px' }}>Escalation &amp; boosts</div>
+          <div style={{ display: 'flex', gap: '8px 26px', flexWrap: 'wrap', fontSize: 12.5,
+            alignItems: 'center', color: 'var(--muted)' }}>
+            <span>Waiting adds {num(w.aging.pts, (n) => setW({ ...w, aging: { ...w.aging, pts: n } }), 44)} pt(s)
+              every {num(Math.round(w.aging.hours / 24) || 1, (n) => setW({ ...w, aging: { ...w.aging, hours: Math.max(1, n) * 24 } }), 44)} day(s),
+              max {num(w.aging.cap, (n) => setW({ ...w, aging: { ...w.aging, cap: n } }), 44)}</span>
+            <span>Repeat call +{num(w.repeatCall, (n) => setW({ ...w, repeatCall: n }), 44)} per prior call (max 3)</span>
+            <span title="Confirmed HMIS match who is chronic on the By-Name List">HMIS chronic +{num(w.hmisChronic, (n) => setW({ ...w, hmisChronic: n }), 44)}</span>
+          </div>
+          <div className="bnl-sub" style={{ fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: '.05em', margin: '14px 0 6px' }}>Bands &amp; response target</div>
+          <div style={{ display: 'flex', gap: '8px 26px', flexWrap: 'wrap', fontSize: 12.5,
+            alignItems: 'center', color: 'var(--muted)' }}>
+            <span>HIGH at {num(w.bands.high, (n) => setW({ ...w, bands: { ...w.bands, high: n } }), 44)} pts</span>
+            <span>MED at {num(w.bands.med, (n) => setW({ ...w, bands: { ...w.bands, med: n } }), 44)} pts</span>
+            <span>
+              <label style={{ cursor: 'pointer' }}>
+                <input type="checkbox" checked={w.slaHours != null}
+                  onChange={(e2) => setW({ ...w, slaHours: e2.target.checked ? 24 : null })} />
+                {' '}Response target
+              </label>
+              {w.slaHours != null && <> {num(w.slaHours, (n) => setW({ ...w, slaHours: Math.max(1, n) }), 44)} hours</>}
+            </span>
+          </div>
+          <div className="bnl-sub" style={{ fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: '.05em', margin: '14px 0 6px' }}>Emergency mode</div>
+          <div style={{ display: 'flex', gap: '8px 18px', flexWrap: 'wrap', fontSize: 12.5,
+            alignItems: 'center', color: 'var(--muted)' }}>
+            <label style={{ cursor: 'pointer' }}>
+              <input type="checkbox" checked={w.emergency.active}
+                onChange={(e2) => setW({ ...w, emergency: { ...w.emergency, active: e2.target.checked } })} />
+              {' '}Active — boosts callers sleeping outside or in a car
+            </label>
+            <input className="tinput" style={{ width: 220 }} maxLength={60} value={w.emergency.label}
+              placeholder="Event label — e.g. Heat advisory"
+              onChange={(e2) => setW({ ...w, emergency: { ...w.emergency, label: e2.target.value } })} />
+            <span>+{num(w.emergency.pts, (n) => setW({ ...w, emergency: { ...w.emergency, pts: n } }), 44)} pts</span>
+          </div>
+          <div style={{ marginTop: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="btn primary" style={{ padding: '6px 16px', fontSize: 12.5 }}
+              disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save rules'}</button>
+            <span className="bnl-sub">
+              Preview: fleeing DV + sleeping outside = {preview} pts = {priorityBand(preview, w)}
+            </span>
+          </div>
+          {log && log.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div className="bnl-sub" style={{ fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: '.05em', marginBottom: 4 }}>Recent changes</div>
+              {log.map((l, i) => (
+                <div key={i} className="bnl-sub" style={{ padding: '2px 0', overflowWrap: 'anywhere' }}>
+                  {new Date(l.changed_at).toLocaleString()} · {l.change.slice(0, 160)}{l.change.length > 160 ? '…' : ''}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

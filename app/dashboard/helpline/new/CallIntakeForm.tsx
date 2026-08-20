@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../../../lib/supabase-browser';
 import {
-  AREAS, SLEEPING_OPTIONS, HOUSEHOLD_OPTIONS, FACTORS, muniArea, priorityOf, priorityBand,
-  suggestTeam, type RoutableTeam,
+  AREAS, DEFAULT_RULES, SLEEPING_OPTIONS, HOUSEHOLD_OPTIONS, FACTORS, muniArea, priorityOf,
+  priorityBand, suggestTeam, type PriorityRules, type RoutableTeam,
 } from '../../../../lib/helpline-options';
+import { fetchPriorityRules } from '../../../../lib/priority-rules';
 import { featuresAt, inFeature, type GeoFC } from '../../../../lib/slippy';
 import { fetchCustomAreas } from '../../../../lib/custom-areas';
 import ReferOut, { type ReferralResource } from '../../../../components/ReferOut';
@@ -24,9 +25,12 @@ async function loadGeo(file: string): Promise<GeoFC | null> {
 }
 
 interface PriorCase {
-  id: number; created_at: string; status: string;
+  id: number; created_at: string; status: string; team_id: number | null;
   first_name: string | null; last_name: string | null; area: string | null;
 }
+/** statuses where a case is still being worked — a repeat call about one of
+ *  these should ATTACH, not spawn a duplicate queue row */
+const STILL_OPEN = ['new', 'assigned', 'attempted', 'contacted', 'confirmed'];
 interface GeoHit { label: string; lat: number; lng: number }
 
 /**
@@ -59,6 +63,8 @@ export default function CallIntakeForm({ me }: { me: string }) {
   const [openBy, setOpenBy] = useState<Map<number, number>>(new Map());
   const [assignNow, setAssignNow] = useState(false);
   const [referOpen, setReferOpen] = useState(false);
+  const [rules, setRules] = useState<PriorityRules>(DEFAULT_RULES);
+  useEffect(() => { fetchPriorityRules().then(setRules); }, []);
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
 
   // Teams + their open-case load, once per form — feeds the live suggestion
@@ -87,10 +93,10 @@ export default function CallIntakeForm({ me }: { me: string }) {
     const h = setTimeout(async () => {
       const { data } = await supabaseBrowser()
         .from('helpline_cases')
-        .select('id, created_at, status, first_name, last_name, area')
+        .select('id, created_at, status, team_id, first_name, last_name, area')
         .or(`phone_line.ilike.%${digits.slice(-7)}%,phone_callback.ilike.%${digits.slice(-7)}%`)
         .order('created_at', { ascending: false })
-        .limit(3);
+        .limit(5);
       setPrior((data ?? []) as PriorCase[]);
     }, 350);
     return () => clearTimeout(h);
@@ -162,8 +168,39 @@ export default function CallIntakeForm({ me }: { me: string }) {
     setDistNote(notes.length ? notes.join(' · ') : null);
   }
 
-  const pts = priorityOf(factors, f.household || null, f.sleeping || null);
-  const band = priorityBand(pts);
+  const pts = priorityOf(factors, f.household || null, f.sleeping || null, rules);
+  const band = priorityBand(pts, rules);
+
+  /** Automated duplicate handling (user pick 2026-08-20): the system tells
+   *  the operator this number has an OPEN case and one click logs the new
+   *  call (and any fresher location) onto it — no duplicate queue row. */
+  async function attachToCase(p: PriorCase) {
+    if (busy) return;
+    setBusy(true); setErr(null);
+    const db = supabaseBrowser();
+    const locBits = [f.address.trim(), f.landmark.trim(),
+      pin ? `pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''].filter(Boolean).join(' · ');
+    const ev = await db.from('helpline_calls').insert({
+      case_id: p.id, operator: me, kind: 'followup',
+      notes: `Repeat call (same number). ${f.notes.trim() || 'No new information given.'}`
+        + (locBits ? ` — location now: ${locBits}` : ''),
+    });
+    let e2 = ev.error;
+    if (!e2 && (pin || f.address.trim() || f.landmark.trim())) {
+      const patch: Record<string, unknown> = {};
+      if (f.address.trim()) patch.address = f.address.trim();
+      if (f.landmark.trim()) patch.landmark = f.landmark.trim();
+      if (f.area.trim()) patch.area = f.area.trim();
+      if (pin) { patch.lat = pin.lat; patch.lng = pin.lng; }
+      if (countyDist) patch.county_district = countyDist;
+      const up = await db.from('helpline_cases').update(patch).eq('id', p.id);
+      e2 = up.error;
+    }
+    setBusy(false);
+    if (e2) { setErr(e2.message); return; }
+    router.push('/dashboard/helpline');
+    router.refresh();
+  }
   const sug = teams.length ? suggestTeam(
     { factors, household: f.household || null, area: f.area || null, county_district: countyDist },
     teams, openBy) : null;
@@ -259,11 +296,35 @@ export default function CallIntakeForm({ me }: { me: string }) {
               placeholder="“But reach me at…”" onChange={(e) => set('phone_callback')(e.target.value)} />
           </div>
         </div>
-        {prior.length > 0 && (
+        {prior.some((p) => STILL_OPEN.includes(p.status)) && (
+          <div style={{ background: 'var(--danger-light)', border: '1px solid var(--danger)',
+            borderRadius: 8, padding: '10px 13px', fontSize: 12.5, margin: '10px 0 0' }}>
+            <b style={{ color: 'var(--danger)' }}>⚠ This number already has an open case</b>
+            {prior.filter((p) => STILL_OPEN.includes(p.status)).map((p) => (
+              <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center',
+                flexWrap: 'wrap', marginTop: 6 }}>
+                <span>#{p.id} <b>{[p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous'}</b>
+                  {' '}· {p.status}
+                  {p.team_id != null && teams.find((t) => t.id === p.team_id)
+                    ? ` · ${teams.find((t) => t.id === p.team_id)!.name}` : ''}
+                  {p.area ? ` · ${p.area}` : ''}</span>
+                <button className="btn primary" type="button" style={{ padding: '4px 12px', fontSize: 12 }}
+                  disabled={busy} onClick={() => attachToCase(p)}>
+                  Log this call on case #{p.id}</button>
+              </div>
+            ))}
+            <div className="bnl-sub" style={{ marginTop: 6 }}>
+              Adds these notes (and any new location) to the open case — no duplicate is created.
+              A shared phone isn&rsquo;t proof of identity: if this is a DIFFERENT person, save a
+              new call below as usual.
+            </div>
+          </div>
+        )}
+        {prior.some((p) => !STILL_OPEN.includes(p.status)) && (
           <div style={{ background: 'var(--primary-soft)', border: '1px solid var(--primary-light)',
             borderRadius: 8, padding: '9px 13px', fontSize: 12.5, margin: '10px 0 0' }}>
             ☎ This number has called before:{' '}
-            {prior.map((p) => (
+            {prior.filter((p) => !STILL_OPEN.includes(p.status)).map((p) => (
               <span key={p.id} style={{ marginRight: 10 }}>
                 <b>{[p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous'}</b>
                 {' '}({new Date(p.created_at).toLocaleDateString()}, {p.status}

@@ -414,7 +414,10 @@ usage heartbeat; everything degrades gracefully until it runs),
 pin checks these FIRST, before districts/municipalities),
 `helpline_referrals.sql` (2026-08-20 — SOP refer-out: helpline_cases
 referred_to + status 'referred_out' + helpline_resources script cards
-seeded from the SOP; NOT YET RUN — the feature is held local, unpushed).
+seeded from the SOP — RUN in prod),
+`helpline_priority.sql` (2026-08-20 — admin-tunable priority: settings row
++ immutable change log + helpline_cases.pinned + helpline_hmis_flags()
+definer fn for the chronic boost; NOT YET RUN — held local, unpushed).
 
 ### Helpline Triage (2026-08-19 — built, NOT yet pushed; user tests locally first)
 Homeless helpline → triage → outreach assignment → enrollment verification.

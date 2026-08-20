@@ -77,17 +77,56 @@ export const FACTORS: { key: string; pts: number; route?: string }[] = [
   { key: 'Disabling condition', pts: 1 },
 ];
 
-/** Transparent priority math — shown on the row, never a black box.
- *  factors + household + sleeping situation. Bands: HIGH ≥5 · MED ≥2 · LOW. */
-export function priorityOf(factors: string[], household: string | null, sleeping: string | null): number {
+/** Admin-tunable priority policy (helpline_priority.sql). DEFAULT_RULES
+ *  reproduces the original hard-coded scoring EXACTLY, so a missing or empty
+ *  settings row changes nothing. Aging = waiting-time escalation, per DAY by
+ *  default (user directive 2026-08-20); emergency = event mode (heat
+ *  advisory) boosting outdoor sleepers; repeatCall = points per prior call
+ *  from the same number (0 = off). */
+export interface PriorityRules {
+  factors: Record<string, number>;
+  household: Record<string, number>;
+  sleeping: Record<string, number>;
+  bands: { high: number; med: number };
+  aging: { pts: number; hours: number; cap: number };
+  repeatCall: number;
+  /** boost when the case's confirmed HMIS match is chronic on the BNL */
+  hmisChronic: number;
+  slaHours: number | null;
+  emergency: { active: boolean; label: string; pts: number };
+}
+export const DEFAULT_RULES: PriorityRules = {
+  factors: Object.fromEntries(FACTORS.map((f) => [f.key, f.pts])),
+  household: { 'With children': 2 },
+  sleeping: { 'Street / outside': 2, 'Car': 2 },
+  bands: { high: 5, med: 2 },
+  aging: { pts: 1, hours: 24, cap: 4 },
+  repeatCall: 0,
+  hmisChronic: 2,
+  slaHours: 24,
+  emergency: { active: false, label: '', pts: 0 },
+};
+/** Sleeping situations the emergency boost applies to — the outdoor ones. */
+export const EMERGENCY_SLEEPING = ['Street / outside', 'Car'] as const;
+
+/** Transparent priority math — shown on the row, never a black box. */
+export function priorityOf(factors: string[], household: string | null, sleeping: string | null,
+  rules: PriorityRules = DEFAULT_RULES): number {
   let p = 0;
-  for (const f of FACTORS) if (factors.includes(f.key)) p += f.pts;
-  if (household === 'With children') p += 2;
-  if (sleeping === 'Street / outside' || sleeping === 'Car') p += 2;
+  for (const k of factors) p += rules.factors[k] ?? 0;
+  if (household) p += rules.household[household] ?? 0;
+  if (sleeping) p += rules.sleeping[sleeping] ?? 0;
   return p;
 }
-export function priorityBand(p: number): 'HIGH' | 'MED' | 'LOW' {
-  return p >= 5 ? 'HIGH' : p >= 2 ? 'MED' : 'LOW';
+export function priorityBand(p: number, rules: PriorityRules = DEFAULT_RULES): 'HIGH' | 'MED' | 'LOW' {
+  return p >= rules.bands.high ? 'HIGH' : p >= rules.bands.med ? 'MED' : 'LOW';
+}
+/** Points a queued call has EARNED by waiting (floor of full periods, capped). */
+export function agingPts(createdAtIso: string, rules: PriorityRules = DEFAULT_RULES, nowMs = Date.now()): number {
+  if (rules.aging.pts <= 0 || rules.aging.hours <= 0 || rules.aging.cap <= 0) return 0;
+  const h = (nowMs - new Date(createdAtIso).getTime()) / 3_600_000;
+  if (!Number.isFinite(h) || h <= 0) return 0;
+  return Math.min(rules.aging.cap, Math.floor(h / rules.aging.hours) * rules.aging.pts);
 }
 
 /** Auto-close rule (user directive 2026-08-19): a case with this many FAILED
