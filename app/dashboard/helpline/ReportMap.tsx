@@ -34,10 +34,13 @@ const LAYERS = [
 ] as const;
 type LayerKey = (typeof LAYERS)[number]['key'];
 
+// Dot colors are a user directive (2026-08-20): red = needs action, green =
+// being worked, blue = resolved-confirmed. Blue is a fixed hex — the theme
+// has no blue token, and the dots sit on light map tiles in both modes.
 const DOT: Record<string, { c: string; label: string }> = {
-  new: { c: 'var(--warn)', label: 'awaiting triage' },
-  open: { c: 'var(--secondary)', label: 'with outreach' },
-  confirmed: { c: 'var(--accent)', label: 'confirmed homeless' },
+  new: { c: 'var(--danger)', label: 'awaiting triage' },
+  open: { c: 'var(--accent)', label: 'with outreach' },
+  confirmed: { c: '#3b82f6', label: 'confirmed homeless' },
   closed: { c: 'var(--faint)', label: 'closed / other' },
 };
 function dotGroup(c: HlCase): keyof typeof DOT {
