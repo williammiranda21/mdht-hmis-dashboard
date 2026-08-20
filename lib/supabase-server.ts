@@ -101,6 +101,12 @@ export async function getViewer(): Promise<Viewer | null> {
     isApproved,
     canSeeBnl: isAdmin || (isApproved && Boolean(data?.bnl_access)),
     canSeeYc: isAdmin || (isApproved && Boolean(data?.yc_access)),
-    canSeeHelpline: isAdmin || (isApproved && Boolean(data?.helpline_access)),
+    // TEMPORARY rollout lock (user directive 2026-08-20): Helpline is
+    // limited to William Miranda ONLY while it's being shaped — the other
+    // five admins keep every other module, and helpline_access grants are
+    // ignored until this lifts. Revert to the commented line to reopen:
+    // canSeeHelpline: isAdmin || (isApproved && Boolean(data?.helpline_access)),
+    canSeeHelpline: isApproved
+      && (data?.email ?? user.email) === 'william.miranda@miamidade.gov',
   };
 }
