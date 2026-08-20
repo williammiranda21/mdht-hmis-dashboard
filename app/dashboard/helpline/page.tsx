@@ -58,6 +58,20 @@ export default async function HelplinePage() {
     }
   }
 
+  // Call VOLUME per case: initial + repeat rows are actual phone calls
+  // (cases = people being worked; this is how many times the phone rang).
+  const callsByCase: Record<number, number> = {};
+  if (ids.length) {
+    const { data: cv } = await sb.from('helpline_calls')
+      .select('case_id, kind')
+      .in('case_id', ids)
+      .in('kind', ['initial', 'repeat'])
+      .limit(5000);
+    for (const e of (cv ?? []) as { case_id: number }[]) {
+      callsByCase[e.case_id] = (callsByCase[e.case_id] ?? 0) + 1;
+    }
+  }
+
   return (
     <HelplineView
       me={viewer.id}
@@ -65,6 +79,7 @@ export default async function HelplinePage() {
       cases={cases}
       teams={(teamsRes.data ?? []) as Team[]}
       events={events}
+      callsByCase={callsByCase}
       sqlMissing={sqlMissing}
     />
   );

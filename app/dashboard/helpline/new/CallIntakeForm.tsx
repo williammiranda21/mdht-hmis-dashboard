@@ -181,7 +181,8 @@ export default function CallIntakeForm({ me }: { me: string }) {
     const locBits = [f.address.trim(), f.landmark.trim(),
       pin ? `pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''].filter(Boolean).join(' · ');
     const ev = await db.from('helpline_calls').insert({
-      case_id: p.id, operator: me, kind: 'followup',
+      case_id: p.id, operator: me,
+      kind: 'repeat', // a real incoming CALL — counts toward call volume
       notes: (reopen
         ? 'Caller called again — case REOPENED, failed-attempt counter reset. '
         : 'Repeat call (same number). ')

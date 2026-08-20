@@ -147,11 +147,13 @@ alter table helpline_cases add column if not exists last_contact date;
 alter table helpline_cases add column if not exists county_district text;
 
 -- Outreach events join the call log (user catch: counters can't say WHICH try
--- succeeded — the trail can). kinds: initial/followup = phone calls in;
--- attempt/contact = outreach going out.
+-- succeeded — the trail can). kinds: initial = the call that created the
+-- case; repeat = a LATER phone call attached to it (2026-08-20 — call volume
+-- is countable: calls received = initial + repeat); followup = staff/system
+-- notes; attempt/contact = outreach going out.
 alter table helpline_calls drop constraint if exists helpline_calls_kind_check;
 alter table helpline_calls add constraint helpline_calls_kind_check
-  check (kind in ('initial','followup','attempt','contact'));
+  check (kind in ('initial','repeat','followup','attempt','contact'));
 
 create index if not exists idx_hl_cases_status on helpline_cases (status, priority desc, created_at);
 create index if not exists idx_hl_cases_phone  on helpline_cases (phone_line);

@@ -124,10 +124,12 @@ const OPEN_STATUSES: CaseStatus[] = ['assigned', 'attempted', 'contacted'];
 type HlTab = 'queue' | 'board' | 'cases' | 'map' | 'admin';
 const HL_TAB_KEY = 'hl-tab';
 
-export default function HelplineView({ me, isAdmin, cases, teams, events = {}, sqlMissing }: {
+export default function HelplineView({ me, isAdmin, cases, teams, events = {}, callsByCase = {}, sqlMissing }: {
   me: string; isAdmin: boolean; cases: HlCase[]; teams: Team[];
   /** outreach trail per open case: chronological attempt/contact events */
   events?: Record<number, { at: string; kind: string }[]>;
+  /** phone calls received per case (initial + repeat) — the VOLUME record */
+  callsByCase?: Record<number, number>;
   sqlMissing: boolean;
 }) {
   const router = useRouter();
@@ -395,6 +397,10 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
           {c.sleeping ? ` · ${c.sleeping}` : ''}{c.household && c.household !== 'Alone' ? ` · ${c.household}` : ''}
           {c.factors.length > 0 && <> · {c.factors.join(', ')}</>}
           {(c.phone_callback || c.phone_line) && <> · ☎ {c.phone_callback ?? c.phone_line}</>}
+          {(callsByCase[c.id] ?? 0) > 1 && (
+            <> · <span title={`${callsByCase[c.id]} phone calls received about this case`}
+              style={{ fontWeight: 700 }}>☎ ×{callsByCase[c.id]}</span></>
+          )}
           {c.referred_to && <> · ↗ {c.referred_to}</>}
           {c.matched_pid && <> · <span className="bnl-fp bnl-fp-sch">HMIS linked</span></>}
         </div>
@@ -802,7 +808,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
       {shownTab === 'map' && (
         <>
           <ReportMap cases={cases} teams={teams} isAdmin={isAdmin} onOpen={(c) => setDrawerC(c)} />
-          <Reporting cases={cases} teams={teams} events={events} />
+          <Reporting cases={cases} teams={teams} events={events} callsByCase={callsByCase} />
         </>
       )}
 
@@ -908,8 +914,9 @@ function median(xs: number[]): number | null {
  * from call to assignment. Computed from the loaded cases (newest 500) —
  * when volume outgrows that, this moves server-side; the columns won't change.
  */
-function Reporting({ cases, teams, events }: {
+function Reporting({ cases, teams, events, callsByCase = {} }: {
   cases: HlCase[]; teams: Team[]; events: Record<number, { at: string; kind: string }[]>;
+  callsByCase?: Record<number, number>;
 }) {
   const rows = useMemo(() => {
     const byTeam = new Map<number | null, HlCase[]>();
@@ -979,6 +986,19 @@ function Reporting({ cases, teams, events }: {
         </div>
         <button className="tbtn" onClick={downloadCsv}>⬇ CSV</button>
       </div>
+      {(() => {
+        // calls ≠ cases: this is how many times the phone actually rang
+        const totalCalls = cases.reduce((s, c) => s + Math.max(1, callsByCase[c.id] ?? 1), 0);
+        const repeats = totalCalls - cases.length;
+        return (
+          <div className="bnl-sub" style={{ padding: '0 18px 6px' }}>
+            ☎ Call volume: <b style={{ color: 'var(--text)' }}>{fmtInt(totalCalls)}</b> calls
+            across {fmtInt(cases.length)} cases
+            {repeats > 0 && <> · {fmtInt(repeats)} repeat call{repeats === 1 ? '' : 's'} attached
+              rather than duplicated</>}
+          </div>
+        );
+      })()}
       {(() => {
         // SOP external referrals — the diversion tally by destination
         const ro = cases.filter((c) => c.status === 'referred_out');
@@ -1557,7 +1577,7 @@ function CaseDrawer({ c, teamName, events, me, onClose }: {
   const stamp = (iso: string) => new Date(iso).toLocaleString(undefined,
     { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const KIND_LBL: Record<string, string> = {
-    initial: '☎ initial call', followup: '📝 note / call-back',
+    initial: '☎ initial call', repeat: '☎ repeat call', followup: '📝 note',
     attempt: '✗ contact attempt (failed)', contact: '✓ contacted',
   };
   const Row = ({ k, children }: { k: string; children: React.ReactNode }) => (
