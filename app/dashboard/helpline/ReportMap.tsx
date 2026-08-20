@@ -132,6 +132,28 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  // Hover scroll-lock (user report 2026-08-20: wheel zoomed AND scrolled the
+  // page, so the map slid under the cursor mid-gesture and the zoom anchor
+  // drifted). preventDefault alone wasn't reliable in the field — locking the
+  // page scroller while the cursor is over the map is mechanism-proof: wheel
+  // can only mean zoom here. Scrollbar width is compensated so nothing shifts.
+  const lockRef = useRef<{ ovf: string; pad: string } | null>(null);
+  function lockScroll() {
+    if (lockRef.current) return;
+    const b = document.body;
+    lockRef.current = { ovf: b.style.overflow, pad: b.style.paddingRight };
+    const sw = window.innerWidth - document.documentElement.clientWidth;
+    b.style.overflow = 'hidden';
+    if (sw > 0) b.style.paddingRight = `${sw}px`;
+  }
+  function unlockScroll() {
+    if (!lockRef.current) return;
+    document.body.style.overflow = lockRef.current.ovf;
+    document.body.style.paddingRight = lockRef.current.pad;
+    lockRef.current = null;
+  }
+  useEffect(() => unlockScroll, []); // never leave the page locked on unmount
+
   // drag-to-pan (pointer events); a real drag suppresses the click behind it
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const draggedRef = useRef(false);
@@ -278,7 +300,9 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
           overflow: 'hidden', border: '1px solid var(--border)', borderRadius: 8,
           background: '#eef1f5', cursor: 'grab', touchAction: 'none', userSelect: 'none' }}
           onPointerDown={onPointerDown} onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp} onPointerLeave={onPointerUp}
+          onPointerUp={onPointerUp}
+          onPointerEnter={lockScroll}
+          onPointerLeave={() => { onPointerUp(); unlockScroll(); }}
           onDoubleClick={onDblClick}>
           {tiles.map((t) => (
             // eslint-disable-next-line @next/next/no-img-element
