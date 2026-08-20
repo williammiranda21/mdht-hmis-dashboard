@@ -1,4 +1,5 @@
 import { tilesFor, TILE } from '../lib/slippy';
+import TileImg from './TileImg';
 
 /**
  * Static OSM map with a center pin — inline-styled so it drops into client
@@ -14,10 +15,8 @@ export default function CaseMap({ lat, lng, zoom = 17, width = 640, height = 300
     <div style={{ position: 'relative', overflow: 'hidden', width, height, maxWidth: '100%',
       border: '1px solid var(--border, #d8dee8)', borderRadius: 8, background: '#eef1f5' }}>
       {tiles.map((t) => (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img key={`${t.x}/${t.y}`} src={`/api/helpline/tile/${t.z}/${t.x}/${t.y}`} alt=""
-          width={TILE} height={TILE}
-          style={{ position: 'absolute', left: t.sx, top: t.sy, display: 'block', maxWidth: 'none' }} />
+        <TileImg key={`${t.x}/${t.y}`} src={`/api/helpline/tile/${t.z}/${t.x}/${t.y}`}
+          size={TILE} left={t.sx} top={t.sy} />
       ))}
       <div aria-hidden="true" style={{ position: 'absolute', left: width / 2, top: height / 2,
         transform: 'translate(-50%,-92%)', fontSize: 30, zIndex: 2,

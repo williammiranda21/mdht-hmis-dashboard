@@ -26,20 +26,28 @@ export async function GET(
     return new Response('bad tile', { status: 400 });
   }
 
-  try {
-    const res = await fetch(`https://tile.openstreetmap.org/${z}/${x}/${y}.png`, {
-      headers: { 'User-Agent': 'MDHT-HMIS-Dashboard helpline (miamidade.gov)' },
-      // Next Data Cache: identical tiles are served without re-fetching OSM.
-      next: { revalidate: 60 * 60 * 24 * 30 },
-    });
-    if (!res.ok) return new Response('tile unavailable', { status: 502 });
-    return new Response(await res.arrayBuffer(), {
-      headers: {
-        'Content-Type': 'image/png',
-        'Cache-Control': 'public, max-age=2592000, immutable',
-      },
-    });
-  } catch {
-    return new Response('tile unavailable', { status: 502 });
+  const url = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+  const headers = { 'User-Agent': 'MDHT-HMIS-Dashboard helpline (miamidade.gov)' };
+  // First try rides the Next Data Cache (30 days). A burst of ~12 tiles can
+  // get one throttled upstream — and a failure stored in that cache made the
+  // SAME tile broken on every view for a month (user report 2026-08-20,
+  // dispatch sheet + call map). So any miss/failure falls through to a fresh
+  // no-store retry, and failures are never cacheable.
+  let res = await fetch(url, { headers, next: { revalidate: 60 * 60 * 24 * 30 } })
+    .catch(() => null);
+  if (!res?.ok) {
+    await new Promise((r) => setTimeout(r, 300));
+    res = await fetch(url, { headers, cache: 'no-store' }).catch(() => null);
   }
+  if (!res?.ok) {
+    return new Response('tile unavailable', {
+      status: 502, headers: { 'Cache-Control': 'no-store' },
+    });
+  }
+  return new Response(await res.arrayBuffer(), {
+    headers: {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=2592000, immutable',
+    },
+  });
 }

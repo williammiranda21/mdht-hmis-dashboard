@@ -5,6 +5,7 @@ import { tilesFor, frameFor, toPx, unproject, project, inFeature, TILE, type Geo
 import { muniArea } from '../../../lib/helpline-options';
 import { fetchCustomAreas, invalidateCustomAreas, type CustomArea } from '../../../lib/custom-areas';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
+import TileImg from '../../../components/TileImg';
 import type { HlCase, Team } from './HelplineView';
 
 /**
@@ -407,10 +408,8 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
             setDraw([...draw, p]);
           }}>
           {tiles.map((t) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img key={`${t.z}/${t.x}/${t.y}`} src={`/api/helpline/tile/${t.z}/${t.x}/${t.y}`} alt=""
-              width={TILE} height={TILE} draggable={false}
-              style={{ position: 'absolute', left: t.sx, top: t.sy, display: 'block', maxWidth: 'none' }} />
+            <TileImg key={`${t.z}/${t.x}/${t.y}`} src={`/api/helpline/tile/${t.z}/${t.x}/${t.y}`}
+              size={TILE} left={t.sx} top={t.sy} />
           ))}
           <svg width={W} height={H} style={{ position: 'absolute', inset: 0, zIndex: 2,
             pointerEvents: draw ? 'none' : undefined }}>

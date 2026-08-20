@@ -23,9 +23,8 @@ function MapBlock({ lat, lng }: { lat: number; lng: number }) {
   return (
     <div className="map" style={{ width: W, height: H }}>
       {tiles.map((t) => (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img key={`${t.x}/${t.y}`} src={`/api/helpline/tile/${Z}/${t.x}/${t.y}`} alt=""
-          width={T} height={T} style={{ left: t.sx, top: t.sy }} />
+        <TileImg key={`${t.x}/${t.y}`} src={`/api/helpline/tile/${Z}/${t.x}/${t.y}`}
+          size={T} left={t.sx} top={t.sy} />
       ))}
       <div className="pin" aria-hidden="true" style={{ left: W / 2, top: H / 2 }}>📍</div>
       <div className="attr">© OpenStreetMap contributors</div>
