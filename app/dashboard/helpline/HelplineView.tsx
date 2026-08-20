@@ -112,6 +112,13 @@ function ChipDated({ c }: { c: HlCase }) {
 
 const OPEN_STATUSES: CaseStatus[] = ['assigned', 'attempted', 'contacted'];
 
+/** Page sections as tabs (user-approved mockup 2026-08-20): operators live in
+ *  the queue, dispatchers in the board, supervisors in map+reporting — each
+ *  gets a focused screen. KPI cards stay above the tabs, counts ride on the
+ *  tab labels so nothing hides, and the choice is remembered per person. */
+type HlTab = 'queue' | 'board' | 'cases' | 'map' | 'admin';
+const HL_TAB_KEY = 'hl-tab';
+
 export default function HelplineView({ me, isAdmin, cases, teams, events = {}, sqlMissing }: {
   me: string; isAdmin: boolean; cases: HlCase[]; teams: Team[];
   /** outreach trail per open case: chronological attempt/contact events */
@@ -132,6 +139,17 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
   const [fEnroll, setFEnroll] = useState('');       // '' all · 'verified' · 'gap'
   const [sortKey, setSortKey] = useState<'name' | 'called' | 'team' | 'status' | 'trail' | 'enroll'>('called');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [tab, setTabState] = useState<HlTab>('queue');
+  useEffect(() => {
+    const t = localStorage.getItem(HL_TAB_KEY) as HlTab | null;
+    if (t && ['queue', 'board', 'cases', 'map', 'admin'].includes(t)) setTabState(t);
+  }, []);
+  const setTab = (t: HlTab) => {
+    setTabState(t);
+    try { localStorage.setItem(HL_TAB_KEY, t); } catch { /* private mode */ }
+  };
+  // a non-admin can't land on the admin tab (e.g. stale localStorage)
+  const shownTab: HlTab = tab === 'admin' && !isAdmin ? 'queue' : tab;
   const setSort = (k: typeof sortKey) => {
     if (k === sortKey) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
     else { setSortKey(k); setSortDir(k === 'name' || k === 'team' || k === 'status' ? 'asc' : 'desc'); }
@@ -242,8 +260,10 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
   const searchable = (c: HlCase) =>
     `${nameOf(c)} ${c.phone_line ?? ''} ${c.phone_callback ?? ''} ${c.area ?? ''} ${c.address ?? ''} ${c.notes ?? ''}`.toLowerCase();
 
-  const kpi = (lbl: string, val: number, note: string, kc: string) => (
-    <div className="bnl-kpi" style={{ ['--kc' as any]: kc }}>
+  const kpi = (lbl: string, val: number, note: string, kc: string, go?: HlTab) => (
+    <div className="bnl-kpi" style={{ ['--kc' as any]: kc, ...(go ? { cursor: 'pointer' } : {}) }}
+      title={go ? 'Open the matching tab' : undefined}
+      onClick={go ? () => setTab(go) : undefined}>
       <div className="bnl-kpi-lbl">{lbl}</div>
       <div className="bnl-kpi-val">{fmtInt(val)}</div>
       <div className="bnl-kpi-note">{note}</div>
@@ -343,24 +363,47 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
       <div className="bnl-kpis" style={{ marginBottom: 18 }}>
         {kpi('Awaiting triage', triage.length,
           triage.length ? `oldest ${Math.max(...triage.map((c) => hoursSince(c.created_at)))}h ago` : 'queue is clear',
-          'var(--danger)')}
-        {kpi('With outreach', working.length, 'assigned · attempted · contacted', 'var(--accent)')}
+          'var(--danger)', 'queue')}
+        {kpi('With outreach', working.length, 'assigned · attempted · contacted', 'var(--accent)', 'board')}
         {kpi('Confirmed homeless', confirmed.length,
-          `${fmtInt(verified.length)} verified enrolled · ${fmtInt(unverified.length)} pending`, 'var(--info)')}
+          `${fmtInt(verified.length)} verified enrolled · ${fmtInt(unverified.length)} pending`, 'var(--info)', 'cases')}
         {kpi('Enrollment gap', unverified.length,
-          unverified.length ? 'confirmed but no HMIS enrollment yet' : 'everyone confirmed is enrolled', 'var(--danger)')}
+          unverified.length ? 'confirmed but no HMIS enrollment yet' : 'everyone confirmed is enrolled', 'var(--danger)', 'cases')}
         {kpi('Referred out', referredOut.length,
-          'prevention · veterans · DV · youth — right-door diversions', 'var(--secondary)')}
-        {kpi('All cases', cases.length, `${fmtInt(done.length)} closed/other`, 'var(--faint)')}
+          'prevention · veterans · DV · youth — right-door diversions', 'var(--secondary)', 'cases')}
+        {kpi('All cases', cases.length, `${fmtInt(done.length)} closed/other`, 'var(--faint)', 'cases')}
       </div>
 
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+        <div className="seg" role="tablist" aria-label="Helpline sections">
+          {([
+            { k: 'queue' as HlTab, lbl: '☎ Call queue', n: triage.length, bg: 'var(--danger-light)', fg: 'var(--danger)' },
+            { k: 'board' as HlTab, lbl: 'Team board', n: working.length, bg: 'var(--accent-light)', fg: 'var(--accent)' },
+            { k: 'cases' as HlTab, lbl: 'All cases', n: 0, bg: '', fg: '' },
+            { k: 'map' as HlTab, lbl: 'Map & reporting', n: 0, bg: '', fg: '' },
+            ...(isAdmin ? [{ k: 'admin' as HlTab, lbl: '⚙ Teams', n: 0, bg: '', fg: '' }] : []),
+          ]).map(({ k, lbl, n, bg, fg }) => (
+            <button key={k} type="button" role="tab" aria-selected={shownTab === k}
+              className={shownTab === k ? 'on' : undefined} onClick={() => setTab(k)}>
+              {lbl}
+              {n > 0 && (
+                <span style={{ background: bg, color: fg, borderRadius: 9, padding: '0 7px',
+                  fontSize: 11, fontWeight: 700, marginLeft: 6 }}>{fmtInt(n)}</span>
+              )}
+            </button>
+          ))}
+        </div>
+        <span style={{ flex: 1 }} />
+        <Link className="btn primary" href="/dashboard/helpline/new">☎ New call</Link>
+      </div>
+
+      {shownTab === 'queue' && (
       <div className="panel" style={{ marginBottom: 18 }}>
         <div className="panel-h">
           <div>
-            <h3>Triage queue</h3>
+            <h3>Call queue</h3>
             <div className="meta">New calls, highest priority first · suggestion = factors → area → county district · fewest open cases breaks ties</div>
           </div>
-          <Link className="btn primary" href="/dashboard/helpline/new">☎ New call</Link>
         </div>
         {triage.length > 0 && (
           <div className="scroll"><table className="bnl-table">
@@ -388,7 +431,9 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
           <div className="empty" style={{ padding: '10px 18px 16px' }}>Nothing waiting — new calls land here.</div>
         )}
       </div>
+      )}
 
+      {shownTab === 'board' && (
       <div className="panel" style={{ marginBottom: 18 }}>
         <div className="panel-h">
           <div>
@@ -483,7 +528,9 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
         ))}
         {!working.length && <div className="empty" style={{ padding: '10px 18px 16px' }}>No assigned cases yet.</div>}
       </div>
+      )}
 
+      {shownTab === 'cases' && (
       <div className="panel">
         <div className="panel-h">
           <div>
@@ -600,8 +647,14 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
           </tbody>
         </table></div>
       </div>
+      )}
 
-      <ReportMap cases={cases} teams={teams} isAdmin={isAdmin} onOpen={(c) => setDrawerC(c)} />
+      {shownTab === 'map' && (
+        <>
+          <ReportMap cases={cases} teams={teams} isAdmin={isAdmin} onOpen={(c) => setDrawerC(c)} />
+          <Reporting cases={cases} teams={teams} events={events} />
+        </>
+      )}
 
       {drawerC && (
         <CaseDrawer c={cases.find((x) => x.id === drawerC.id) ?? drawerC}
@@ -615,9 +668,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
           onClose={() => setReferFor(null)} />
       )}
 
-      <Reporting cases={cases} teams={teams} events={events} />
-
-      {isAdmin && <TeamAdmin teams={teams} busy={busy}
+      {shownTab === 'admin' && isAdmin && <TeamAdmin teams={teams} busy={busy}
         onCreate={(name) => run(async () => db().from('outreach_teams')
           .insert({ name, zones: [], factors: [] }))}
         onSave={(id, patch) => run(async () => db().from('outreach_teams')
