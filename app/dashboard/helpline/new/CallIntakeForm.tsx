@@ -12,6 +12,7 @@ import { fetchPriorityRules } from '../../../../lib/priority-rules';
 import { featuresAt, inFeature, type GeoFC } from '../../../../lib/slippy';
 import { fetchCustomAreas } from '../../../../lib/custom-areas';
 import ReferOut, { type ReferralResource } from '../../../../components/ReferOut';
+import PinMap from '../../../../components/PinMap';
 
 // District boundary files, fetched once per session (same-origin static).
 let _cityGeo: GeoFC | null | undefined;
@@ -152,13 +153,11 @@ export default function CallIntakeForm({ me }: { me: string }) {
     }
   }
 
-  /** Pin picked → detect districts (point-in-polygon on the same files the
-   *  call map draws). Inside the city: area auto-sets to the Commission
-   *  District, per the routing doc — no lookup-map trip. Outside: the
-   *  operator's municipality pick stands. County district is stamped either
-   *  way for reporting. Operator can always override the area afterward. */
-  async function pickPin(g: GeoHit) {
-    setPin(g);
+  /** Point-in-polygon detection + area stamping for ANY coordinates — shared
+   *  by geocode picks and manual pin nudges, so moving the pin re-routes.
+   *  Custom areas outrank everything; inside the city the area auto-sets to
+   *  the Commission District; the county district is stamped either way. */
+  async function detectArea(latN: number, lngN: number) {
     if (_cityGeo === undefined) _cityGeo = await loadGeo('/gis/districts.geojson');
     if (_countyGeo === undefined) _countyGeo = await loadGeo('/gis/county_districts.geojson');
     if (_muniGeo === undefined) _muniGeo = await loadGeo('/gis/municipalities.geojson');
@@ -166,8 +165,8 @@ export default function CallIntakeForm({ me }: { me: string }) {
     // Admin-drawn custom areas outrank everything — they exist precisely to
     // override the default geography (e.g. a drawn 'Government Center').
     const customs = await fetchCustomAreas();
-    const custom = customs.find((a) => inFeature(g.lng, g.lat, a.polygon));
-    const city = _cityGeo ? featuresAt(g.lng, g.lat, _cityGeo) : [];
+    const custom = customs.find((a) => inFeature(lngN, latN, a.polygon));
+    const city = _cityGeo ? featuresAt(lngN, latN, _cityGeo) : [];
     if (custom) {
       set('area')(custom.name);
       notes.push(`in ${custom.name} (custom area, set automatically)`);
@@ -185,7 +184,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
       // featuresAt can return several hits (inFeature ignores holes, so the
       // unincorporated outer ring may contain municipalities) — take the
       // first hit that names a real municipality.
-      const muni = _muniGeo ? featuresAt(g.lng, g.lat, _muniGeo) : [];
+      const muni = _muniGeo ? featuresAt(lngN, latN, _muniGeo) : [];
       const mArea = muni.map((m) => muniArea(String(m.NAME ?? ''))).find(Boolean) ?? null;
       if (mArea) {
         set('area')(mArea);
@@ -194,7 +193,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
         notes.push('outside City of Miami — routes by County Commission District');
       }
     }
-    const county = _countyGeo ? featuresAt(g.lng, g.lat, _countyGeo) : [];
+    const county = _countyGeo ? featuresAt(lngN, latN, _countyGeo) : [];
     if (county.length) {
       const cd = `County District ${county[0].ID ?? '?'}`;
       setCountyDist(cd);
@@ -203,6 +202,23 @@ export default function CallIntakeForm({ me }: { me: string }) {
       setCountyDist(null);
     }
     setDistNote(notes.length ? notes.join(' · ') : null);
+  }
+
+  const [focusKey, setFocusKey] = useState(0);
+  const [manualMap, setManualMap] = useState(false);
+  async function pickPin(g: GeoHit) {
+    setPin(g);
+    setFocusKey((k) => k + 1); // recenter the adjust-map on the new result
+    await detectArea(g.lat, g.lng);
+  }
+  /** Staff fine-tune (user ask: "Bayfront Park, south side") — clicking the
+   *  map moves the pin and re-runs detection + the team suggestion. */
+  function movePin(latN: number, lngN: number) {
+    setPin((p) => ({
+      label: `${(p?.label ?? 'manual pin').replace(/ \(adjusted\)$/, '')} (adjusted)`,
+      lat: latN, lng: lngN,
+    }));
+    void detectArea(latN, lngN);
   }
 
   const pts = priorityOf(factors, f.household || null, f.sleeping || null, rules);
@@ -517,6 +533,11 @@ export default function CallIntakeForm({ me }: { me: string }) {
           <button className="tbtn" type="button" disabled={geo === 'loading'} onClick={geocode}
             title="Look up coordinates (server-side); the pin sets the district and drives the team suggestion">
             {geo === 'loading' ? 'Locating…' : '📍 Locate'}</button>
+          {!pin && !manualMap && (
+            <button className="tbtn" type="button"
+              title="No usable address? Open the map and click where the caller is"
+              onClick={() => setManualMap(true)}>🗺 Drop pin</button>
+          )}
         </div>
         {/* No area question (user directive 2026-08-20): the PIN decides — city
             district becomes the area, county district is the countywide
@@ -545,6 +566,18 @@ export default function CallIntakeForm({ me }: { me: string }) {
             <span className="bnl-sub"> · {g.lat.toFixed(5)}, {g.lng.toFixed(5)}</span>
           </button>
         ))}
+
+        {(pin || manualMap) && (
+          <div style={{ marginTop: 8 }}>
+            <div className="bnl-sub" style={{ marginBottom: 4 }}>
+              {pin
+                ? '🎯 Fine-tune: drag to pan · scroll to zoom · CLICK to move the pin ("south side of the park") — districts and the team suggestion update live.'
+                : '🎯 Click the map where the caller is — the pin sets the districts and routing.'}
+            </div>
+            <PinMap lat={pin?.lat ?? null} lng={pin?.lng ?? null} focusKey={focusKey}
+              onPick={movePin} />
+          </div>
+        )}
 
         <L>Landmark / how to find them</L>
         <input className="tinput" style={{ width: '100%' }} value={f.landmark} maxLength={200}
