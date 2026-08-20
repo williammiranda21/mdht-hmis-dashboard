@@ -230,8 +230,6 @@ export default function CallIntakeForm({ me }: { me: string }) {
    *  call (and any fresher location) onto it — no duplicate queue row. */
   async function attachToCase(p: PriorCase, reopen = false) {
     if (busy) return;
-    setBusy(true); setErr(null);
-    const db = supabaseBrowser();
     const locBits = [f.address.trim(), f.landmark.trim(),
       pin ? `pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''].filter(Boolean).join(' · ');
     // borrowed phone? capture the number they're reachable at NOW
@@ -239,6 +237,23 @@ export default function CallIntakeForm({ me }: { me: string }) {
     const newNumber = typedNum
       && typedNum.replace(/\D/g, '').slice(-7) !== (p.phone_line ?? '').replace(/\D/g, '').slice(-7)
       ? typedNum : '';
+    // Show exactly what's about to attach — a rushed click was logging an
+    // empty "no new information" entry (user report 2026-08-20). Cancel
+    // returns to the form so notes/location can be filled in first.
+    const summary = [
+      f.notes.trim() ? `Notes: ${f.notes.trim().slice(0, 140)}${f.notes.trim().length > 140 ? '…' : ''}` : null,
+      locBits ? `New location: ${locBits}` : null,
+      newNumber ? `New callback number: ${newNumber}` : null,
+    ].filter(Boolean);
+    const okGo = confirm(
+      (reopen ? `Reopen case #${p.id} and log this call?` : `Log this call on open case #${p.id}?`)
+      + '\n\n'
+      + (summary.length ? summary.join('\n')
+        : '⚠ Nothing new is filled in — it will be logged as “No new information given.”\n'
+          + 'Cancel to add call notes or an updated location first.'));
+    if (!okGo) return;
+    setBusy(true); setErr(null);
+    const db = supabaseBrowser();
     const ev = await db.from('helpline_calls').insert({
       case_id: p.id, operator: me,
       kind: 'repeat', // a real incoming CALL — counts toward call volume
