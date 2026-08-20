@@ -52,7 +52,14 @@ export async function GET(req: Request) {
       sb.from('cohorts').select('id, name, description, created_by, created_at').order('created_at', { ascending: false }),
       sb.from('cohort_members').select('cohort_id'),
     ]);
-    if (cRes.error) return NextResponse.json({ error: cRes.error.message }, { status: 500 });
+    if (cRes.error) {
+      // undefined_table (42P01) = cohorts.sql genuinely never ran — the ONLY
+      // case that earns the one-time-setup hint. Anything else (timeout, RLS,
+      // outage) must not masquerade as it (2026-08-20: the county proxy's
+      // blocked-request page was being misread as "table missing").
+      if (cRes.error.code === '42P01') return NextResponse.json({ setup: true, cohorts: [] });
+      return NextResponse.json({ error: cRes.error.message }, { status: 500 });
+    }
     const counts = new Map<number, number>();
     for (const m of (mRes.data ?? []) as { cohort_id: number }[]) {
       counts.set(Number(m.cohort_id), (counts.get(Number(m.cohort_id)) ?? 0) + 1);

@@ -157,6 +157,8 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
     { isAdmin?: boolean; viewerId?: string | null }) {
   const [cohorts, setCohorts] = useState<CohortRow[] | null>(null);
   const [setupNeeded, setSetupNeeded] = useState(false);
+  /** list fetch failed for a NON-setup reason (network block, server error) */
+  const [listErr, setListErr] = useState<string | null>(null);
   const [sel, setSel] = useState<number | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [name, setName] = useState('');
@@ -317,13 +319,22 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
   };
 
   const loadList = () => {
+    setListErr(null);
     fetch('/api/cohorts')
       .then(auth401)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((j) => setCohorts(j.cohorts ?? []))
+      .then((j) => {
+        // the API says explicitly when cohorts.sql hasn't run — any OTHER
+        // failure is a network/server problem and must not claim to be setup
+        if (j.setup) { setCohorts([]); setSetupNeeded(true); return; }
+        setCohorts(j.cohorts ?? []);
+      })
       .catch((e) => {
         if (String((e as Error)?.message) === '401') return;
-        setCohorts([]); setSetupNeeded(true);
+        setCohorts([]);
+        setListErr('Couldn’t load cohorts — network or server error, the data is untouched. '
+          + 'On county PCs the security proxy can block the dashboard API on vercel.app '
+          + '(pending the hmis.miamidade.gov move); localhost is unaffected.');
       });
   };
   useEffect(loadList, []);
@@ -403,6 +414,12 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
           {setupNeeded && (
             <div className="bnl-dq" style={{ marginBottom: 12 }}>
               One-time setup: run <code>supabase/cohorts.sql</code> in the Supabase SQL editor, then reload.
+            </div>
+          )}
+          {listErr && (
+            <div className="lerror" role="alert" style={{ marginBottom: 12 }}>
+              {listErr}{' '}
+              <button className="tbtn" style={{ marginLeft: 6 }} onClick={loadList}>Retry</button>
             </div>
           )}
           {isAdmin && (
