@@ -95,6 +95,32 @@ approved, so disabling an account revokes admin power.
   **reset password** (temp password shown once, never emailed — no SMTP configured)
 - Users self-change password at `/dashboard/account`
 
+### Idle sign-out + last-seen (2026-08-20, user directive "away 1 hour = logged out")
+- Policy + full design in `lib/idle.ts`. **Clocks never mix** (a skewed client
+  PC clock must not cause a login loop): the `hmis-last-active` cookie is
+  httpOnly and SERVER-written only — by `/api/seen` (the activity ping) and
+  the `/auth/callback` seed — and middleware compares it to server-now.
+  `components/IdleLogout.tsx` (dashboard layout) measures idleness with the
+  CLIENT clock in localStorage (cross-tab), warns at 55 min, signs out via the
+  server signout route at 60, and pings `/api/seen` (throttled 5 min) while
+  the user is active so the server stamp stays fresh.
+- Middleware ENFORCES: live session + stale-or-MISSING stamp → sb-* cookies
+  cleared, redirect `/login?reason=idle&next=…` (API calls get JSON 401).
+  FAIL CLOSED — every session-creating flow must seed the stamp (LoginForm and
+  SignupForm await a `/api/seen` ping before navigating; /auth/callback sets
+  the cookie itself; add the ping to any future flow). `/api/seen` is EXEMPT
+  from the idle check (it's the seeder — chicken-and-egg) but requires a
+  session. Middleware deliberately never refreshes the stamp from request
+  traffic: requests aren't proof of a human (a future polling feature would
+  otherwise defeat the timeout). Deploy note: sessions existing before this
+  shipped have no stamp → one forced re-login each.
+- `profiles.last_seen_at` (run-once `supabase/last_seen.sql`) = real usage,
+  stamped by every `/api/seen` ping (service role, caller's row only). Shown
+  as "seen Xd ago" under Last sign-in in the admin console. Needed because
+  sessions persist — `last_sign_in_at` said "20d ago" for a daily user.
+  Session-JWT probe scripts must ALSO ping /api/seen (or set the cookie) or
+  middleware 401s them as idle.
+
 ### Non-obvious things that will bite you
 - **Sign-out must stay server-side** (`app/auth/signout/route.ts`, plain form POST). A client-side
   `signOut()` silently failed: the browser client can't clear middleware-set/chunked `sb-*`
@@ -379,7 +405,11 @@ Skipping the load half leaves Supabase stale while local JSONs advance — the c
 "which half ran" trap (§6). New SQL run-once files since 2026-07-31: `targets.sql`,
 `dq_snapshots.sql`, `user_dq.sql`, `cohorts.sql` (all already run in prod),
 `youth_connect.sql` (2026-08-19 — Youth Connect: youth_intakes/intake_invites/
-client_index + profiles.yc_access + can_see_yc()).
+client_index + profiles.yc_access + can_see_yc()),
+`last_seen.sql` (2026-08-20 — profiles.last_seen_at for the /api/seen
+usage heartbeat; everything degrades gracefully until it runs),
+`team_mgmt.sql` (2026-08-20 — outreach_teams.member_accounts jsonb
+[{id,name}] account assignment + RLS write tightened to admins).
 
 ### Helpline Triage (2026-08-19 — built, NOT yet pushed; user tests locally first)
 Homeless helpline → triage → outreach assignment → enrollment verification.
@@ -394,7 +424,17 @@ County Commission District (`COUNTY_ZONES` fallback, so calls outside the City
 of Miami still route once teams carry county zones); fewest open cases breaks
 ties. The intake form shows the live suggestion with reason + optional
 assign-on-save; the call map's district counter names covering teams, or warns
-when a district is uncovered).
+when a district is uncovered). INTAKE ASKS NO AREA (user directive 2026-08-20):
+the operator captures address/landmark only — the geocoded pin auto-stamps
+area (city district) + county district; outside the city, routing = the
+county-district fallback. Consequence: municipality/neighborhood zone chips
+only bind if a case somehow carries that area string — reviving
+municipality routing needs a municipal-boundaries GeoJSON layer (pipeline/
+shp_to_geojson.py converts county shapefiles). TEAM MANAGEMENT (TeamAdmin in
+HelplineView, admin-only): create teams, rename, activate/deactivate (never
+delete — history), assign dashboard ACCOUNTS (member_accounts snapshot),
+free-text field workers + dispatch contact, zone coverage. Run-once
+team_mgmt.sql adds the column and makes team writes admin-only.
 Surfaces: `/dashboard/helpline` (KPIs, triage queue, team board, all-cases +
 admin zone editor) · `/new` (call intake: repeat-caller banner by phone,
 priority computed live from lib/helpline-options.ts closed lists, geocoding

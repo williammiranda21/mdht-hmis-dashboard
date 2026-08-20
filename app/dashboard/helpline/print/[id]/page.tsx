@@ -59,8 +59,14 @@ export default async function DispatchSheet({ params }: { params: { id: string }
   ]);
   if (!c) return <div className="panel"><div className="empty">Case not found.</div></div>;
   const { data: team } = c.team_id != null
-    ? await sb.from('outreach_teams').select('name, members, dispatch').eq('id', c.team_id).maybeSingle()
+    ? await sb.from('outreach_teams').select('*').eq('id', c.team_id).maybeSingle()
     : { data: null };
+  // Assigned accounts + free-text field workers on one staff line ('*' select
+  // so a pre-team_mgmt.sql database, without member_accounts, still renders).
+  const staff = [
+    ...(((team?.member_accounts ?? []) as { name: string }[]).map((a) => a.name)),
+    team?.members ?? '',
+  ].filter(Boolean).join(', ');
 
   const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Anonymous caller';
   const band = priorityBand(c.priority ?? 0);
@@ -130,7 +136,7 @@ export default async function DispatchSheet({ params }: { params: { id: string }
       <div className="assign">
         <span><span className="k">Assigned to </span>
           <b style={{ fontSize: 14 }}>{team?.name ?? 'NOT YET ASSIGNED'}</b>
-          {team?.members && <span className="k"> — {team.members}</span>}
+          {staff && <span className="k"> — {staff}</span>}
           {team?.dispatch && <span className="k"> · dispatch: {team.dispatch}</span>}</span>
         {c.assigned_at && <span className="k">assigned {fmt(c.assigned_at)}</span>}
       </div>

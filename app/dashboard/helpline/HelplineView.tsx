@@ -44,8 +44,12 @@ export interface HlCase {
 export interface Team {
   id: number; name: string; project_id: number | null;
   zones: string[]; factors: string[]; active: boolean;
-  /** named workers + dispatch contact (City district sub-teams carry these) */
+  /** field workers WITHOUT accounts + dispatch contact (free text, from the
+   *  MHAP staffing doc; City district sub-teams carry these) */
   members?: string | null; dispatch?: string | null;
+  /** dashboard ACCOUNTS assigned to the team — jsonb snapshot [{id,name}],
+   *  admin-managed in TeamAdmin (run team_mgmt.sql once; undefined before) */
+  member_accounts?: { id: string; name: string }[] | null;
 }
 interface Candidate {
   pid: string; name: string; dob: string | null; score: number; why: string[];
@@ -364,7 +368,11 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
             <div style={{ fontWeight: 700, color: 'var(--strong)', padding: '8px 6px 4px', fontSize: 13.5 }}>
               {team.name} <span className="bnl-sub">· {fmtInt(openByTeam.get(team.id) ?? 0)} open
               {team.zones.length ? ` · covers ${team.zones.join(', ')}` : ' · no zones set'}
-              {team.members ? ` · ${team.members}` : ''}
+              {(() => {
+                const staff = [...(team.member_accounts ?? []).map((a) => a.name),
+                  team.members ?? ''].filter(Boolean).join(', ');
+                return staff ? ` · ${staff}` : '';
+              })()}
               {team.dispatch ? ` · dispatch: ${team.dispatch}` : ''}</span>
             </div>
             <div className="scroll"><table className="bnl-table">
@@ -569,8 +577,11 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
 
       <Reporting cases={cases} teams={teams} events={events} />
 
-      {isAdmin && <TeamZones teams={teams} busy={busy} onSave={(id, zones, factors) =>
-        run(async () => db().from('outreach_teams').update({ zones, factors }).eq('id', id))} />}
+      {isAdmin && <TeamAdmin teams={teams} busy={busy}
+        onCreate={(name) => run(async () => db().from('outreach_teams')
+          .insert({ name, zones: [], factors: [] }))}
+        onSave={(id, patch) => run(async () => db().from('outreach_teams')
+          .update(patch).eq('id', id))} />}
     </>
   );
 }
@@ -767,37 +778,101 @@ const TEAM_TAGS: { key: string; label: string }[] = [
 ];
 
 /**
- * Admin-only coverage editor. Zones are TAP-CHIPS from the same AREAS list the
- * intake form uses — a typed "hialeah" can never miss "Hialeah" because
- * nothing is typed. Saving is explicit: the button only lights up when
- * something changed, and a confirmation names exactly what was saved.
+ * Admin-only team management (user ask 2026-08-20): create teams, assign
+ * DASHBOARD ACCOUNTS to them (member_accounts jsonb snapshot [{id,name}] —
+ * cohort_tasks.assignees precedent, because profiles are self-read-only for
+ * non-admins, so the board can't join names at read time), name field workers
+ * without accounts (free-text `members`, the MHAP staffing doc), set the
+ * dispatch contact, activate/deactivate, and cover zones. Zones are TAP-CHIPS
+ * — a typed "hialeah" can never miss "Hialeah" because nothing is typed.
+ * Saving is explicit: the button only lights up when something changed, and a
+ * confirmation names exactly what was saved. Requires supabase/team_mgmt.sql
+ * for the accounts column + admin-only writes; degrades gracefully before it.
  */
-function TeamZones({ teams, busy, onSave }: {
+function TeamAdmin({ teams, busy, onCreate, onSave }: {
   teams: Team[]; busy: boolean;
-  onSave: (id: number, zones: string[], factors: string[]) => Promise<boolean>;
+  onCreate: (name: string) => Promise<boolean>;
+  onSave: (id: number, patch: Record<string, unknown>) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [newName, setNewName] = useState('');
+  const [name, setName] = useState('');
   const [zones, setZones] = useState<string[]>([]);
   const [tags, setTags] = useState<string[]>([]);
-  const [saved, setSaved] = useState<string | null>(null);
+  const [accts, setAccts] = useState<{ id: string; name: string }[]>([]);
+  const [fieldTxt, setFieldTxt] = useState('');
+  const [dispatchTxt, setDispatchTxt] = useState('');
+  const [activeFlag, setActiveFlag] = useState(true);
 
+  // Approved accounts for the assignment picker — lazy, once per panel open.
+  // The admin's own session reads profiles (admins-read-all policy).
+  const [accounts, setAccounts] = useState<{ id: string; name: string }[] | null>(null);
+  useEffect(() => {
+    if (!open || accounts !== null) return;
+    (async () => {
+      const { data } = await supabaseBrowser().from('profiles')
+        .select('id, display_name, email').eq('status', 'approved').order('display_name');
+      setAccounts((data ?? []).map((p: any) => ({
+        id: String(p.id),
+        name: String(p.display_name || p.email || String(p.id).slice(0, 8)),
+      })));
+    })();
+  }, [open, accounts]);
+
+  const idsOf = (xs: { id: string }[]) => JSON.stringify(xs.map((a) => a.id).sort());
   const startEdit = (t: Team) => {
     setEditing(t.id);
+    setName(t.name);
     setZones([...t.zones]);
     setTags([...t.factors]);
+    setAccts([...(t.member_accounts ?? [])]);
+    setFieldTxt(t.members ?? '');
+    setDispatchTxt(t.dispatch ?? '');
+    setActiveFlag(t.active);
     setSaved(null);
   };
   const dirty = (t: Team) =>
-    JSON.stringify([...zones].sort()) !== JSON.stringify([...t.zones].sort())
-    || JSON.stringify([...tags].sort()) !== JSON.stringify([...t.factors].sort());
+    name.trim() !== t.name
+    || JSON.stringify([...zones].sort()) !== JSON.stringify([...t.zones].sort())
+    || JSON.stringify([...tags].sort()) !== JSON.stringify([...t.factors].sort())
+    || idsOf(accts) !== idsOf(t.member_accounts ?? [])
+    || fieldTxt.trim() !== (t.members ?? '')
+    || dispatchTxt.trim() !== (t.dispatch ?? '')
+    || activeFlag !== t.active;
 
   async function save(t: Team) {
-    const ok = await onSave(t.id, zones, tags);
+    const patch: Record<string, unknown> = {
+      name: name.trim() || t.name,
+      zones,
+      factors: tags,
+      active: activeFlag,
+    };
+    // Columns from later run-once SQL (helpline.sql tail: members/dispatch;
+    // team_mgmt.sql: member_accounts) are sent ONLY when changed — confirmed
+    // 2026-08-20 that prod predates them, and an unknown column fails the
+    // whole update.
+    if (fieldTxt.trim() !== (t.members ?? '')) patch.members = fieldTxt.trim() || null;
+    if (dispatchTxt.trim() !== (t.dispatch ?? '')) patch.dispatch = dispatchTxt.trim() || null;
+    if (idsOf(accts) !== idsOf(t.member_accounts ?? [])) patch.member_accounts = accts;
+    const ok = await onSave(t.id, patch);
     if (ok) {
-      setSaved(`Saved — ${t.name} now covers ${zones.length ? zones.join(', ') : 'no areas'}`
-        + (tags.length ? ` · routes ${tags.map((k) => TEAM_TAGS.find((x) => x.key === k)?.label ?? k).join(', ')}` : ''));
+      setSaved(`Saved — ${patch.name} covers ${zones.length ? zones.join(', ') : 'no areas'}`
+        + (accts.length ? ` · staff ${accts.map((a) => a.name).join(', ')}` : '')
+        + (tags.length ? ` · routes ${tags.map((k) => TEAM_TAGS.find((x) => x.key === k)?.label ?? k).join(', ')}` : '')
+        + (activeFlag ? '' : ' · INACTIVE'));
       setEditing(null);
+    }
+  }
+
+  async function create() {
+    const nm = newName.trim();
+    if (!nm) return;
+    const ok = await onCreate(nm);
+    if (ok) {
+      setNewName('');
+      setSaved(`Team created — ${nm}. It appears below once the page refreshes; Edit it to assign staff and coverage.`);
     }
   }
 
@@ -805,13 +880,13 @@ function TeamZones({ teams, busy, onSave }: {
     <div className="panel" style={{ marginTop: 18 }}>
       <div className="panel-h">
         <div>
-          <h3>Team coverage (admin)</h3>
-          <div className="meta">Zones drive the geography suggestion — specific areas first, county
-            districts as the countywide fallback · routing tags outrank both ·
-            pick from the same lists the intake uses</div>
+          <h3>Teams (admin)</h3>
+          <div className="meta">Create teams, assign staff, set coverage · zones drive the geography
+            suggestion — city districts + county districts are auto-detected from the call pin ·
+            routing tags outrank geography</div>
         </div>
         <button className="tbtn" onClick={() => { setOpen(!open); setEditing(null); setSaved(null); }}>
-          {open ? 'Close' : 'Edit coverage'}</button>
+          {open ? 'Close' : 'Manage teams'}</button>
       </div>
       {saved && (
         <div role="status" style={{ margin: '0 18px 12px', background: 'var(--accent-light)',
@@ -820,13 +895,33 @@ function TeamZones({ teams, busy, onSave }: {
         </div>
       )}
       {open && (
+        <div style={{ display: 'flex', gap: 8, padding: '0 18px 12px' }}>
+          <input className="tinput" style={{ maxWidth: 320 }} value={newName} maxLength={80}
+            placeholder="New team name — e.g. MHAP North"
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') create(); }} />
+          <button className="btn primary" style={{ padding: '6px 14px', fontSize: 12.5 }}
+            disabled={busy || !newName.trim()} onClick={create}>＋ Create team</button>
+        </div>
+      )}
+      {open && (
         <div className="scroll"><table className="bnl-table">
-          <thead><tr><th>Team</th><th>Covers</th><th>Routing</th><th style={{ textAlign: 'right' }}></th></tr></thead>
+          <thead><tr><th>Team</th><th>Staff</th><th>Covers</th><th>Routing</th><th style={{ textAlign: 'right' }}></th></tr></thead>
           <tbody>
             {teams.map((t) => (
               <FragmentZoneRow key={t.id}>
-                <tr style={{ cursor: 'default' }}>
-                  <td className="bnl-nm" style={{ minWidth: 180 }}>{t.name}</td>
+                <tr style={{ cursor: 'default', opacity: t.active ? 1 : 0.55 }}>
+                  <td className="bnl-nm" style={{ minWidth: 180 }}>{t.name}
+                    {!t.active && <span className="bnl-sub"> · inactive</span>}</td>
+                  <td>
+                    {(t.member_accounts?.length || t.members)
+                      ? <span style={{ fontSize: 12.5 }}>
+                          {(t.member_accounts ?? []).map((a) => (
+                            <span key={a.id} className="bnl-fp bnl-fp-sch">{a.name}</span>))}
+                          {t.members && <span className="bnl-sub"> {t.members}</span>}
+                        </span>
+                      : <span className="bnl-sub">—</span>}
+                  </td>
                   <td>{t.zones.length
                     ? t.zones.map((z) => <span key={z} className="bnl-fp bnl-fp-par">{z}</span>)
                     : <span className="bnl-sub">no zones — never suggested by geography</span>}</td>
@@ -842,9 +937,52 @@ function TeamZones({ teams, busy, onSave }: {
                 </tr>
                 {editing === t.id ? (
                   <tr style={{ cursor: 'default' }}>
-                    <td colSpan={4} style={{ background: 'var(--rowhover)' }}>
+                    <td colSpan={5} style={{ background: 'var(--rowhover)' }}>
                       <div style={{ padding: '8px 6px 14px' }}>
-                        <div className="bnl-sub" style={{ margin: '4px 0 6px', fontWeight: 700,
+                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                          <div style={{ flex: 1, minWidth: 220 }}>
+                            <div className="bnl-sub" style={{ margin: '4px 0 6px', fontWeight: 700,
+                              textTransform: 'uppercase', letterSpacing: '.05em' }}>Team name</div>
+                            <input className="tinput" style={{ width: '100%' }} value={name} maxLength={80}
+                              onChange={(e) => setName(e.target.value)} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 220 }}>
+                            <div className="bnl-sub" style={{ margin: '4px 0 6px', fontWeight: 700,
+                              textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                              Dispatch contact — phone/email for the sheet</div>
+                            <input className="tinput" style={{ width: '100%' }} value={dispatchTxt} maxLength={120}
+                              onChange={(e) => setDispatchTxt(e.target.value)} />
+                          </div>
+                        </div>
+                        <div className="bnl-sub" style={{ margin: '12px 0 6px', fontWeight: 700,
+                          textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                          Staff accounts — tap to assign ({accts.length} assigned)</div>
+                        {accounts === null && <div className="bnl-sub">Loading accounts…</div>}
+                        {accounts !== null && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {accounts.map((a) => {
+                              const on = accts.some((x) => x.id === a.id);
+                              return (
+                                <button key={a.id} type="button" aria-pressed={on}
+                                  onClick={() => setAccts((p) => on
+                                    ? p.filter((x) => x.id !== a.id) : [...p, a])}
+                                  style={{ border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+                                    background: on ? 'var(--accent-light)' : 'var(--card)',
+                                    color: on ? 'var(--strong)' : 'var(--muted)',
+                                    borderRadius: 16, padding: '5px 11px', fontSize: 12,
+                                    fontWeight: 600, cursor: 'pointer', font: 'inherit' }}>
+                                  {on ? '✓ ' : ''}{a.name}</button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <div className="bnl-sub" style={{ margin: '12px 0 6px', fontWeight: 700,
+                          textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                          Field workers without accounts — free text, shows on the board and the sheet</div>
+                        <input className="tinput" style={{ width: '100%' }} value={fieldTxt} maxLength={300}
+                          placeholder="e.g. J. Perez · M. Charles"
+                          onChange={(e) => setFieldTxt(e.target.value)} />
+                        <div className="bnl-sub" style={{ margin: '12px 0 6px', fontWeight: 700,
                           textTransform: 'uppercase', letterSpacing: '.05em' }}>
                           Areas covered — tap to toggle ({zones.length} selected)</div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -899,6 +1037,13 @@ function TeamZones({ teams, busy, onSave }: {
                             );
                           })}
                         </div>
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12,
+                          fontSize: 12.5, color: 'var(--text)', cursor: 'pointer' }}>
+                          <input type="checkbox" checked={activeFlag}
+                            onChange={(e) => setActiveFlag(e.target.checked)} />
+                          Active — inactive teams keep their case history but leave every picker and
+                          the suggestion engine
+                        </label>
                         <div style={{ marginTop: 12 }}>
                           <button className="btn primary" style={{ padding: '6px 16px', fontSize: 12.5 }}
                             disabled={busy || !dirty(t)} onClick={() => save(t)}>

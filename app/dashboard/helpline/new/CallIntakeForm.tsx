@@ -124,7 +124,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
         notes.push(`inside City of Miami — District ${d} (area set automatically)`);
       }
     } else if (_cityGeo) {
-      notes.push('outside City of Miami — pick the municipality as the area');
+      notes.push('outside City of Miami — routes by County Commission District');
     }
     const county = _countyGeo ? featuresAt(g.lng, g.lat, _countyGeo) : [];
     if (county.length) {
@@ -259,29 +259,24 @@ export default function CallIntakeForm({ me }: { me: string }) {
           </div>
         </div>
 
-        <L>Area — drives the team suggestion</L>
-        <select className="fselect" style={{ width: '100%' }} value={f.area}
-          onChange={(e) => set('area')(e.target.value)}>
-          <option value="">Choose the area…</option>
-          {AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
-        </select>
-        <div className="bnl-sub" style={{ marginTop: 4 }}>
-          Inside the City of Miami, pick the Commission District (city teams route by district).{' '}
-          <a href="https://www.miami.gov/My-Government/City-Officials/Find-My-Commissioner-District-Map"
-            target="_blank" rel="noreferrer" style={{ color: 'var(--secondary)' }}>
-            Unsure? City district lookup →</a>{' '}
-          Miami Shores / North Miami / North Miami Beach / Aventura route by municipality, never district.
-        </div>
-
         <L>Address or intersection — as exact as they can give</L>
         <div style={{ display: 'flex', gap: 8 }}>
           <input className="tinput" style={{ flex: 1 }} value={f.address} maxLength={160}
             placeholder="e.g. 401 NW 2nd Ave · or NW 36th St & 17th Ave"
-            onChange={(e) => { set('address')(e.target.value); setGeo(null); setPin(null); }} />
+            onChange={(e) => { set('address')(e.target.value); setGeo(null); setPin(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); geocode(); } }} />
           <button className="tbtn" type="button" disabled={geo === 'loading'} onClick={geocode}
-            title="Look up coordinates (server-side) so the dispatch sheet carries a pin">
+            title="Look up coordinates (server-side); the pin sets the district and drives the team suggestion">
             {geo === 'loading' ? 'Locating…' : '📍 Locate'}</button>
         </div>
+        {/* No area question (user directive 2026-08-20): the PIN decides — city
+            district becomes the area, county district is the countywide
+            routing fallback. The operator just types what the caller says. */}
+        {f.address.trim().length >= 4 && !pin && geo === null && (
+          <div className="bnl-sub" style={{ marginTop: 4 }}>
+            Press Enter or 📍 Locate — the pin sets the district and the team suggestion.
+          </div>
+        )}
         {Array.isArray(geo) && geo.length === 0 && (
           <div className="bnl-sub" style={{ marginTop: 4 }}>No match — the typed address still saves; refine or skip.</div>
         )}
