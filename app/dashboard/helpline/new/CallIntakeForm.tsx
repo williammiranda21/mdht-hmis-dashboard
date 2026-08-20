@@ -174,7 +174,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
   /** Automated duplicate handling (user pick 2026-08-20): the system tells
    *  the operator this number has an OPEN case and one click logs the new
    *  call (and any fresher location) onto it — no duplicate queue row. */
-  async function attachToCase(p: PriorCase) {
+  async function attachToCase(p: PriorCase, reopen = false) {
     if (busy) return;
     setBusy(true); setErr(null);
     const db = supabaseBrowser();
@@ -182,19 +182,31 @@ export default function CallIntakeForm({ me }: { me: string }) {
       pin ? `pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''].filter(Boolean).join(' · ');
     const ev = await db.from('helpline_calls').insert({
       case_id: p.id, operator: me, kind: 'followup',
-      notes: `Repeat call (same number). ${f.notes.trim() || 'No new information given.'}`
+      notes: (reopen
+        ? 'Caller called again — case REOPENED, failed-attempt counter reset. '
+        : 'Repeat call (same number). ')
+        + (f.notes.trim() || 'No new information given.')
         + (locBits ? ` — location now: ${locBits}` : ''),
     });
     let e2 = ev.error;
-    if (!e2 && (pin || f.address.trim() || f.landmark.trim())) {
+    if (!e2) {
       const patch: Record<string, unknown> = {};
       if (f.address.trim()) patch.address = f.address.trim();
       if (f.landmark.trim()) patch.landmark = f.landmark.trim();
       if (f.area.trim()) patch.area = f.area.trim();
       if (pin) { patch.lat = pin.lat; patch.lng = pin.lng; }
       if (countyDist) patch.county_district = countyDist;
-      const up = await db.from('helpline_cases').update(patch).eq('id', p.id);
-      e2 = up.error;
+      if (reopen) {
+        // back to its team (or triage) with a FRESH 3-strike clock — the
+        // dated ✗ history stays in the log; without the reset, one more
+        // failed try would instantly re-close a reopened case
+        patch.status = p.team_id != null ? 'assigned' : 'new';
+        patch.attempts = 0;
+      }
+      if (Object.keys(patch).length) {
+        const up = await db.from('helpline_cases').update(patch).eq('id', p.id);
+        e2 = up.error;
+      }
     }
     setBusy(false);
     if (e2) { setErr(e2.message); return; }
@@ -323,15 +335,26 @@ export default function CallIntakeForm({ me }: { me: string }) {
         {prior.some((p) => !STILL_OPEN.includes(p.status)) && (
           <div style={{ background: 'var(--primary-soft)', border: '1px solid var(--primary-light)',
             borderRadius: 8, padding: '9px 13px', fontSize: 12.5, margin: '10px 0 0' }}>
-            ☎ This number has called before:{' '}
+            ☎ This number has called before:
             {prior.filter((p) => !STILL_OPEN.includes(p.status)).map((p) => (
-              <span key={p.id} style={{ marginRight: 10 }}>
-                <b>{[p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous'}</b>
-                {' '}({new Date(p.created_at).toLocaleDateString()}, {p.status}
-                {p.area ? `, ${p.area}` : ''})
-              </span>
+              <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center',
+                flexWrap: 'wrap', marginTop: 5 }}>
+                <span>
+                  <b>{[p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous'}</b>
+                  {' '}({new Date(p.created_at).toLocaleDateString()}, {p.status}
+                  {p.area ? `, ${p.area}` : ''})
+                </span>
+                <button className="tbtn" type="button" style={{ padding: '3px 10px', fontSize: 12 }}
+                  disabled={busy}
+                  title="Same person calling again? Reopen the closed case — it returns to its team (or the queue) with a fresh attempt counter, and these notes attach to it"
+                  onClick={() => attachToCase(p, true)}>
+                  Reopen #{p.id} + log this call</button>
+              </div>
             ))}
-            <span style={{ color: 'var(--faint)' }}>— a shared phone isn&rsquo;t proof of identity; confirm on the call.</span>
+            <div className="bnl-sub" style={{ marginTop: 5 }}>
+              A shared phone isn&rsquo;t proof of identity; confirm on the call. Different person →
+              save a new call below as usual.
+            </div>
           </div>
         )}
 

@@ -274,6 +274,17 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
     });
   };
 
+  // Reopen resets the failed-attempt counter — without this, a case closed by
+  // the 3-strike rule would re-close on the very next failed try. The dated
+  // ✗/✓ events keep the full history; only the strike clock restarts.
+  const reopenCase = async (c: HlCase) => {
+    await db().from('helpline_calls').insert({
+      case_id: c.id, operator: me, kind: 'followup',
+      notes: 'Reopened — failed-attempt counter reset (dated tries stay in the log).',
+    });
+    return update(c.id, { status: c.team_id != null ? 'assigned' : 'new', attempts: 0 });
+  };
+
   // Manual close gets the same treatment: a closure note in the permanent log.
   const closeNoLocate = async (c: HlCase) => {
     await db().from('helpline_calls').insert({
@@ -772,8 +783,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
                   )}
                   {['no_locate', 'declined', 'closed', 'referred_out'].includes(c.status) && (
                     <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
-                      title="Back to the team board (keeps the team) — e.g. a new sighting or the caller called again"
-                      onClick={() => update(c.id, { status: c.team_id != null ? 'assigned' : 'new' })}>
+                      title="Back to the team board (keeps the team) with a fresh attempt counter — e.g. a new sighting or the caller called again"
+                      onClick={() => reopenCase(c)}>
                       Reopen</button>
                   )}
                 </td>
