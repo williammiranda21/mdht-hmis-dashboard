@@ -208,6 +208,26 @@ export default function CallIntakeForm({ me }: { me: string }) {
   const pts = priorityOf(factors, f.household || null, f.sleeping || null, rules);
   const band = priorityBand(pts, rules);
 
+  // In-page attach confirmation (user: no browser alert popups). Shows what
+  // will attach, warns when the form is empty; the summary reads LIVE state,
+  // so Go back → type notes → Confirm includes them.
+  const [confirmAttach, setConfirmAttach] = useState<{ p: PriorCase; reopen: boolean } | null>(null);
+  const [confirmNewCase, setConfirmNewCase] = useState(false);
+  const [armCancel, setArmCancel] = useState(false);
+  const attachPreview = (p: PriorCase): string[] => {
+    const locBits = [f.address.trim(), f.landmark.trim(),
+      pin ? `pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''].filter(Boolean).join(' · ');
+    const typedNum = (f.phone_callback || f.phone_line).trim();
+    const newNumber = typedNum
+      && typedNum.replace(/\D/g, '').slice(-7) !== (p.phone_line ?? '').replace(/\D/g, '').slice(-7)
+      ? typedNum : '';
+    return [
+      f.notes.trim() ? `Notes: ${f.notes.trim().slice(0, 140)}${f.notes.trim().length > 140 ? '…' : ''}` : '',
+      locBits ? `New location: ${locBits}` : '',
+      newNumber ? `New callback number: ${newNumber}` : '',
+    ].filter(Boolean);
+  };
+
   // open-case matches from every channel, deduped — labeled by WHAT matched
   const idHits = (p: PriorCase): string[] => {
     const hits: string[] = [];
@@ -224,6 +244,9 @@ export default function CallIntakeForm({ me }: { me: string }) {
     ...priorName.filter((p) => !phoneOpen.some((q) => q.id === p.id))
       .map((p) => ({ p, via: idHits(p).join(' + ') || 'possible match' })),
   ];
+  // identifiers changed → any pending confirmations are stale
+  const matchKey = openMatches.map((m) => m.p.id).join(',');
+  useEffect(() => { setConfirmNewCase(false); setConfirmAttach(null); }, [matchKey]);
 
   /** Automated duplicate handling (user pick 2026-08-20): the system tells
    *  the operator this number has an OPEN case and one click logs the new
@@ -237,21 +260,6 @@ export default function CallIntakeForm({ me }: { me: string }) {
     const newNumber = typedNum
       && typedNum.replace(/\D/g, '').slice(-7) !== (p.phone_line ?? '').replace(/\D/g, '').slice(-7)
       ? typedNum : '';
-    // Show exactly what's about to attach — a rushed click was logging an
-    // empty "no new information" entry (user report 2026-08-20). Cancel
-    // returns to the form so notes/location can be filled in first.
-    const summary = [
-      f.notes.trim() ? `Notes: ${f.notes.trim().slice(0, 140)}${f.notes.trim().length > 140 ? '…' : ''}` : null,
-      locBits ? `New location: ${locBits}` : null,
-      newNumber ? `New callback number: ${newNumber}` : null,
-    ].filter(Boolean);
-    const okGo = confirm(
-      (reopen ? `Reopen case #${p.id} and log this call?` : `Log this call on open case #${p.id}?`)
-      + '\n\n'
-      + (summary.length ? summary.join('\n')
-        : '⚠ Nothing new is filled in — it will be logged as “No new information given.”\n'
-          + 'Cancel to add call notes or an updated location first.'));
-    if (!okGo) return;
     setBusy(true); setErr(null);
     const db = supabaseBrowser();
     const ev = await db.from('helpline_calls').insert({
@@ -293,10 +301,17 @@ export default function CallIntakeForm({ me }: { me: string }) {
     { factors, household: f.household || null, area: f.area || null, county_district: countyDist },
     teams, openBy) : null;
 
-  async function submit(refer?: { resource: ReferralResource; terminal: boolean }) {
+  async function submit(refer?: { resource: ReferralResource; terminal: boolean }, force = false) {
     if (busy) return;
     if (!f.first_name.trim() && !f.phone_line.trim() && !f.phone_callback.trim() && !f.landmark.trim() && !f.address.trim()) {
       setErr('Capture at least a name, a number, or a location — something outreach can act on.');
+      return;
+    }
+    // A matched OPEN case means Save would create a duplicate — stop and ask
+    // in-page (user scenario 2026-08-20: updating info for a previous caller
+    // and hitting Save by mistake). force = the operator confirmed new-person.
+    if (!refer && !force && openMatches.length > 0) {
+      setConfirmNewCase(true);
       return;
     }
     if (f.ssn4 && !/^\d{4}$/.test(f.ssn4)) { setErr('SSN-4 must be exactly 4 digits (or blank).'); return; }
@@ -405,7 +420,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
                   {p.dob ? ` · DOB ${p.dob}` : ''}
                   {' '}<span className="bnl-fp bnl-fp-sch">{via}</span></span>
                 <button className="btn primary" type="button" style={{ padding: '4px 12px', fontSize: 12 }}
-                  disabled={busy} onClick={() => attachToCase(p)}>
+                  disabled={busy} onClick={() => setConfirmAttach({ p, reopen: false })}>
                   Log this call on case #{p.id}</button>
               </div>
             ))}
@@ -431,13 +446,41 @@ export default function CallIntakeForm({ me }: { me: string }) {
                 <button className="tbtn" type="button" style={{ padding: '3px 10px', fontSize: 12 }}
                   disabled={busy}
                   title="Same person calling again? Reopen the closed case — it returns to its team (or the queue) with a fresh attempt counter, and these notes attach to it"
-                  onClick={() => attachToCase(p, true)}>
+                  onClick={() => setConfirmAttach({ p, reopen: true })}>
                   Reopen #{p.id} + log this call</button>
               </div>
             ))}
             <div className="bnl-sub" style={{ marginTop: 5 }}>
               A shared phone isn&rsquo;t proof of identity; confirm on the call. Different person →
               save a new call below as usual.
+            </div>
+          </div>
+        )}
+
+        {confirmAttach && (
+          <div style={{ background: 'var(--info-light)', border: '1px solid var(--info)',
+            borderRadius: 8, padding: '10px 13px', fontSize: 12.5, margin: '10px 0 0' }}>
+            <b style={{ color: 'var(--strong)' }}>
+              {confirmAttach.reopen
+                ? `Reopen case #${confirmAttach.p.id} and log this call?`
+                : `Log this call on open case #${confirmAttach.p.id}?`}</b>
+            {attachPreview(confirmAttach.p).length > 0
+              ? attachPreview(confirmAttach.p).map((s, i) => (
+                  <div key={i} style={{ marginTop: 4 }}>{s}</div>))
+              : <div style={{ color: 'var(--warn)', fontWeight: 600, marginTop: 4 }}>
+                  Nothing new is filled in — it will be logged as &ldquo;No new information
+                  given.&rdquo; Go back to add call notes or an updated location first.
+                </div>}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              <button className="btn primary" type="button" disabled={busy}
+                style={{ background: 'var(--accent)' }}
+                onClick={() => {
+                  const a = confirmAttach;
+                  setConfirmAttach(null);
+                  if (a) attachToCase(a.p, a.reopen);
+                }}>
+                {confirmAttach.reopen ? 'Confirm — reopen + log call' : 'Confirm — log call'}</button>
+              <button className="tbtn" type="button" onClick={() => setConfirmAttach(null)}>← Go back</button>
             </div>
           </div>
         )}
@@ -555,8 +598,33 @@ export default function CallIntakeForm({ me }: { me: string }) {
           </div>
         )}
 
+        {confirmNewCase && openMatches.length > 0 && (
+          <div style={{ background: 'var(--warn-light)', border: '1px solid var(--warn)',
+            borderRadius: 8, padding: '10px 13px', fontSize: 12.5, marginTop: 14 }}>
+            <b style={{ color: 'var(--strong)' }}>⚠ An open case may already exist for this
+              caller — save a NEW case anyway?</b>
+            <div className="bnl-sub" style={{ marginTop: 4 }}>
+              {openMatches.map(({ p, via }) =>
+                `#${p.id} ${[p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous'} (${via})`
+              ).join(' · ')}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              <button className="btn primary" type="button" disabled={busy}
+                style={{ background: 'var(--info)' }}
+                onClick={() => { setConfirmNewCase(false); setConfirmAttach({ p: openMatches[0].p, reopen: false }); }}>
+                Attach to #{openMatches[0].p.id} instead</button>
+              <button className="btn primary" type="button" disabled={busy}
+                style={{ background: 'var(--accent)' }}
+                onClick={() => { setConfirmNewCase(false); submit(undefined, true); }}>
+                Different person — save new case</button>
+              <button className="tbtn" type="button" onClick={() => setConfirmNewCase(false)}>← Go back</button>
+            </div>
+          </div>
+        )}
+
         {/* color-coded, equal-size actions (user directive 2026-08-20):
-            green = save, blue = save + refer, red = cancel */}
+            green = save, blue = save + refer, red = cancel (two-step, no
+            browser dialogs anywhere on this form) */}
         <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button className="btn primary" disabled={busy} onClick={() => submit()}
             style={{ background: 'var(--accent)', minWidth: 160 }}>
@@ -574,11 +642,11 @@ export default function CallIntakeForm({ me }: { me: string }) {
             onClick={() => {
               const touched = Object.values(f).some((v) => v.trim() !== '')
                 || factors.length > 0 || pin !== null;
-              if (!touched || confirm('Discard this call? Nothing has been saved.')) {
-                router.push('/dashboard/helpline');
-              }
+              if (!touched || armCancel) { router.push('/dashboard/helpline'); return; }
+              setArmCancel(true);
+              setTimeout(() => setArmCancel(false), 4000);
             }}>
-            Cancel call
+            {armCancel ? 'Discard? Click again' : 'Cancel call'}
           </button>
         </div>
         {referOpen && (
