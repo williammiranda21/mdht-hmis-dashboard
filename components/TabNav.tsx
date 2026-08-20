@@ -17,9 +17,9 @@ const TABS = [
   { href: '/dashboard/bnl', label: 'By-Name List', icon: 'lock' },
   // Youth Connect: admins + yc_access grantees (Educate Tomorrow). Hidden from
   // everyone else — the page re-checks, hiding the tab is not the boundary.
-  { href: '/dashboard/youth-intake', label: 'Youth Intake', icon: 'sprout', ycOnly: true },
+  { href: '/dashboard/youth-intake', label: 'Youth Intake', icon: 'sprout', ycOnly: true, dev: true },
   // Helpline Triage: admins + helpline_access grantees (operators/Trust staff).
-  { href: '/dashboard/helpline', label: 'Helpline', icon: 'phone', hlOnly: true },
+  { href: '/dashboard/helpline', label: 'Helpline', icon: 'phone', hlOnly: true, dev: true },
   { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy', adminOnly: true },
   { href: '/dashboard/deep-dive', label: 'Deep Dive', icon: 'search' },
   { href: '/dashboard/glossary', label: 'Glossary', icon: 'book' },
@@ -105,6 +105,9 @@ type Tab = (typeof TABS)[number];
 const isAdminTab = (t: Tab): boolean => 'adminOnly' in t && t.adminOnly === true;
 const isYcTab = (t: Tab): boolean => 'ycOnly' in t && t.ycOnly === true;
 const isHlTab = (t: Tab): boolean => 'hlOnly' in t && t.hlOnly === true;
+// `dev` tabs carry an "under development" note so pilot users know the page
+// is still being shaped (user ask 2026-08-20).
+const isDevTab = (t: Tab): boolean => 'dev' in t && t.dev === true;
 
 export default function TabNav({ isAdmin = false, cohortAccess = false, ycAccess = false, hlAccess = false }:
     { isAdmin?: boolean; cohortAccess?: boolean; ycAccess?: boolean; hlAccess?: boolean }) {
@@ -120,7 +123,12 @@ export default function TabNav({ isAdmin = false, cohortAccess = false, ycAccess
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
           {ICONS[t.icon]}
         </svg>
-        {t.label}
+        {isDevTab(t)
+          ? <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+              {t.label}
+              <span className="nav-dev">under development</span>
+            </span>
+          : t.label}
       </Link>
     );
   };

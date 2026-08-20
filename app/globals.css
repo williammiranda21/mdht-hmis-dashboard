@@ -183,6 +183,8 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
 :root[data-theme="dark"] .toggle button.on{color:#fff}
 
 .tab{display:inline-flex;align-items:center;gap:8px} .tab svg{width:15px;height:15px}
+/* "under development" note on pilot tabs — sidebar is dark in both modes */
+.nav-dev{font-size:9px;font-style:italic;font-weight:500;letter-spacing:.04em;color:#6f7d93}
 .tabnav .sp{flex:1}
 
 /* filter bar extras */
