@@ -353,6 +353,17 @@ export default function CallIntakeForm({ me }: { me: string }) {
           <button className="btn primary" disabled={busy} onClick={submit}>
             {busy ? 'Saving…' : assignNow && sug ? `Save + assign → ${sug.team.name}` : 'Save call'}
           </button>
+          <button className="tbtn" type="button" style={{ marginLeft: 8 }} disabled={busy}
+            title="Discard this call and return to triage — nothing is saved"
+            onClick={() => {
+              const touched = Object.values(f).some((v) => v.trim() !== '')
+                || factors.length > 0 || pin !== null;
+              if (!touched || confirm('Discard this call? Nothing has been saved.')) {
+                router.push('/dashboard/helpline');
+              }
+            }}>
+            Cancel call
+          </button>
         </div>
       </div>
     </div>
