@@ -27,7 +27,12 @@ async function loadGeo(file: string): Promise<GeoFC | null> {
 interface PriorCase {
   id: number; created_at: string; status: string; team_id: number | null;
   first_name: string | null; last_name: string | null; area: string | null;
+  dob: string | null; phone_line: string | null; ssn4: string | null;
 }
+const PRIOR_COLS = 'id, created_at, status, team_id, first_name, last_name, area, dob, phone_line, ssn4';
+/** 8xx toll-free / relay lines: many unrelated callers share them, so
+ *  number-based repeat detection is noise — the name check carries it. */
+const isTollFree = (digits: string) => /^1?8(00|88|77|66|55|44|33)\d{7}$/.test(digits);
 /** statuses where a case is still being worked — a repeat call about one of
  *  these should ATTACH, not spawn a duplicate queue row */
 const STILL_OPEN = ['new', 'assigned', 'attempted', 'contacted', 'confirmed'];
@@ -87,13 +92,16 @@ export default function CallIntakeForm({ me }: { me: string }) {
   }, []);
 
   // Repeat-caller check: same number, any prior case. Debounced on the digits.
+  // Toll-free/relay numbers are skipped — shared by unrelated callers.
+  const [tollFree, setTollFree] = useState(false);
   useEffect(() => {
     const digits = f.phone_line.replace(/\D/g, '');
-    if (digits.length < 7) { setPrior([]); return; }
+    setTollFree(isTollFree(digits));
+    if (digits.length < 7 || isTollFree(digits)) { setPrior([]); return; }
     const h = setTimeout(async () => {
       const { data } = await supabaseBrowser()
         .from('helpline_cases')
-        .select('id, created_at, status, team_id, first_name, last_name, area')
+        .select(PRIOR_COLS)
         .or(`phone_line.ilike.%${digits.slice(-7)}%,phone_callback.ilike.%${digits.slice(-7)}%`)
         .order('created_at', { ascending: false })
         .limit(5);
@@ -101,6 +109,35 @@ export default function CallIntakeForm({ me }: { me: string }) {
     }, 350);
     return () => clearTimeout(h);
   }, [f.phone_line]);
+
+  // Borrowed-phone coverage (user directive 2026-08-20: match on name, DOB,
+  // SSN-4, and phone — whatever is available). Any single identifier can
+  // surface an open case; the banner says WHICH fields matched so the
+  // operator can verify identity on the call.
+  const [priorName, setPriorName] = useState<PriorCase[]>([]);
+  useEffect(() => {
+    const fn = f.first_name.trim(), ln = f.last_name.trim();
+    const hasName = fn.length >= 2 && ln.length >= 2;
+    const hasDob = Boolean(f.dob);
+    const hasSsn = /^\d{4}$/.test(f.ssn4);
+    if (!hasName && !hasDob && !hasSsn) { setPriorName([]); return; }
+    const h = setTimeout(async () => {
+      const clean = (s: string) => s.replace(/[(),.]/g, ' ').trim();
+      const ors: string[] = [];
+      if (hasName) ors.push(`and(first_name.ilike.${clean(fn)},last_name.ilike.${clean(ln)})`);
+      if (hasDob) ors.push(`dob.eq.${f.dob}`);
+      if (hasSsn) ors.push(`ssn4.eq.${f.ssn4}`);
+      const { data } = await supabaseBrowser()
+        .from('helpline_cases')
+        .select(PRIOR_COLS)
+        .or(ors.join(','))
+        .in('status', STILL_OPEN)
+        .order('created_at', { ascending: false })
+        .limit(4);
+      setPriorName((data ?? []) as PriorCase[]);
+    }, 400);
+    return () => clearTimeout(h);
+  }, [f.first_name, f.last_name, f.dob, f.ssn4]);
 
   async function geocode() {
     const q = [f.address, f.area, 'Miami-Dade FL'].filter(Boolean).join(', ');
@@ -171,6 +208,23 @@ export default function CallIntakeForm({ me }: { me: string }) {
   const pts = priorityOf(factors, f.household || null, f.sleeping || null, rules);
   const band = priorityBand(pts, rules);
 
+  // open-case matches from every channel, deduped — labeled by WHAT matched
+  const idHits = (p: PriorCase): string[] => {
+    const hits: string[] = [];
+    const fn = f.first_name.trim().toLowerCase(), ln = f.last_name.trim().toLowerCase();
+    if (fn && ln && (p.first_name ?? '').toLowerCase() === fn
+      && (p.last_name ?? '').toLowerCase() === ln) hits.push('name');
+    if (f.dob && p.dob === f.dob) hits.push('DOB');
+    if (/^\d{4}$/.test(f.ssn4) && p.ssn4 === f.ssn4) hits.push('SSN-4');
+    return hits;
+  };
+  const phoneOpen = prior.filter((p) => STILL_OPEN.includes(p.status));
+  const openMatches = [
+    ...phoneOpen.map((p) => ({ p, via: ['same number', ...idHits(p)].join(' + ') })),
+    ...priorName.filter((p) => !phoneOpen.some((q) => q.id === p.id))
+      .map((p) => ({ p, via: idHits(p).join(' + ') || 'possible match' })),
+  ];
+
   /** Automated duplicate handling (user pick 2026-08-20): the system tells
    *  the operator this number has an OPEN case and one click logs the new
    *  call (and any fresher location) onto it — no duplicate queue row. */
@@ -180,12 +234,17 @@ export default function CallIntakeForm({ me }: { me: string }) {
     const db = supabaseBrowser();
     const locBits = [f.address.trim(), f.landmark.trim(),
       pin ? `pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''].filter(Boolean).join(' · ');
+    // borrowed phone? capture the number they're reachable at NOW
+    const typedNum = (f.phone_callback || f.phone_line).trim();
+    const newNumber = typedNum
+      && typedNum.replace(/\D/g, '').slice(-7) !== (p.phone_line ?? '').replace(/\D/g, '').slice(-7)
+      ? typedNum : '';
     const ev = await db.from('helpline_calls').insert({
       case_id: p.id, operator: me,
       kind: 'repeat', // a real incoming CALL — counts toward call volume
       notes: (reopen
         ? 'Caller called again — case REOPENED, failed-attempt counter reset. '
-        : 'Repeat call (same number). ')
+        : `Repeat call${newNumber ? ` from a different number (${newNumber})` : ' (same number)'}. `)
         + (f.notes.trim() || 'No new information given.')
         + (locBits ? ` — location now: ${locBits}` : ''),
     });
@@ -197,6 +256,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
       if (f.area.trim()) patch.area = f.area.trim();
       if (pin) { patch.lat = pin.lat; patch.lng = pin.lng; }
       if (countyDist) patch.county_district = countyDist;
+      if (newNumber) patch.phone_callback = newNumber; // reach them at the NEW number
       if (reopen) {
         // back to its team (or triage) with a FRESH 3-strike clock — the
         // dated ✗ history stays in the log; without the reset, one more
@@ -302,6 +362,12 @@ export default function CallIntakeForm({ me }: { me: string }) {
             <L>Number they called from</L>
             <input className="tinput" style={{ width: '100%' }} value={f.phone_line} maxLength={25}
               placeholder="Caller ID" onChange={(e) => set('phone_line')(e.target.value)} />
+            {tollFree && (
+              <div className="bnl-sub" style={{ marginTop: 4 }}>
+                Toll-free / relay line — repeat detection by number is off for this call;
+                name, DOB, and SSN-4 checks still run.
+              </div>
+            )}
           </div>
           <div style={{ flex: 1, minWidth: 180 }}>
             <L>Callback number — if different</L>
@@ -309,27 +375,29 @@ export default function CallIntakeForm({ me }: { me: string }) {
               placeholder="“But reach me at…”" onChange={(e) => set('phone_callback')(e.target.value)} />
           </div>
         </div>
-        {prior.some((p) => STILL_OPEN.includes(p.status)) && (
+        {openMatches.length > 0 && (
           <div style={{ background: 'var(--danger-light)', border: '1px solid var(--danger)',
             borderRadius: 8, padding: '10px 13px', fontSize: 12.5, margin: '10px 0 0' }}>
-            <b style={{ color: 'var(--danger)' }}>⚠ This number already has an open case</b>
-            {prior.filter((p) => STILL_OPEN.includes(p.status)).map((p) => (
+            <b style={{ color: 'var(--danger)' }}>⚠ This caller may already have an open case</b>
+            {openMatches.map(({ p, via }) => (
               <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center',
                 flexWrap: 'wrap', marginTop: 6 }}>
                 <span>#{p.id} <b>{[p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous'}</b>
                   {' '}· {p.status}
                   {p.team_id != null && teams.find((t) => t.id === p.team_id)
                     ? ` · ${teams.find((t) => t.id === p.team_id)!.name}` : ''}
-                  {p.area ? ` · ${p.area}` : ''}</span>
+                  {p.area ? ` · ${p.area}` : ''}
+                  {p.dob ? ` · DOB ${p.dob}` : ''}
+                  {' '}<span className="bnl-fp bnl-fp-sch">{via}</span></span>
                 <button className="btn primary" type="button" style={{ padding: '4px 12px', fontSize: 12 }}
                   disabled={busy} onClick={() => attachToCase(p)}>
                   Log this call on case #{p.id}</button>
               </div>
             ))}
             <div className="bnl-sub" style={{ marginTop: 6 }}>
-              Adds these notes (and any new location) to the open case — no duplicate is created.
-              A shared phone isn&rsquo;t proof of identity: if this is a DIFFERENT person, save a
-              new call below as usual.
+              Adds these notes, any new location, AND the new number to the open case — no
+              duplicate is created. Verify identity on the call (DOB shown when known); a
+              different person → save a new call below as usual.
             </div>
           </div>
         )}
