@@ -333,8 +333,7 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
         if (String((e as Error)?.message) === '401') return;
         setCohorts([]);
         setListErr('Couldn’t load cohorts — network or server error, the data is untouched. '
-          + 'On county PCs the security proxy can block the dashboard API on vercel.app '
-          + '(pending the hmis.miamidade.gov move); localhost is unaffected.');
+          + 'On county computers the security proxy can block the dashboard’s data requests.');
       });
   };
   useEffect(loadList, []);
