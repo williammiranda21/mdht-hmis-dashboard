@@ -411,7 +411,10 @@ usage heartbeat; everything degrades gracefully until it runs),
 `team_mgmt.sql` (2026-08-20 — outreach_teams.member_accounts jsonb
 [{id,name}] account assignment + RLS write tightened to admins),
 `custom_areas.sql` (2026-08-20 — admin-drawn routing polygons; the intake
-pin checks these FIRST, before districts/municipalities).
+pin checks these FIRST, before districts/municipalities),
+`helpline_referrals.sql` (2026-08-20 — SOP refer-out: helpline_cases
+referred_to + status 'referred_out' + helpline_resources script cards
+seeded from the SOP; NOT YET RUN — the feature is held local, unpushed).
 
 ### Helpline Triage (2026-08-19 — built, NOT yet pushed; user tests locally first)
 Homeless helpline → triage → outreach assignment → enrollment verification.

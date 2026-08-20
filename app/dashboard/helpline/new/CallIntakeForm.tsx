@@ -10,6 +10,7 @@ import {
 } from '../../../../lib/helpline-options';
 import { featuresAt, inFeature, type GeoFC } from '../../../../lib/slippy';
 import { fetchCustomAreas } from '../../../../lib/custom-areas';
+import ReferOut, { type ReferralResource } from '../../../../components/ReferOut';
 
 // District boundary files, fetched once per session (same-origin static).
 let _cityGeo: GeoFC | null | undefined;
@@ -57,6 +58,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
   const [teams, setTeams] = useState<RoutableTeam[]>([]);
   const [openBy, setOpenBy] = useState<Map<number, number>>(new Map());
   const [assignNow, setAssignNow] = useState(false);
+  const [referOpen, setReferOpen] = useState(false);
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
 
   // Teams + their open-case load, once per form — feeds the live suggestion
@@ -166,7 +168,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
     { factors, household: f.household || null, area: f.area || null, county_district: countyDist },
     teams, openBy) : null;
 
-  async function submit() {
+  async function submit(refer?: { resource: ReferralResource; terminal: boolean }) {
     if (busy) return;
     if (!f.first_name.trim() && !f.phone_line.trim() && !f.phone_callback.trim() && !f.landmark.trim() && !f.address.trim()) {
       setErr('Capture at least a name, a number, or a location — something outreach can act on.');
@@ -178,7 +180,11 @@ export default function CallIntakeForm({ me }: { me: string }) {
     for (const [k, v] of Object.entries(f)) if (v.trim()) row[k] = v.trim();
     if (pin) { row.lat = pin.lat; row.lng = pin.lng; }
     if (countyDist) row.county_district = countyDist;
-    if (assignNow && sug) {
+    if (refer?.terminal) {
+      // SOP referral resolved the call — no outreach dispatch for this case.
+      row.status = 'referred_out';
+      row.referred_to = refer.resource.name;
+    } else if (assignNow && sug) {
       row.team_id = sug.team.id;
       row.status = 'assigned';
       row.assigned_at = new Date().toISOString();
@@ -187,6 +193,15 @@ export default function CallIntakeForm({ me }: { me: string }) {
     const { data, error } = await db.from('helpline_cases').insert(row).select('id').single();
     if (!error && data) {
       await db.from('helpline_calls').insert({ case_id: data.id, operator: me, kind: 'initial', notes: f.notes.trim() || null });
+      if (refer) {
+        // the SOP's "document that the referral information was provided"
+        await db.from('helpline_calls').insert({
+          case_id: data.id, operator: me, kind: 'followup',
+          notes: refer.terminal
+            ? `Referred out → ${refer.resource.name}. SOP referral information provided to the caller.`
+            : `Referral info provided → ${refer.resource.name}; case remains active for outreach.`,
+        });
+      }
     }
     setBusy(false);
     if (error) { setErr(error.message); return; }
@@ -373,8 +388,13 @@ export default function CallIntakeForm({ me }: { me: string }) {
         )}
 
         <div style={{ marginTop: 14 }}>
-          <button className="btn primary" disabled={busy} onClick={submit}>
+          <button className="btn primary" disabled={busy} onClick={() => submit()}>
             {busy ? 'Saving…' : assignNow && sug ? `Save + assign → ${sug.team.name}` : 'Save call'}
+          </button>
+          <button className="tbtn" type="button" style={{ marginLeft: 8 }} disabled={busy}
+            title="SOP specialized referrals (prevention · veterans · DV · youth) and other-provider areas — shows the script to read to the caller, then saves the call"
+            onClick={() => setReferOpen(true)}>
+            ↗ Save + refer out
           </button>
           <button className="tbtn" type="button" style={{ marginLeft: 8 }} disabled={busy}
             title="Discard this call and return to triage — nothing is saved"
@@ -388,6 +408,11 @@ export default function CallIntakeForm({ me }: { me: string }) {
             Cancel call
           </button>
         </div>
+        {referOpen && (
+          <ReferOut title="Refer the caller out"
+            onPick={(resource, terminal) => { setReferOpen(false); submit({ resource, terminal }); }}
+            onClose={() => setReferOpen(false)} />
+        )}
       </div>
     </div>
   );

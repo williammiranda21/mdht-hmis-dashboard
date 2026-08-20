@@ -97,7 +97,7 @@ export const MAX_FAILED_ATTEMPTS = 3;
 
 export const CASE_STATUSES = [
   'new', 'assigned', 'attempted', 'contacted', 'confirmed',
-  'declined', 'no_locate', 'closed',
+  'declined', 'no_locate', 'closed', 'referred_out',
 ] as const;
 export type CaseStatus = (typeof CASE_STATUSES)[number];
 

@@ -9,6 +9,7 @@ import CaseMap from '../../../components/CaseMap';
 import ReportMap from './ReportMap';
 import { AREAS, COUNTY_ZONES, MAX_FAILED_ATTEMPTS, priorityBand, suggestTeam, type CaseStatus } from '../../../lib/helpline-options';
 import { fetchCustomAreas } from '../../../lib/custom-areas';
+import ReferOut, { type ReferralResource } from '../../../components/ReferOut';
 
 export interface HlCase {
   id: number;
@@ -37,6 +38,9 @@ export interface HlCase {
   contacts: number;
   last_contact: string | null;
   county_district: string | null;
+  /** external resource this call was referred to (SOP refer-out; null unless
+   *  status referred_out or an info-only referral was logged) */
+  referred_to: string | null;
   matched_pid: string | null;
   confirmed_at: string | null;
   verified_entry: string | null;
@@ -83,6 +87,7 @@ const STATUS_CHIP: Record<CaseStatus, [string, string, string]> = {
   declined: ['declined help', 'var(--track)', 'var(--muted)'],
   no_locate: ['could not locate', 'var(--track)', 'var(--muted)'],
   closed: ['closed', 'var(--track)', 'var(--muted)'],
+  referred_out: ['referred out', 'var(--primary-light)', 'var(--secondary)'],
 };
 function Chip({ s }: { s: CaseStatus }) {
   const [label, bg, fg] = STATUS_CHIP[s];
@@ -159,6 +164,24 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
   const assign = (c: HlCase, teamId: number) =>
     update(c.id, { team_id: teamId, status: 'assigned', assigned_at: new Date().toISOString() });
 
+  // SOP refer-out from triage: terminal closes the case as referred_out;
+  // info-only logs that the script was read but keeps the case in the queue
+  // (an unsheltered caller in coverage still gets outreach). Either way the
+  // "document that referral info was provided" note lands in the call log.
+  const [referFor, setReferFor] = useState<HlCase | null>(null);
+  const referOut = async (c: HlCase, r: ReferralResource, terminal: boolean) => {
+    setReferFor(null);
+    const ev = await db().from('helpline_calls').insert({
+      case_id: c.id, operator: me, kind: 'followup',
+      notes: terminal
+        ? `Referred out → ${r.name}. SOP referral information provided to the caller.`
+        : `Referral info provided → ${r.name}; case remains active for outreach.`,
+    });
+    if (ev.error) { setError(ev.error.message); return; }
+    if (terminal) await update(c.id, { status: 'referred_out', referred_to: r.name });
+    else router.refresh();
+  };
+
   // Failed try and successful contact are SEPARATE facts (user call
   // 2026-08-19): each bumps its own counter, and status only moves FORWARD —
   // a failed try after a successful contact never downgrades the case.
@@ -210,7 +233,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
   const triage = cases.filter((c) => c.status === 'new');
   const working = cases.filter((c) => OPEN_STATUSES.includes(c.status));
   const confirmed = cases.filter((c) => c.status === 'confirmed');
-  const done = cases.filter((c) => ['declined', 'no_locate', 'closed'].includes(c.status));
+  const done = cases.filter((c) => ['declined', 'no_locate', 'closed', 'referred_out'].includes(c.status));
+  const referredOut = cases.filter((c) => c.status === 'referred_out');
   const verified = confirmed.filter((c) => c.verified_entry);
   const unverified = confirmed.filter((c) => !c.verified_entry);
 
@@ -243,6 +267,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
           {c.sleeping ? ` · ${c.sleeping}` : ''}{c.household && c.household !== 'Alone' ? ` · ${c.household}` : ''}
           {c.factors.length > 0 && <> · {c.factors.join(', ')}</>}
           {(c.phone_callback || c.phone_line) && <> · ☎ {c.phone_callback ?? c.phone_line}</>}
+          {c.referred_to && <> · ↗ {c.referred_to}</>}
           {c.matched_pid && <> · <span className="bnl-fp bnl-fp-sch">HMIS linked</span></>}
         </div>
       </td>
@@ -298,6 +323,9 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
             <option key={x.id} value={x.id}>{x.name} ({openByTeam.get(x.id) ?? 0} open)</option>
           ))}
         </select>
+        <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
+          title="SOP refer-out (prevention · veterans · DV · youth · other-provider areas) — shows the script first"
+          onClick={() => setReferFor(c)}>↗ Refer</button>
       </div>
     );
   }
@@ -321,6 +349,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
           `${fmtInt(verified.length)} verified enrolled · ${fmtInt(unverified.length)} pending`, 'var(--info)')}
         {kpi('Enrollment gap', unverified.length,
           unverified.length ? 'confirmed but no HMIS enrollment yet' : 'everyone confirmed is enrolled', 'var(--danger)')}
+        {kpi('Referred out', referredOut.length,
+          'prevention · veterans · DV · youth — right-door diversions', 'var(--secondary)')}
         {kpi('All cases', cases.length, `${fmtInt(done.length)} closed/other`, 'var(--faint)')}
       </div>
 
@@ -470,6 +500,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
             <select className="fselect" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
               <option value="">All</option>
               <option value="confirmed">Confirmed homeless</option>
+              <option value="referred_out">Referred out</option>
               <option value="no_locate">Could not locate</option>
               <option value="declined">Declined help</option>
               <option value="closed">Closed</option>
@@ -553,7 +584,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
                     <Link className="tbtn" style={{ marginLeft: 6 }}
                       href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}>BNL →</Link>
                   )}
-                  {['no_locate', 'declined', 'closed'].includes(c.status) && (
+                  {['no_locate', 'declined', 'closed', 'referred_out'].includes(c.status) && (
                     <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
                       title="Back to the team board (keeps the team) — e.g. a new sighting or the caller called again"
                       onClick={() => update(c.id, { status: c.team_id != null ? 'assigned' : 'new' })}>
@@ -576,6 +607,12 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
         <CaseDrawer c={cases.find((x) => x.id === drawerC.id) ?? drawerC}
           teamName={drawerC.team_id != null ? (teamById.get(drawerC.team_id)?.name ?? null) : null}
           events={events[drawerC.id]} me={me} onClose={() => setDrawerC(null)} />
+      )}
+
+      {referFor && (
+        <ReferOut title={`Refer #${referFor.id} out`}
+          onPick={(r, terminal) => referOut(referFor, r, terminal)}
+          onClose={() => setReferFor(null)} />
       )}
 
       <Reporting cases={cases} teams={teams} events={events} />
@@ -735,6 +772,19 @@ function Reporting({ cases, teams, events }: {
         </div>
         <button className="tbtn" onClick={downloadCsv}>⬇ CSV</button>
       </div>
+      {(() => {
+        // SOP external referrals — the diversion tally by destination
+        const ro = cases.filter((c) => c.status === 'referred_out');
+        if (!ro.length) return null;
+        const by = new Map<string, number>();
+        ro.forEach((c) => by.set(c.referred_to ?? '(unspecified)', (by.get(c.referred_to ?? '(unspecified)') ?? 0) + 1));
+        return (
+          <div className="bnl-sub" style={{ padding: '0 18px 10px' }}>
+            ↗ External referrals: {[...by.entries()].sort((a, b) => b[1] - a[1])
+              .map(([k, v]) => `${k} — ${v}`).join(' · ')}
+          </div>
+        );
+      })()}
       <div className="scroll"><table className="bnl-table">
         <thead><tr>
           <th>Team</th><th className="num">Cases</th><th className="num">Open now</th>
@@ -1194,6 +1244,7 @@ function CaseDrawer({ c, teamName, events, me, onClose }: {
             {[c.sleeping, c.household, ...(c.factors ?? [])].filter(Boolean).join(' · ') || '—'}
             <span className="bnl-sub"> · priority {c.priority} pts</span>
           </Row>
+          {c.referred_to && <Row k="Referred to">↗ {c.referred_to}</Row>}
           {c.matched_pid && <Row k="HMIS">record {c.matched_pid.slice(0, 12)}…</Row>}
           <Row k="Outreach">
             <Trail events={events} c={c} />
