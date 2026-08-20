@@ -30,6 +30,10 @@ export default function SignupForm() {
       setBusy(false);
       return;
     }
+    // Auto-confirm means signUp creates a session — seed the idle-timeout
+    // stamp (server-written via /api/seen) so middleware doesn't treat the
+    // fresh session as idle (lib/idle.ts).
+    await fetch('/api/seen', { method: 'POST' }).catch(() => { /* re-login recovers */ });
     setDone(true);
     setBusy(false);
   }

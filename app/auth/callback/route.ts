@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { supabaseServer } from '../../../lib/supabase-server';
+import { IDLE_COOKIE, IDLE_COOKIE_MAX_AGE } from '../../../lib/idle';
 
 /**
  * PKCE code exchange — the landing point for Supabase auth emails (password
@@ -24,5 +25,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(fail);
     }
   }
-  return NextResponse.redirect(dest);
+  const res = NextResponse.redirect(dest);
+  // Seed the idle-timeout activity stamp WITH the session — middleware kills a
+  // session that has none (lib/idle.ts), which would strand password resets.
+  res.cookies.set({ name: IDLE_COOKIE, value: String(Date.now()), path: '/',
+    maxAge: IDLE_COOKIE_MAX_AGE, sameSite: 'lax', httpOnly: true });
+  return res;
 }

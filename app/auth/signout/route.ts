@@ -17,7 +17,18 @@ export async function POST(req: Request) {
   const supabase = supabaseServer();
   await supabase.auth.signOut();
 
-  const res = NextResponse.redirect(new URL('/login', req.url), { status: 303 });
+  // ?reason=idle (from the IdleLogout tracker) tells the login page to say WHY
+  // they're back there; ?next= lets the re-login land on the page they left.
+  const url = new URL(req.url);
+  const target = new URL('/login', req.url);
+  if (url.searchParams.get('reason') === 'idle') {
+    target.searchParams.set('reason', 'idle');
+    const next = url.searchParams.get('next');
+    if (next && next.startsWith('/') && !next.startsWith('//')) {
+      target.searchParams.set('next', next);
+    }
+  }
+  const res = NextResponse.redirect(target, { status: 303 });
 
   // Belt and braces: drop every Supabase auth cookie (incl. chunked
   // `sb-<ref>-auth-token.0/.1`) so nothing can resurrect the session.
@@ -28,5 +39,6 @@ export async function POST(req: Request) {
       res.cookies.set({ name, value: '', path: '/', maxAge: 0 });
     }
   }
+  res.cookies.set({ name: 'hmis-last-active', value: '', path: '/', maxAge: 0 });
   return res;
 }

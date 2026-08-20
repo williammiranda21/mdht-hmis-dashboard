@@ -3,6 +3,7 @@ import Link from 'next/link';
 import ThemeToggle from '../../components/ThemeToggle';
 import TabNav from '../../components/TabNav';
 import UserMenu from '../../components/UserMenu';
+import IdleLogout from '../../components/IdleLogout';
 import AnnouncementBar, { type Announcement } from '../../components/AnnouncementBar';
 import { getViewer, supabaseServer } from '../../lib/supabase-server';
 
@@ -139,6 +140,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           {children}
         </div>
       </div>
+      <IdleLogout />
     </div>
   );
 }

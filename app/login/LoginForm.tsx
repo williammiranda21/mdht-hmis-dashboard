@@ -7,6 +7,7 @@ import { supabaseBrowser } from '../../lib/supabase-browser';
 export default function LoginForm() {
   const params = useSearchParams();
   const next = params.get('next') || '/dashboard';
+  const idledOut = params.get('reason') === 'idle';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,6 +25,10 @@ export default function LoginForm() {
       setBusy(false);
       return;
     }
+    // Seed the idle-timeout activity stamp BEFORE navigating — middleware
+    // treats a session without one as idle-expired (lib/idle.ts). The stamp
+    // is server-written (/api/seen), so a wrong client clock can't matter.
+    await fetch('/api/seen', { method: 'POST' }).catch(() => { /* re-login recovers */ });
     // Hard navigation, not router.replace(): a client-side transition lazily
     // fetches the dashboard chunk, and in dev that URL goes stale on every
     // recompile (ChunkLoadError right before the page settles). A full document
@@ -34,6 +39,13 @@ export default function LoginForm() {
 
   return (
     <form onSubmit={onSubmit} className="loginform">
+      {idledOut && (
+        <div role="status" style={{ background: 'var(--warn-light)', color: 'var(--warn)',
+          border: '1px solid var(--warn)', borderRadius: 8, padding: '9px 13px',
+          fontSize: 13, marginBottom: 12, fontWeight: 600 }}>
+          You were signed out after an hour of inactivity. Sign back in to continue.
+        </div>
+      )}
       <label className="lfield">
         <span>Email</span>
         <input

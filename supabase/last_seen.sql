@@ -1,0 +1,11 @@
+-- Run once (2026-08-20): profiles.last_seen_at — real usage telemetry.
+--
+-- Supabase sessions persist in cookies, so auth.users.last_sign_in_at only
+-- moves when credentials are actually typed — a daily user can show "20d ago"
+-- (the William Greene case). /api/seen stamps this column from the dashboard
+-- shell while the user is genuinely active (client-throttled to ~15 min),
+-- via the service role scoped to the caller's own row.
+--
+-- No RLS change: admins already read all profiles (the admin console),
+-- everyone else never sees the column. Written only by the service role.
+alter table public.profiles add column if not exists last_seen_at timestamptz;

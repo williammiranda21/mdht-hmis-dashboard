@@ -73,6 +73,7 @@ export default async function AdminPage() {
     status: p.status,
     createdAt: p.created_at,
     lastSignInAt: lastSignIn.get(p.id) ?? null,
+    lastSeenAt: p.last_seen_at ?? null,
     projectIds: byUser.get(p.id) ?? [],
   }));
 

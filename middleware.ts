@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { IDLE_MS, IDLE_COOKIE } from './lib/idle';
 
 /**
  * Refreshes the Supabase session cookie on every request and gates the app.
@@ -52,6 +53,32 @@ export async function middleware(req: NextRequest) {
     url.pathname = '/login';
     url.search = `?next=${encodeURIComponent(pathname + search)}`;
     return NextResponse.redirect(url);
+  }
+
+  // Idle sign-out (lib/idle.ts): a live session whose activity stamp is stale
+  // or MISSING is over — fail closed, this is a PII system. The stamp is
+  // server-written by /api/seen (client clocks are never trusted), which is
+  // why /api/seen itself must be exempt: it's how new sessions get seeded.
+  // Middleware deliberately never refreshes the stamp here — request traffic
+  // isn't proof a human is present.
+  if (user && !isPublic && pathname !== '/api/seen') {
+    const stamp = Number(req.cookies.get(IDLE_COOKIE)?.value ?? NaN);
+    if (!Number.isFinite(stamp) || Date.now() - stamp > IDLE_MS) {
+      try { await supabase.auth.signOut(); } catch { /* cookie wipe below still ends it */ }
+      const out = pathname.startsWith('/api/')
+        ? NextResponse.json({ error: 'signed out after inactivity' }, { status: 401 })
+        : (() => {
+            const url = req.nextUrl.clone();
+            url.pathname = '/login';
+            url.search = `?reason=idle&next=${encodeURIComponent(pathname + search)}`;
+            return NextResponse.redirect(url);
+          })();
+      for (const c of req.cookies.getAll()) {
+        if (c.name.startsWith('sb-')) out.cookies.set({ name: c.name, value: '', path: '/', maxAge: 0 });
+      }
+      out.cookies.set({ name: IDLE_COOKIE, value: '', path: '/', maxAge: 0 });
+      return out;
+    }
   }
 
   // Already signed in and sitting on /login → send them to the dashboard.

@@ -24,6 +24,10 @@ export interface AdminProfile {
   /** auth.users.last_sign_in_at — stamped on fresh sign-ins only (a session
    *  kept alive by token refresh does NOT update it). Floor, not "last seen". */
   lastSignInAt: string | null;
+  /** profiles.last_seen_at — real usage, stamped by /api/seen while the user
+   *  is active in the dashboard. Null until supabase/last_seen.sql runs (or
+   *  the user's first visit after this shipped). */
+  lastSeenAt: string | null;
   projectIds: number[];
 }
 export interface ProjectOption { id: number; name: string; type: string }
@@ -135,6 +139,22 @@ export default function AdminUsers({
       : <span title={title}>{label}</span>;
   }
 
+  // Real usage (profiles.last_seen_at) — the answer to "sign-in says 20d ago
+  // but I know they were in here yesterday": persistent sessions don't stamp
+  // a sign-in, the /api/seen heartbeat stamps this.
+  function lastSeenSub(r: AdminProfile) {
+    if (!r.lastSeenAt) return null;
+    const d = new Date(r.lastSeenAt);
+    const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+    const label = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days}d ago`;
+    return (
+      <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 2 }}
+        title={`Last activity in the dashboard ${d.toLocaleString()} — stamped while they actually use it, sign-in or not`}>
+        seen {label}
+      </div>
+    );
+  }
+
   function Row({ r }: { r: AdminProfile }) {
     const isMe = r.id === me;
     return (
@@ -147,7 +167,7 @@ export default function AdminUsers({
           </td>
           <td>{r.agency || <span style={{ color: 'var(--faint)' }}>—</span>}</td>
           <td>{statusPill(r.status)}</td>
-          <td style={{ whiteSpace: 'nowrap' }}>{lastSignInCell(r)}</td>
+          <td style={{ whiteSpace: 'nowrap' }}>{lastSignInCell(r)}{lastSeenSub(r)}</td>
           <td className="num">
             {r.isAdmin ? (
               <span className="pill good" title="Admins see every project — grants aren't used">
@@ -271,7 +291,7 @@ export default function AdminUsers({
           <div className="scroll">
             <table>
               <thead>
-                <tr><th>User</th><th>Agency</th><th>Status</th><th title="From Supabase Auth. Fresh sign-ins only — an open session kept alive by token refresh doesn't update it.">Last sign-in</th><th className="num">Scope</th><th className="num">Actions</th></tr>
+                <tr><th>User</th><th>Agency</th><th>Status</th><th title="Top: last credential sign-in (Supabase Auth). Below: last real activity in the dashboard (/api/seen heartbeat) — persistent sessions make sign-in alone misleading.">Last sign-in · seen</th><th className="num">Scope</th><th className="num">Actions</th></tr>
               </thead>
               <tbody>{pending.map((r) => <Row key={r.id} r={r} />)}</tbody>
             </table>
@@ -295,7 +315,7 @@ export default function AdminUsers({
         <div className="scroll">
           <table>
             <thead>
-              <tr><th>User</th><th>Agency</th><th>Status</th><th title="From Supabase Auth. Fresh sign-ins only — an open session kept alive by token refresh doesn't update it.">Last sign-in</th><th className="num">Scope</th><th className="num">Actions</th></tr>
+              <tr><th>User</th><th>Agency</th><th>Status</th><th title="Top: last credential sign-in (Supabase Auth). Below: last real activity in the dashboard (/api/seen heartbeat) — persistent sessions make sign-in alone misleading.">Last sign-in · seen</th><th className="num">Scope</th><th className="num">Actions</th></tr>
             </thead>
             <tbody>
               {shown.map((r) => <Row key={r.id} r={r} />)}
