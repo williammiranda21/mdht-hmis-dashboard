@@ -23,8 +23,26 @@ export const AREAS = [
   'Kendall', 'Kendale Lakes', 'Palmetto Bay', 'Pinecrest', 'Cutler Bay',
   'Perrine', 'Richmond Heights', 'Goulds', 'Naranja', 'Leisure City',
   'Homestead', 'Florida City', 'Aventura', 'Key Biscayne',
+  // Remaining municipalities from the county Municipality layer (2026-08-20)
+  // so a pin anywhere incorporated can stamp its area automatically.
+  'Miami Shores', 'Miami Springs', 'El Portal', 'Biscayne Park',
+  'North Bay Village', 'Bay Harbor Islands', 'Surfside', 'Bal Harbour',
+  'Golden Beach', 'Indian Creek Village', 'Medley', 'Virginia Gardens',
+  'West Miami', 'Sunny Isles Beach',
   'Unincorporated / other',
 ] as const;
+
+/** County Municipality-layer NAME (uppercase, e.g. "MIAMI SHORES") → the
+ *  AREAS value the pin should stamp. Null = no municipality stamp: the City
+ *  of Miami routes by Commission District, unincorporated Miami-Dade by
+ *  County Commission District — both stamped separately from the same pin. */
+export function muniArea(name: string): string | null {
+  const n = name.trim().toUpperCase();
+  if (!n || n === 'MIAMI' || n === 'UNINCORPORATED MIAMI-DADE') return null;
+  const t = n.toLowerCase().split(' ')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  return (AREAS as readonly string[]).includes(t) ? t : null;
+}
 
 /** Miami-Dade County Commission Districts — the countywide zone layer.
  *  Strings match the `County District N` stamp intake writes to

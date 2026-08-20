@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { tilesFor, frameFor, toPx, unproject, project, inFeature, TILE, type GeoFC } from '../../../lib/slippy';
+import { muniArea } from '../../../lib/helpline-options';
 import type { HlCase, Team } from './HelplineView';
 
 /**
@@ -27,6 +28,7 @@ type ViewKey = keyof typeof VIEWS;
 const LAYERS = [
   { key: 'districts', label: 'City of Miami districts', file: '/gis/districts.geojson', stroke: 'var(--secondary)', width: 2 },
   { key: 'county', label: 'County districts', file: '/gis/county_districts.geojson', stroke: 'var(--accent)', width: 1.6 },
+  { key: 'muni', label: 'Municipalities', file: '/gis/municipalities.geojson', stroke: 'var(--danger)', width: 1.4 },
   { key: 'zipcodes', label: 'ZIP codes', file: '/gis/zipcodes.geojson', stroke: 'var(--warn)', width: 1.4 },
   { key: 'tracts', label: 'Census tracts', file: '/gis/census_tracts.geojson', stroke: 'var(--faint)', width: 0.8 },
 ] as const;
@@ -62,7 +64,9 @@ function featureName(props?: Record<string, unknown>): string {
 }
 
 /** The zone string a boundary corresponds to in outreach_teams.zones —
- *  city districts and county districts only (ZIPs/tracts don't route). */
+ *  city districts, county districts, and municipalities (ZIPs/tracts don't
+ *  route). Municipality NAMEs normalize through muniArea (MIAMI and
+ *  unincorporated return null — they route by district instead). */
 function zoneOf(key: LayerKey, props?: Record<string, unknown>): string | null {
   if (!props) return null;
   if (key === 'districts' && props.COMDISTID != null && props.COMDISTID !== '') {
@@ -71,6 +75,7 @@ function zoneOf(key: LayerKey, props?: Record<string, unknown>): string | null {
   if (key === 'county' && props.ID != null && props.ID !== '') {
     return `County District ${props.ID}`;
   }
+  if (key === 'muni') return muniArea(String(props.NAME ?? ''));
   return null;
 }
 
@@ -81,9 +86,9 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
     { lat: VIEWS.metro.lat, lng: VIEWS.metro.lng });
   const [z, setZ] = useState<number>(VIEWS.metro.z);
   const [on, setOn] = useState<Record<LayerKey, boolean>>(
-    { districts: false, county: false, zipcodes: false, tracts: false });
+    { districts: false, county: false, muni: false, zipcodes: false, tracts: false });
   const [geo, setGeo] = useState<Record<LayerKey, GeoFC | 'missing' | 'loading' | undefined>>(
-    { districts: undefined, county: undefined, zipcodes: undefined, tracts: undefined });
+    { districts: undefined, county: undefined, muni: undefined, zipcodes: undefined, tracts: undefined });
   const [sel, setSel] = useState<{ key: LayerKey; idx: number } | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../../../lib/supabase-browser';
 import {
-  AREAS, SLEEPING_OPTIONS, HOUSEHOLD_OPTIONS, FACTORS, priorityOf, priorityBand,
+  AREAS, SLEEPING_OPTIONS, HOUSEHOLD_OPTIONS, FACTORS, muniArea, priorityOf, priorityBand,
   suggestTeam, type RoutableTeam,
 } from '../../../../lib/helpline-options';
 import { featuresAt, type GeoFC } from '../../../../lib/slippy';
@@ -13,6 +13,7 @@ import { featuresAt, type GeoFC } from '../../../../lib/slippy';
 // District boundary files, fetched once per session (same-origin static).
 let _cityGeo: GeoFC | null | undefined;
 let _countyGeo: GeoFC | null | undefined;
+let _muniGeo: GeoFC | null | undefined;
 async function loadGeo(file: string): Promise<GeoFC | null> {
   try {
     const r = await fetch(file);
@@ -114,6 +115,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
     setPin(g);
     if (_cityGeo === undefined) _cityGeo = await loadGeo('/gis/districts.geojson');
     if (_countyGeo === undefined) _countyGeo = await loadGeo('/gis/county_districts.geojson');
+    if (_muniGeo === undefined) _muniGeo = await loadGeo('/gis/municipalities.geojson');
     const notes: string[] = [];
     const city = _cityGeo ? featuresAt(g.lng, g.lat, _cityGeo) : [];
     if (city.length) {
@@ -124,7 +126,20 @@ export default function CallIntakeForm({ me }: { me: string }) {
         notes.push(`inside City of Miami — District ${d} (area set automatically)`);
       }
     } else if (_cityGeo) {
-      notes.push('outside City of Miami — routes by County Commission District');
+      // Outside the city: the municipality polygon (county layer) stamps the
+      // area so municipality-zoned teams route; unincorporated (or file
+      // missing) leaves area null and the county-district fallback routes.
+      // featuresAt can return several hits (inFeature ignores holes, so the
+      // unincorporated outer ring may contain municipalities) — take the
+      // first hit that names a real municipality.
+      const muni = _muniGeo ? featuresAt(g.lng, g.lat, _muniGeo) : [];
+      const mArea = muni.map((m) => muniArea(String(m.NAME ?? ''))).find(Boolean) ?? null;
+      if (mArea) {
+        set('area')(mArea);
+        notes.push(`in ${mArea} (area set automatically)`);
+      } else {
+        notes.push('outside City of Miami — routes by County Commission District');
+      }
     }
     const county = _countyGeo ? featuresAt(g.lng, g.lat, _countyGeo) : [];
     if (county.length) {

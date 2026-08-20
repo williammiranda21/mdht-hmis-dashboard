@@ -426,11 +426,13 @@ ties. The intake form shows the live suggestion with reason + optional
 assign-on-save; the call map's district counter names covering teams, or warns
 when a district is uncovered). INTAKE ASKS NO AREA (user directive 2026-08-20):
 the operator captures address/landmark only — the geocoded pin auto-stamps
-area (city district) + county district; outside the city, routing = the
-county-district fallback. Consequence: municipality/neighborhood zone chips
-only bind if a case somehow carries that area string — reviving
-municipality routing needs a municipal-boundaries GeoJSON layer (pipeline/
-shp_to_geojson.py converts county shapefiles). TEAM MANAGEMENT (TeamAdmin in
+the area (City of Miami pin → Commission District; other municipalities →
+municipality name via public/gis/municipalities.geojson NAME + muniArea()
+normalizer, layer added by the user 2026-08-20) + the county district;
+unincorporated pins carry only the county district (the routing fallback).
+Neighborhood chips (Kendall, Overtown…) remain manual-only labels — no
+polygons. Cross-street queries resolve via Overpass shared-node lookup
+(lib/intersection.ts) since Nominatim can't do intersections. TEAM MANAGEMENT (TeamAdmin in
 HelplineView, admin-only): create teams, rename, activate/deactivate (never
 delete — history), assign dashboard ACCOUNTS (member_accounts snapshot),
 free-text field workers + dispatch contact, zone coverage. Run-once
