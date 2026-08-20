@@ -71,12 +71,14 @@ function bandColor(band: string): string {
   return band === 'HIGH' ? 'var(--danger)' : band === 'MED' ? 'var(--warn)' : 'var(--faint)';
 }
 
+// One color language with the call map (user directive 2026-08-20): red =
+// awaiting action, green = being worked by outreach, blue = confirmed.
 const STATUS_CHIP: Record<CaseStatus, [string, string, string]> = {
-  new: ['new', 'var(--warn-light)', 'var(--warn)'],
-  assigned: ['assigned', 'var(--primary-light)', 'var(--secondary)'],
-  attempted: ['attempted', 'var(--primary-light)', 'var(--secondary)'],
+  new: ['new', 'var(--danger-light)', 'var(--danger)'],
+  assigned: ['assigned', 'var(--accent-light)', 'var(--accent)'],
+  attempted: ['attempted', 'var(--accent-light)', 'var(--accent)'],
   contacted: ['contacted', 'var(--accent-light)', 'var(--accent)'],
-  confirmed: ['confirmed homeless', 'var(--accent-light)', 'var(--accent)'],
+  confirmed: ['confirmed homeless', 'var(--info-light)', 'var(--info)'],
   declined: ['declined help', 'var(--track)', 'var(--muted)'],
   no_locate: ['could not locate', 'var(--track)', 'var(--muted)'],
   closed: ['closed', 'var(--track)', 'var(--muted)'],
@@ -312,10 +314,10 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
       <div className="bnl-kpis" style={{ marginBottom: 18 }}>
         {kpi('Awaiting triage', triage.length,
           triage.length ? `oldest ${Math.max(...triage.map((c) => hoursSince(c.created_at)))}h ago` : 'queue is clear',
-          'var(--warn)')}
-        {kpi('With outreach', working.length, 'assigned · attempted · contacted', 'var(--secondary)')}
+          'var(--danger)')}
+        {kpi('With outreach', working.length, 'assigned · attempted · contacted', 'var(--accent)')}
         {kpi('Confirmed homeless', confirmed.length,
-          `${fmtInt(verified.length)} verified enrolled · ${fmtInt(unverified.length)} pending`, 'var(--accent)')}
+          `${fmtInt(verified.length)} verified enrolled · ${fmtInt(unverified.length)} pending`, 'var(--info)')}
         {kpi('Enrollment gap', unverified.length,
           unverified.length ? 'confirmed but no HMIS enrollment yet' : 'everyone confirmed is enrolled', 'var(--danger)')}
         {kpi('All cases', cases.length, `${fmtInt(done.length)} closed/other`, 'var(--faint)')}
