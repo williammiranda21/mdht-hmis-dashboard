@@ -555,16 +555,21 @@ export default function CallIntakeForm({ me }: { me: string }) {
           </div>
         )}
 
-        <div style={{ marginTop: 14 }}>
-          <button className="btn primary" disabled={busy} onClick={() => submit()}>
+        {/* color-coded, equal-size actions (user directive 2026-08-20):
+            green = save, blue = save + refer, red = cancel */}
+        <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button className="btn primary" disabled={busy} onClick={() => submit()}
+            style={{ background: 'var(--accent)', minWidth: 160 }}>
             {busy ? 'Saving…' : assignNow && sug ? `Save + assign → ${sug.team.name}` : 'Save call'}
           </button>
-          <button className="tbtn" type="button" style={{ marginLeft: 8 }} disabled={busy}
+          <button className="btn primary" type="button" disabled={busy}
+            style={{ background: 'var(--info)', minWidth: 160 }}
             title="SOP specialized referrals (prevention · veterans · DV · youth) and other-provider areas — shows the script to read to the caller, then saves the call"
             onClick={() => setReferOpen(true)}>
             ↗ Save + refer out
           </button>
-          <button className="tbtn" type="button" style={{ marginLeft: 8 }} disabled={busy}
+          <button className="btn primary" type="button" disabled={busy}
+            style={{ background: 'var(--danger)', minWidth: 160 }}
             title="Discard this call and return to triage — nothing is saved"
             onClick={() => {
               const touched = Object.values(f).some((v) => v.trim() !== '')
