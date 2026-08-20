@@ -487,7 +487,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
             { k: 'board' as HlTab, lbl: 'Team board', n: working.length, bg: 'var(--accent-light)', fg: 'var(--accent)' },
             { k: 'cases' as HlTab, lbl: 'All cases', n: 0, bg: '', fg: '' },
             { k: 'map' as HlTab, lbl: 'Map & reporting', n: 0, bg: '', fg: '' },
-            ...(isAdmin ? [{ k: 'admin' as HlTab, lbl: '⚙ Teams', n: 0, bg: '', fg: '' }] : []),
+            ...(isAdmin ? [{ k: 'admin' as HlTab, lbl: '⚙ Settings', n: 0, bg: '', fg: '' }] : []),
           ]).map(({ k, lbl, n, bg, fg }) => (
             <button key={k} type="button" role="tab" aria-selected={shownTab === k}
               className={shownTab === k ? 'on' : undefined} onClick={() => setTab(k)}>
