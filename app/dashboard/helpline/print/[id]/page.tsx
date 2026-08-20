@@ -2,6 +2,7 @@ import { supabaseServer, getViewer } from '../../../../../lib/supabase-server';
 import { priorityBand } from '../../../../../lib/helpline-options';
 import { tilesFor, TILE } from '../../../../../lib/slippy';
 import PrintButton from './PrintButton';
+import TileImg from '../../../../../components/TileImg';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Dispatch Sheet' };
