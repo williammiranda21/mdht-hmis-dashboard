@@ -214,11 +214,31 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
       && ['assigned', 'attempted'].includes(c.status);
     const ev = await db().from('helpline_calls').insert({ case_id: c.id, operator: me, kind: 'attempt' });
     if (ev.error) setError(`Per-try event not recorded (re-run supabase/helpline.sql): ${ev.error.message}`);
+    if (strikeOut) {
+      // the closure itself is a logged event — the drawer must explain WHY
+      // the case ended after the third ✗ (user ask 2026-08-20)
+      await db().from('helpline_calls').insert({
+        case_id: c.id, operator: me, kind: 'followup',
+        notes: `Case closed — could not locate. ${MAX_FAILED_ATTEMPTS} failed contact attempts `
+          + 'with no successful contact (3-strike rule). Reopen from All cases if they are '
+          + 'sighted or call again.',
+      });
+    }
     return update(c.id, {
       status: strikeOut ? 'no_locate' : c.status === 'assigned' ? 'attempted' : c.status,
       attempts,
       last_attempt: new Date().toISOString().slice(0, 10),
     });
+  };
+
+  // Manual close gets the same treatment: a closure note in the permanent log.
+  const closeNoLocate = async (c: HlCase) => {
+    await db().from('helpline_calls').insert({
+      case_id: c.id, operator: me, kind: 'followup',
+      notes: `Case closed — could not locate (closed by outreach; ${c.attempts} failed `
+        + `attempt${c.attempts === 1 ? '' : 's'} logged).`,
+    });
+    return update(c.id, { status: 'no_locate' });
   };
 
   const logContact = async (c: HlCase) => {
@@ -490,7 +510,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
                             ? 'No attempts have been logged on this case.\n\n'
                             : `${c.attempts} attempt${c.attempts === 1 ? '' : 's'} logged.\n\n`;
                           if (confirm(`${warn}Close this case as COULD NOT LOCATE? It leaves the team board (it can be reopened from All cases).`)) {
-                            update(c.id, { status: 'no_locate' });
+                            closeNoLocate(c);
                           }
                         }}>Close · can&rsquo;t locate</button>
                     </td>
