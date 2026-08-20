@@ -8,6 +8,7 @@ import { fmtInt } from '../../../lib/format';
 import CaseMap from '../../../components/CaseMap';
 import ReportMap from './ReportMap';
 import { AREAS, COUNTY_ZONES, MAX_FAILED_ATTEMPTS, priorityBand, suggestTeam, type CaseStatus } from '../../../lib/helpline-options';
+import { fetchCustomAreas } from '../../../lib/custom-areas';
 
 export interface HlCase {
   id: number;
@@ -569,7 +570,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, s
         </table></div>
       </div>
 
-      <ReportMap cases={cases} teams={teams} onOpen={(c) => setDrawerC(c)} />
+      <ReportMap cases={cases} teams={teams} isAdmin={isAdmin} onOpen={(c) => setDrawerC(c)} />
 
       {drawerC && (
         <CaseDrawer c={cases.find((x) => x.id === drawerC.id) ?? drawerC}
@@ -822,6 +823,14 @@ function TeamAdmin({ teams, busy, onCreate, onSave }: {
       })));
     })();
   }, [open, accounts]);
+  // Custom-area names drawn on the call map — offered as zone chips (names
+  // already in AREAS are filtered: their chip exists in the main group).
+  const [customZones, setCustomZones] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!open || customZones !== null) return;
+    fetchCustomAreas().then((as) => setCustomZones(
+      as.map((a) => a.name).filter((n) => !(AREAS as readonly string[]).includes(n))));
+  }, [open, customZones]);
 
   const idsOf = (xs: { id: string }[]) => JSON.stringify(xs.map((a) => a.id).sort());
   const startEdit = (t: Team) => {
@@ -1021,6 +1030,28 @@ function TeamAdmin({ teams, busy, onCreate, onSave }: {
                             );
                           })}
                         </div>
+                        {(customZones?.length ?? 0) > 0 && (
+                          <>
+                            <div className="bnl-sub" style={{ margin: '12px 0 6px', fontWeight: 700,
+                              textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                              Custom areas — drawn on the call map</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                              {customZones!.map((a) => {
+                                const on = zones.includes(a);
+                                return (
+                                  <button key={a} type="button" aria-pressed={on}
+                                    onClick={() => setZones((p) => on ? p.filter((x) => x !== a) : [...p, a])}
+                                    style={{ border: `1px solid ${on ? 'var(--info)' : 'var(--border)'}`,
+                                      background: on ? 'var(--info-light)' : 'var(--card)',
+                                      color: on ? 'var(--strong)' : 'var(--muted)',
+                                      borderRadius: 16, padding: '5px 11px', fontSize: 12,
+                                      fontWeight: 600, cursor: 'pointer', font: 'inherit' }}>
+                                    {on ? '✓ ' : ''}{a}</button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
                         <div className="bnl-sub" style={{ margin: '12px 0 6px', fontWeight: 700,
                           textTransform: 'uppercase', letterSpacing: '.05em' }}>
                           Routing — this team takes these callers countywide</div>

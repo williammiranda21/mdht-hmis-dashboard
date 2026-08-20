@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { tilesFor, frameFor, toPx, unproject, project, inFeature, TILE, type GeoFC } from '../../../lib/slippy';
 import { muniArea } from '../../../lib/helpline-options';
+import { fetchCustomAreas, invalidateCustomAreas, type CustomArea } from '../../../lib/custom-areas';
+import { supabaseBrowser } from '../../../lib/supabase-browser';
 import type { HlCase, Team } from './HelplineView';
 
 /**
@@ -81,8 +83,8 @@ function zoneOf(key: LayerKey, props?: Record<string, unknown>): string | null {
   return null;
 }
 
-export default function ReportMap({ cases, teams = [], onOpen }: {
-  cases: HlCase[]; teams?: Team[]; onOpen: (c: HlCase) => void;
+export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }: {
+  cases: HlCase[]; teams?: Team[]; isAdmin?: boolean; onOpen: (c: HlCase) => void;
 }) {
   const [center, setCenter] = useState<{ lat: number; lng: number }>(
     { lat: VIEWS.metro.lat, lng: VIEWS.metro.lng });
@@ -91,9 +93,43 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
     { districts: false, county: false, muni: false, zipcodes: false, tracts: false });
   const [geo, setGeo] = useState<Record<LayerKey, GeoFC | 'missing' | 'loading' | undefined>>(
     { districts: undefined, county: undefined, muni: undefined, zipcodes: undefined, tracts: undefined });
-  const [sel, setSel] = useState<{ key: LayerKey; idx: number } | null>(null);
+  const [sel, setSel] = useState<{ key: LayerKey | 'custom'; idx: number } | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+
+  // Custom areas (supabase/custom_areas.sql): admin-drawn routing polygons —
+  // the PIT-app pattern. Rendered as a layer; admins draw new ones by
+  // clicking corners on the map, then naming the shape.
+  const [customs, setCustoms] = useState<CustomArea[] | null>(null);
+  const [onCustom, setOnCustom] = useState(false);
+  const [draw, setDraw] = useState<{ lat: number; lng: number }[] | null>(null);
+  const [areaName, setAreaName] = useState('');
+  const [busyDraw, setBusyDraw] = useState(false);
+  const [drawErr, setDrawErr] = useState<string | null>(null);
+  useEffect(() => {
+    if ((onCustom || draw) && customs === null) fetchCustomAreas().then(setCustoms);
+  }, [onCustom, draw, customs]);
+
+  async function saveArea() {
+    if (!draw || draw.length < 3 || !areaName.trim() || busyDraw) return;
+    setBusyDraw(true); setDrawErr(null);
+    const ring = [...draw.map((p) => [p.lng, p.lat]), [draw[0].lng, draw[0].lat]];
+    const { error } = await supabaseBrowser().from('custom_areas')
+      .insert({ name: areaName.trim(), polygon: { type: 'Polygon', coordinates: [ring] } });
+    setBusyDraw(false);
+    if (error) { setDrawErr(error.message); return; }
+    invalidateCustomAreas();
+    setCustoms(await fetchCustomAreas(true));
+    setDraw(null); setAreaName(''); setOnCustom(true);
+  }
+  async function deleteArea(a: CustomArea) {
+    if (!confirm(`Delete custom area "${a.name}"? Cases keep the label, but nothing new will route to it.`)) return;
+    const { error } = await supabaseBrowser().from('custom_areas').delete().eq('id', a.id);
+    if (error) { setDrawErr(error.message); return; }
+    invalidateCustomAreas();
+    setCustoms(await fetchCustomAreas(true));
+    setSel(null);
+  }
 
   // Fluid width: the map meets the panel borders at any window size.
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -222,16 +258,21 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
   const dots = shown.filter((c) => c.lat != null && c.lng != null);
   const noGeo = shown.length - dots.length;
 
-  // selected-boundary counter
-  const selFeature = sel && typeof geo[sel.key] === 'object'
+  // selected-boundary counter (a custom area selects the same way)
+  const selCustom = sel?.key === 'custom' ? (customs?.[sel.idx] ?? null) : null;
+  const selFeature = sel && sel.key !== 'custom' && typeof geo[sel.key] === 'object'
     ? (geo[sel.key] as GeoFC).features[sel.idx] : null;
+  const selGeom = selCustom ? selCustom.polygon : (selFeature?.geometry ?? null);
+  const selName = selCustom ? selCustom.name : featureName(selFeature?.properties);
+  const selZone = selCustom ? selCustom.name
+    : sel && sel.key !== 'custom' ? zoneOf(sel.key, selFeature?.properties) : null;
   const selCounts = useMemo(() => {
-    if (!selFeature) return null;
-    const inside = dots.filter((c) => inFeature(c.lng!, c.lat!, selFeature.geometry));
+    if (!selGeom) return null;
+    const inside = dots.filter((c) => inFeature(c.lng!, c.lat!, selGeom));
     const by: Record<string, number> = {};
     inside.forEach((c) => { by[dotGroup(c)] = (by[dotGroup(c)] ?? 0) + 1; });
     return { total: inside.length, by };
-  }, [selFeature, dots]);
+  }, [selGeom, dots]);
 
   function pathOf(geom: { type: string; coordinates: any }): string {
     const rings: number[][][] = geom.type === 'Polygon' ? geom.coordinates
@@ -293,6 +334,26 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
             )}
           </label>
         ))}
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
+          fontSize: 12.5, color: 'var(--muted)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={onCustom}
+            onChange={() => {
+              setOnCustom(!onCustom);
+              if (sel?.key === 'custom') setSel(null);
+            }} />
+          <span style={{ borderBottom: '2px solid var(--info)' }}>Custom areas</span>
+          {onCustom && customs === null && <span className="bnl-sub">loading…</span>}
+          {onCustom && customs?.length === 0 && (
+            <span className="bnl-sub" title={isAdmin
+              ? 'Use ✏ Draw custom area to create one'
+              : 'An admin can draw these on this map'}>— none drawn yet</span>
+          )}
+        </label>
+        {isAdmin && !draw && (
+          <button className="tbtn" onClick={() => { setDraw([]); setSel(null); setDrawErr(null); }}
+            title="Click corners on the map to outline a new routing area, then name it">
+            ✏ Draw custom area</button>
+        )}
         <span style={{ flex: 1 }} />
         {Object.entries(DOT).map(([k, d]) => (
           <span key={k} className="bnl-sub" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -302,6 +363,32 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
         ))}
       </div>
 
+      {draw && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+          padding: '0 18px 10px' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--strong)', fontWeight: 600 }}>
+            ✏ {draw.length < 3
+              ? `Click the map to drop corners — ${draw.length} of at least 3`
+              : `${draw.length} corners — keep clicking, or name it and save`}
+          </span>
+          <button className="tbtn" disabled={!draw.length}
+            onClick={() => setDraw(draw.slice(0, -1))}>Undo corner</button>
+          <button className="tbtn"
+            onClick={() => { setDraw(null); setAreaName(''); setDrawErr(null); }}>Cancel</button>
+          {draw.length >= 3 && (
+            <>
+              <input className="tinput" style={{ width: 230 }} value={areaName} maxLength={60}
+                placeholder="Area name — becomes the routing zone"
+                onChange={(e) => setAreaName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') saveArea(); }} />
+              <button className="btn primary" style={{ padding: '6px 14px', fontSize: 12.5 }}
+                disabled={busyDraw || !areaName.trim()} onClick={saveArea}>
+                {busyDraw ? 'Saving…' : 'Save area'}</button>
+            </>
+          )}
+          {drawErr && <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>{drawErr}</span>}
+        </div>
+      )}
       <div ref={wrapRef} style={{ padding: '0 18px 16px' }}>
         <div ref={mapRef} style={{ position: 'relative', width: W, height: H, maxWidth: '100%',
           overflow: 'hidden', border: '1px solid var(--border)', borderRadius: 8,
@@ -310,14 +397,23 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
           onPointerUp={onPointerUp}
           onPointerEnter={lockScroll}
           onPointerLeave={() => { onPointerUp(); unlockScroll(); }}
-          onDoubleClick={onDblClick}>
+          onDoubleClick={draw ? undefined : onDblClick}
+          onClick={(e) => {
+            // draw mode: every non-drag click drops a polygon corner
+            if (!draw || draggedRef.current) return;
+            const rect = (e.currentTarget as Element).getBoundingClientRect();
+            const p = unproject(frame.left + (e.clientX - rect.left),
+              frame.top + (e.clientY - rect.top), z);
+            setDraw([...draw, p]);
+          }}>
           {tiles.map((t) => (
             // eslint-disable-next-line @next/next/no-img-element
             <img key={`${t.z}/${t.x}/${t.y}`} src={`/api/helpline/tile/${t.z}/${t.x}/${t.y}`} alt=""
               width={TILE} height={TILE} draggable={false}
               style={{ position: 'absolute', left: t.sx, top: t.sy, display: 'block', maxWidth: 'none' }} />
           ))}
-          <svg width={W} height={H} style={{ position: 'absolute', inset: 0, zIndex: 2 }}>
+          <svg width={W} height={H} style={{ position: 'absolute', inset: 0, zIndex: 2,
+            pointerEvents: draw ? 'none' : undefined }}>
             {LAYERS.map((L) => {
               const g = geo[L.key];
               if (!on[L.key] || !g || g === 'missing' || g === 'loading') return null;
@@ -341,6 +437,21 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
                 </g>
               );
             })}
+            {(onCustom || draw) && (customs ?? []).map((a, i) => {
+              const isSel = sel?.key === 'custom' && sel.idx === i;
+              return (
+                <path key={`ca${a.id}`} d={pathOf(a.polygon)}
+                  fill={isSel ? 'var(--info)' : 'transparent'} fillOpacity={isSel ? 0.14 : 0}
+                  stroke="var(--info)" strokeWidth={isSel ? 3 : 1.8} opacity={0.9}
+                  style={{ cursor: 'pointer', pointerEvents: 'visible' }}
+                  onClick={() => {
+                    if (draggedRef.current) return;
+                    setSel(isSel ? null : { key: 'custom', idx: i });
+                  }}>
+                  <title>{a.name}</title>
+                </path>
+              );
+            })}
             {dots.map((c) => {
               const { x, y } = toPx(c.lat!, c.lng!, frame);
               if (x < -8 || y < -8 || x > W + 8 || y > H + 8) return null;
@@ -354,6 +465,22 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
                 </circle>
               );
             })}
+            {/* in-progress custom-area drawing */}
+            {draw && draw.length > 0 && (
+              <g style={{ pointerEvents: 'none' }}>
+                <path d={draw.map((p, i) => {
+                    const { x, y } = toPx(p.lat, p.lng, frame);
+                    return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+                  }).join('') + (draw.length > 2 ? 'Z' : '')}
+                  fill="var(--info)" fillOpacity={0.12}
+                  stroke="var(--info)" strokeWidth={2} strokeDasharray="6 4" />
+                {draw.map((p, i) => {
+                  const { x, y } = toPx(p.lat, p.lng, frame);
+                  return <circle key={i} cx={x} cy={y} r={4} fill="var(--info)"
+                    stroke="rgba(255,255,255,.9)" strokeWidth={1.5} />;
+                })}
+              </g>
+            )}
           </svg>
 
           {/* zoom controls */}
@@ -365,14 +492,15 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
               onClick={() => zoomTo(z - 1)} aria-label="Zoom out">−</button>
           </div>
 
-          {/* selected-boundary counter */}
-          {selFeature && selCounts && (
+          {/* selected-boundary counter (districts, municipalities, custom areas) */}
+          {selGeom && selCounts && (
             <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 4,
               background: 'var(--card)', border: '1px solid var(--border-strong)',
               borderRadius: 8, padding: '10px 14px', boxShadow: 'var(--shadow)',
               minWidth: 200, fontSize: 12.5 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                <b style={{ color: 'var(--strong)' }}>{featureName(selFeature.properties)}</b>
+                <b style={{ color: 'var(--strong)' }}>
+                  {selName}{selCustom && <span className="bnl-sub"> · custom area</span>}</b>
                 <button className="bnl-x" style={{ float: 'none' }} aria-label="Clear selection"
                   onClick={() => setSel(null)}>✕</button>
               </div>
@@ -387,10 +515,9 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
                 </div>
               ))}
               {(() => {
-                // which teams the suggestion would route this district to
-                const zone = sel ? zoneOf(sel.key, selFeature.properties) : null;
-                if (!zone || !teams.length) return null;
-                const cover = teams.filter((t) => t.active && t.zones.includes(zone));
+                // which teams the suggestion would route this zone to
+                if (!selZone || !teams.length) return null;
+                const cover = teams.filter((t) => t.active && t.zones.includes(selZone));
                 return (
                   <div className="bnl-sub" style={{ marginTop: 6, paddingTop: 6,
                     borderTop: '1px solid var(--hair)', maxWidth: 230 }}>
@@ -398,10 +525,14 @@ export default function ReportMap({ cases, teams = [], onOpen }: {
                       ? <>Covered by <b style={{ color: 'var(--text)' }}>
                           {cover.map((t) => t.name).join(', ')}</b></>
                       : <span style={{ color: 'var(--warn)', fontWeight: 600 }}>
-                          No team covers {zone} — set it in Team coverage below</span>}
+                          No team covers {selZone} — set it in Team coverage below</span>}
                   </div>
                 );
               })()}
+              {selCustom && isAdmin && (
+                <button className="tbtn" style={{ marginTop: 8 }}
+                  onClick={() => deleteArea(selCustom)}>🗑 Delete area</button>
+              )}
             </div>
           )}
 

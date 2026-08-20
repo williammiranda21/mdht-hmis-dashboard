@@ -39,7 +39,7 @@ export function unproject(px: number, py: number, z: number): { lat: number; lng
 }
 
 // ── point-in-polygon (ray cast) for the GIS boundary layers ─────────────────
-type Geometry = { type: string; coordinates: any };
+export type Geometry = { type: string; coordinates: any };
 export type GeoFC = { features: { properties?: Record<string, unknown>; geometry: Geometry }[] };
 
 function inRing(lng: number, lat: number, ring: number[][]): boolean {

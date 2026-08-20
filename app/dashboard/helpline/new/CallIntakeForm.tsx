@@ -8,7 +8,8 @@ import {
   AREAS, SLEEPING_OPTIONS, HOUSEHOLD_OPTIONS, FACTORS, muniArea, priorityOf, priorityBand,
   suggestTeam, type RoutableTeam,
 } from '../../../../lib/helpline-options';
-import { featuresAt, type GeoFC } from '../../../../lib/slippy';
+import { featuresAt, inFeature, type GeoFC } from '../../../../lib/slippy';
+import { fetchCustomAreas } from '../../../../lib/custom-areas';
 
 // District boundary files, fetched once per session (same-origin static).
 let _cityGeo: GeoFC | null | undefined;
@@ -117,8 +118,15 @@ export default function CallIntakeForm({ me }: { me: string }) {
     if (_countyGeo === undefined) _countyGeo = await loadGeo('/gis/county_districts.geojson');
     if (_muniGeo === undefined) _muniGeo = await loadGeo('/gis/municipalities.geojson');
     const notes: string[] = [];
+    // Admin-drawn custom areas outrank everything — they exist precisely to
+    // override the default geography (e.g. a drawn 'Government Center').
+    const customs = await fetchCustomAreas();
+    const custom = customs.find((a) => inFeature(g.lng, g.lat, a.polygon));
     const city = _cityGeo ? featuresAt(g.lng, g.lat, _cityGeo) : [];
-    if (city.length) {
+    if (custom) {
+      set('area')(custom.name);
+      notes.push(`in ${custom.name} (custom area, set automatically)`);
+    } else if (city.length) {
       const d = String(city[0].COMDISTID ?? '');
       const areaVal = d === '' ? '' : `Miami District ${d}`;
       if (areaVal && (AREAS as readonly string[]).includes(areaVal)) {
