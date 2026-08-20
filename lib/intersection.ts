@@ -73,8 +73,10 @@ export function streetRegex(street: string): string {
     if (TYPES[tok]) return TYPES[tok];
     const bare = tok.match(/^(\d+)$/);
     if (bare) return `(${bare[1]}|${ordinal(Number(bare[1]))})`;
-    const ord = tok.match(/^(\d+)(st|nd|rd|th)$/);
-    if (ord) return `(${ord[1]}|${ord[1]}${ord[2]})`;
+    // Typed suffixes are IGNORED — "12nd"/"2th"/"3nd" are everyday typos, so
+    // any number+suffix matches the number and its CORRECT ordinal.
+    const ord = tok.match(/^(\d+)(?:st|nd|rd|th)$/);
+    if (ord) return `(${ord[1]}|${ordinal(Number(ord[1]))})`;
     return tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }).join(' ');
 }
