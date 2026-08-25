@@ -104,8 +104,12 @@ export async function getViewer(): Promise<Viewer | null> {
     status,
     isApproved,
     canSeeBnl: isAdmin || (isApproved && Boolean(data?.bnl_access)),
+    // `?? true`: before bnl_write.sql runs the column doesn't exist (undefined)
+    // — that must read as "not migrated yet", not "denied", or every current
+    // writer breaks in the deploy-to-SQL gap. Post-SQL the column always
+    // exists, so false really means revoked.
     canWriteBnlNotes: isAdmin
-      || (isApproved && Boolean(data?.bnl_access) && Boolean(data?.bnl_write)),
+      || (isApproved && Boolean(data?.bnl_access) && ((data?.bnl_write as boolean | undefined) ?? true)),
     canSeeYc: isAdmin || (isApproved && Boolean(data?.yc_access)),
     // TEMPORARY rollout lock (user directive 2026-08-20): Helpline is
     // limited to William Miranda ONLY while it's being shaped — the other
