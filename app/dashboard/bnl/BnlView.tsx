@@ -87,6 +87,46 @@ export default function BnlView({
     x: number; y: number; name: string;
     notes: NonNullable<BnlClient['notes2']>;
   } | null>(null);
+  // Quick note (user ask 2026-08-25): CLICKING the note cell opens an
+  // interactive version of the card — recent notes + a composer — so case
+  // conferencing adds a note without the drawer round-trip. Same permanent
+  // bnl_notes thread via /api/bnl/notes; the row preview updates in place.
+  const [noteEdit, setNoteEdit] = useState<{ x: number; y: number; pid: string; name: string } | null>(null);
+  const [noteBody, setNoteBody] = useState('');
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteErr, setNoteErr] = useState<string | null>(null);
+
+  async function saveQuickNote() {
+    if (!noteEdit || noteBusy) return;
+    const body = noteBody.trim();
+    if (!body) return;
+    setNoteBusy(true); setNoteErr(null);
+    try {
+      const res = await fetch('/api/bnl/notes', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pid: noteEdit.pid, body }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.error || `save failed (${res.status})`);
+      const n = j.note as { body: string; author_name: string | null; author_email: string | null; created_at: string };
+      setRows((prev) => prev.map((r) => r.pid === noteEdit.pid
+        ? {
+            ...r,
+            notes2: [
+              { body: n.body, author: n.author_name ?? n.author_email ?? null, at: String(n.created_at).slice(0, 10) },
+              ...(r.notes2 ?? []),
+            ].slice(0, 5),
+          }
+        : r));
+      // stay open so the note visibly lands in the list; click-away closes
+      setNoteBody('');
+    } catch (e) {
+      setNoteErr(String((e as Error).message));
+    } finally {
+      setNoteBusy(false);
+    }
+  }
   // Hover card for the HH column — household members + ages (same fixed-panel
   // pattern as the notes card, but anchored to the RIGHT of the cell since the
   // HH column sits at the left edge of the table).
@@ -510,13 +550,21 @@ export default function BnlView({
                     <td>{r.ref_type ? (
                       <><div>{r.ref_type} · <b>{r.ref_status}</b></div><div className="bnl-sub">{r.ref_date}{r.ref_prov ? ` · ${r.ref_prov}` : ''}</div></>
                     ) : <span className="bnl-sub">—</span>}</td>
-                    <td style={{ maxWidth: 380, minWidth: 260 }}
+                    <td style={{ maxWidth: 380, minWidth: 260, cursor: 'pointer' }}
+                      title="Click to add a quick note"
                       onMouseEnter={(e) => {
-                        if (!r.notes2?.length) return;
+                        if (noteEdit || !r.notes2?.length) return;
                         const rect = e.currentTarget.getBoundingClientRect();
                         setNotePop({ x: rect.left, y: rect.top, name: r.name, notes: r.notes2 });
                       }}
-                      onMouseLeave={() => setNotePop(null)}>
+                      onMouseLeave={() => setNotePop(null)}
+                      onClick={(e) => {
+                        e.stopPropagation(); // the row itself opens the drawer
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setNotePop(null);
+                        setNoteBody(''); setNoteErr(null);
+                        setNoteEdit({ x: rect.left, y: rect.top, pid: r.pid, name: r.name });
+                      }}>
                       {(r.notes2?.length ?? 0)
                         ? (() => {
                             const latest = r.notes2![0];
@@ -539,7 +587,7 @@ export default function BnlView({
                               </div>
                             );
                           })()
-                        : <span className="bnl-sub">—</span>}
+                        : <span className="bnl-sub" style={{ opacity: 0.75 }}>＋ add note</span>}
                     </td>
                   </tr>
                 );
@@ -611,9 +659,60 @@ export default function BnlView({
               </div>
             </div>
           ))}
-          <div className="bnl-sub" style={{ marginTop: 8 }}>open the client for the full thread</div>
+          <div className="bnl-sub" style={{ marginTop: 8 }}>open the client for the full thread · click to add a note</div>
         </div>
       )}
+
+      {/* Quick-note composer — the interactive sibling of the hover card.
+          Backdrop closes it; Esc closes; Enter saves (Shift+Enter = newline).
+          Reads the row's notes LIVE so a saved note appears immediately. */}
+      {noteEdit && (() => {
+        const row = rows.find((r) => r.pid === noteEdit.pid);
+        const notes = row?.notes2 ?? [];
+        return (
+          <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 59 }}
+              onMouseDown={() => setNoteEdit(null)} />
+            <div className="panel" role="dialog" aria-label={`Quick note for ${noteEdit.name}`}
+              style={{ position: 'fixed',
+                right: Math.max(window.innerWidth - noteEdit.x + 10, 12),
+                top: Math.min(noteEdit.y, Math.max(window.innerHeight - 420, 12)),
+                width: 400, maxWidth: '62vw', maxHeight: 460, overflowY: 'auto',
+                zIndex: 60, padding: '12px 14px', boxShadow: '0 8px 24px rgba(0,0,0,0.35)' }}
+              onKeyDown={(e) => { if (e.key === 'Escape') setNoteEdit(null); }}>
+              <div style={{ fontWeight: 700, fontSize: '.85rem', marginBottom: 6 }}>
+                {noteEdit.name} <span className="bnl-sub">· quick note</span>
+              </div>
+              {noteErr && <div className="lerror" role="alert" style={{ marginBottom: 8 }}>{noteErr}</div>}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'flex-start' }}>
+                <textarea className="tinput" rows={2} autoFocus maxLength={4000}
+                  style={{ flex: 1, resize: 'vertical' }} value={noteBody}
+                  placeholder="Type the note — Enter saves, Shift+Enter for a new line"
+                  onChange={(e) => setNoteBody(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveQuickNote(); }
+                  }} />
+                <button className="btn primary" disabled={noteBusy || !noteBody.trim()}
+                  onClick={saveQuickNote}>{noteBusy ? 'Saving…' : 'Add'}</button>
+              </div>
+              {notes.map((n, i) => (
+                <div key={i} style={{ marginBottom: 8 }}>
+                  <div className="bnl-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {n.at}{n.author ? ` · ${n.author}` : ''}
+                  </div>
+                  <div style={{ fontSize: '.82rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {n.body}
+                  </div>
+                </div>
+              ))}
+              {!notes.length && <div className="bnl-sub">No notes yet — this will be the first.</div>}
+              <div className="bnl-sub" style={{ marginTop: 4 }}>
+                notes are permanent · open the client row for the full thread
+              </div>
+            </div>
+          </>
+        );
+      })()}
 
       {/* HH hover card — household members + ages. Opens rightward (the HH
           column sits near the table's left edge), clamped to the viewport. */}
