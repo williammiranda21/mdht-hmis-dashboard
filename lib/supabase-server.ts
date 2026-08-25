@@ -59,10 +59,12 @@ export interface Viewer {
    * queries would come back empty.
    */
   canSeeBnl: boolean;
-  /** May WRITE BNL notes — account-level and separate from seeing the BNL
-   *  (user directive 2026-08-25). Admins always; non-admins need bnl_access
-   *  AND the bnl_write grant. Mirrors can_write_bnl_notes() SQL (bnl_write.sql). */
-  canWriteBnlNotes: boolean;
+  /** Population scopes this account may WRITE BNL notes for (user directive
+   *  2026-08-25: e.g. Youth but not Families). Values from
+   *  {all,youth,vet,family,single,senior}; empty = read-only. Admins →
+   *  ['all']. Mirrors can_write_bnl_note(pid) SQL (bnl_write_pops.sql);
+   *  evaluate per client with canWriteClient() in lib/bnl-query.ts. */
+  bnlWritePops: string[];
   /** May open Youth Connect (intake list, review queue, invites). Admins always
    *  qualify; non-admins via the `yc_access` grant. Mirrors can_see_yc() SQL. */
   canSeeYc: boolean;
@@ -104,12 +106,13 @@ export async function getViewer(): Promise<Viewer | null> {
     status,
     isApproved,
     canSeeBnl: isAdmin || (isApproved && Boolean(data?.bnl_access)),
-    // `?? true`: before bnl_write.sql runs the column doesn't exist (undefined)
-    // — that must read as "not migrated yet", not "denied", or every current
-    // writer breaks in the deploy-to-SQL gap. Post-SQL the column always
-    // exists, so false really means revoked.
-    canWriteBnlNotes: isAdmin
-      || (isApproved && Boolean(data?.bnl_access) && ((data?.bnl_write as boolean | undefined) ?? true)),
+    // Missing bnl_write_pops column = "not migrated yet", never "denied":
+    // fall back to the boolean-era logic (missing THAT too → grandfathered
+    // full write) so nothing breaks in a deploy-to-SQL gap.
+    bnlWritePops: isAdmin ? ['all']
+      : !isApproved || !data?.bnl_access ? []
+      : (data?.bnl_write_pops as string[] | undefined)
+        ?? (((data?.bnl_write as boolean | undefined) ?? true) ? ['all'] : []),
     canSeeYc: isAdmin || (isApproved && Boolean(data?.yc_access)),
     // TEMPORARY rollout lock (user directive 2026-08-20): Helpline is
     // limited to William Miranda ONLY while it's being shaped — the other

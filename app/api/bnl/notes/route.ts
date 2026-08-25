@@ -1,5 +1,18 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../../lib/supabase-server';
+import { canWriteClient } from '../../../../lib/bnl-query';
+
+/** Per-population write scope (bnl_write_pops.sql): may this viewer write on
+ *  THIS client? Looks the client up by pid; a client no longer on the roster
+ *  is writable only with the 'all' scope (notes outlive the roster). The
+ *  INSERT policy re-checks all of this in SQL — this is the courtesy layer. */
+async function canWriteOn(pid: string, writePops: string[]): Promise<boolean> {
+  if (!writePops.length) return false;
+  if (writePops.includes('all')) return true;
+  const { data } = await supabaseServer()
+    .from('bnl_clients').select('age, veteran, family').eq('pid', pid).maybeSingle();
+  return data ? canWriteClient(writePops, data) : false;
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -38,18 +51,13 @@ export async function GET(req: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   // canWrite rides along so every composer (drawer, quick note, worklists)
   // self-gates without prop-drilling — the INSERT policy is the real boundary.
-  return NextResponse.json({ notes: data ?? [], canWrite: viewer.canWriteBnlNotes });
+  return NextResponse.json({ notes: data ?? [], canWrite: await canWriteOn(pid, viewer.bnlWritePops) });
 }
 
 export async function POST(req: Request) {
   const viewer = await getViewer();
   if (!viewer) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  if (!viewer.canWriteBnlNotes) {
-    return NextResponse.json(
-      { error: 'Notes are read-only for your account — ask an administrator for the BNL notes grant.' },
-      { status: 403 },
-    );
-  }
+
 
   let payload: { pid?: string; body?: string };
   try {
@@ -62,6 +70,12 @@ export async function POST(req: Request) {
   const body = (payload.body ?? '').trim();
   if (!pid) return NextResponse.json({ error: 'pid required' }, { status: 400 });
   if (!body) return NextResponse.json({ error: 'note cannot be empty' }, { status: 400 });
+  if (!(await canWriteOn(pid, viewer.bnlWritePops))) {
+    return NextResponse.json(
+      { error: 'Notes are read-only for this client on your account — an administrator sets note-writing scopes in Users.' },
+      { status: 403 },
+    );
+  }
   if (body.length > MAX_BODY) {
     return NextResponse.json({ error: `note too long (max ${MAX_BODY} characters)` }, { status: 400 });
   }

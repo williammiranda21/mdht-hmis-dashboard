@@ -54,6 +54,26 @@ export interface RosterQuery {
   projMode: 'in' | 'out';
 }
 
+/** Note-WRITING population scopes (bnl_write_pops.sql). MUST stay in sync
+ *  with can_write_bnl_note() in SQL. Deliberate difference from the tab
+ *  predicates: family WRITE scope covers every member of a child-including
+ *  household (family flag), not just the fam_rep row — a family case manager
+ *  notes on members. Populations overlap; a client in two populations is
+ *  writable by either scope. */
+export function canWriteClient(
+  writePops: string[],
+  c: { age?: number | null; veteran?: boolean | null; family?: boolean | null },
+): boolean {
+  if (writePops.includes('all')) return true;
+  const a = c.age ?? null;
+  if (writePops.includes('youth') && a != null && a >= 18 && a < 25) return true;
+  if (writePops.includes('vet') && Boolean(c.veteran)) return true;
+  if (writePops.includes('family') && Boolean(c.family)) return true;
+  if (writePops.includes('single') && a != null && a >= 25 && !c.family) return true;
+  if (writePops.includes('senior') && a != null && a >= 62) return true;
+  return false;
+}
+
 /** Sortable columns. Whitelisted — never interpolate a user string into order(). */
 const SORTABLE = new Set([
   'name', 'age', 'status', 'project', 'days_homeless', 'sys_days3',

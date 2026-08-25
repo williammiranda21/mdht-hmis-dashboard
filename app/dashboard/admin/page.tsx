@@ -68,7 +68,8 @@ export default async function AdminPage() {
     agency: p.agency,
     isAdmin: Boolean(p.is_admin),
     bnlAccess: Boolean(p.bnl_access),
-    bnlWrite: Boolean(p.bnl_write),
+    bnlWritePops: (p.bnl_write_pops as string[] | null)
+      ?? (p.bnl_write ? ['all'] : []),
     ycAccess: Boolean(p.yc_access),
     hlAccess: Boolean(p.helpline_access),
     status: p.status,

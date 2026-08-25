@@ -15,9 +15,11 @@ export interface AdminProfile {
    *  Admins always have it (can_see_bnl() ORs the two), so this only matters
    *  for non-admins. The BNL contains real names — grant sparingly. */
   bnlAccess: boolean;
-  /** May WRITE BNL notes (bnl_write.sql) — meaningful only with bnlAccess;
-   *  admins always write. Reading notes rides bnlAccess. */
-  bnlWrite: boolean;
+  /** Note-WRITING population scopes (bnl_write_pops.sql): which BNL
+   *  populations this account may write notes on — 'all' or any of
+   *  youth/vet/family/single/senior; empty = read-only. Meaningful only with
+   *  bnlAccess; admins always write everywhere. */
+  bnlWritePops: string[];
   /** Youth Connect (intake list + review + invites). Admins always have it. */
   ycAccess: boolean;
   /** Helpline Triage (call intake + assignment). Admins always have it. */
@@ -104,8 +106,17 @@ export default function AdminUsers({
   const setBnlAccess = (r: AdminProfile, bnl: boolean) =>
     run(r.id, async () => db().from('profiles').update({ bnl_access: bnl }).eq('id', r.id));
 
-  const setBnlWrite = (r: AdminProfile, w: boolean) =>
-    run(r.id, async () => db().from('profiles').update({ bnl_write: w }).eq('id', r.id));
+  // 'all' supersedes the specific scopes: turning it on clears them, and
+  // picking a specific scope turns 'all' off.
+  const toggleWritePop = (r: AdminProfile, k: string) => {
+    let next: string[];
+    if (k === 'all') next = r.bnlWritePops.includes('all') ? [] : ['all'];
+    else {
+      const base = r.bnlWritePops.filter((x) => x !== 'all');
+      next = base.includes(k) ? base.filter((x) => x !== k) : [...base, k];
+    }
+    return run(r.id, async () => db().from('profiles').update({ bnl_write_pops: next }).eq('id', r.id));
+  };
 
   const setYcAccess = (r: AdminProfile, yc: boolean) =>
     run(r.id, async () => db().from('profiles').update({ yc_access: yc }).eq('id', r.id));
@@ -213,14 +224,26 @@ export default function AdminUsers({
                   {r.bnlAccess ? 'Revoke BNL access' : 'Grant BNL access'}
                 </button>
               )}
-              {/* Note-WRITING is a separate account-level grant (bnl_write.sql,
-                  user directive 2026-08-25) — only meaningful with BNL access. */}
+              {/* Note-WRITING scopes (bnl_write_pops.sql, user directive
+                  2026-08-25): per BNL population — e.g. write in Youth but
+                  not Families. Only meaningful with BNL access. */}
               {!r.isAdmin && r.status === 'approved' && r.bnlAccess && (
-                <button className={`tbtn${r.bnlWrite ? ' tbtn-on' : ''}`} disabled={busy === r.id}
-                  title="Whether this account may WRITE case notes on the By-Name List (all populations). Reading notes rides BNL access; writing is this switch."
-                  onClick={() => setBnlWrite(r, !r.bnlWrite)}>
-                  {r.bnlWrite ? 'Revoke notes' : 'Grant notes'}
-                </button>
+                <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}
+                  title="Which BNL populations this account may WRITE notes on. A client in two populations is writable by either scope. None selected = read-only.">
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--faint)',
+                    letterSpacing: '.05em' }}>NOTES</span>
+                  {([['all', 'All'], ['youth', 'Youth'], ['vet', 'Vet'], ['family', 'Fam'],
+                     ['single', 'Single'], ['senior', 'Senior']] as const).map(([k, lbl]) => (
+                    <button key={k} disabled={busy === r.id}
+                      className={`tbtn${r.bnlWritePops.includes(k) ? ' tbtn-on' : ''}`}
+                      style={{ padding: '2px 8px', fontSize: 11,
+                        ...(k !== 'all' && r.bnlWritePops.includes('all')
+                          ? { opacity: 0.45 } : {}) }}
+                      onClick={() => toggleWritePop(r, k)}>
+                      {lbl}
+                    </button>
+                  ))}
+                </span>
               )}
               {!r.isAdmin && r.status === 'approved' && (
                 <button className={`tbtn${r.ycAccess ? ' tbtn-on' : ''}`} disabled={busy === r.id}

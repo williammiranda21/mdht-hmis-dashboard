@@ -8,6 +8,7 @@ import {
 import JourneyBar from '../../../components/JourneyBar';
 import ProjectPicker from '../../../components/ProjectPicker';
 import ClientDrawer, { Flags } from './ClientDrawer';
+import { canWriteClient } from '../../../lib/bnl-query';
 
 type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'assessed' | 'ms_wait' | 'hh_n' | 'income';
 
@@ -50,14 +51,15 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 export default function BnlView({
   initialRows, initialTotal, agg, ceMilestones = null, isAdmin = false, projectOpts = [],
-  deepLinkPid = '', canWriteNotes = true,
+  deepLinkPid = '', writePops = ['all'],
 }: { initialRows: BnlClient[]; initialTotal: number; agg: BnlAgg; ceMilestones?: CeMilestonesAgg | null; isAdmin?: boolean;
      projectOpts?: { id: number; name: string; type: string | null }[];
      /** ?pid= deep link (Youth Intake, worklists…): open this client's drawer
       *  over the default roster on load. */
      deepLinkPid?: string;
-     /** account-level bnl_write grant (bnl_write.sql) — gates every composer */
-     canWriteNotes?: boolean }) {
+     /** note-writing population scopes (bnl_write_pops.sql) — evaluated per
+      *  CLIENT via canWriteClient(); gates the quick-note composer */
+     writePops?: string[] }) {
   const [pop, setPop] = useState<PopKey>('all');
   const [q, setQ] = useState('');
   const [fStatus, setFStatus] = useState('');
@@ -553,7 +555,7 @@ export default function BnlView({
                       <><div>{r.ref_type} · <b>{r.ref_status}</b></div><div className="bnl-sub">{r.ref_date}{r.ref_prov ? ` · ${r.ref_prov}` : ''}</div></>
                     ) : <span className="bnl-sub">—</span>}</td>
                     <td style={{ maxWidth: 380, minWidth: 260, cursor: 'pointer' }}
-                      title={canWriteNotes ? 'Click to add a quick note' : 'Click to view recent notes'}
+                      title={canWriteClient(writePops, r) ? 'Click to add a quick note' : 'Click to view recent notes'}
                       onMouseEnter={(e) => {
                         if (noteEdit || !r.notes2?.length) return;
                         const rect = e.currentTarget.getBoundingClientRect();
@@ -562,7 +564,7 @@ export default function BnlView({
                       onMouseLeave={() => setNotePop(null)}
                       onClick={(e) => {
                         e.stopPropagation(); // the row itself opens the drawer
-                        if (!canWriteNotes && !r.notes2?.length) return; // nothing to view
+                        if (!canWriteClient(writePops, r) && !r.notes2?.length) return; // nothing to view
                         const rect = e.currentTarget.getBoundingClientRect();
                         setNotePop(null);
                         setNoteBody(''); setNoteErr(null);
@@ -590,7 +592,7 @@ export default function BnlView({
                               </div>
                             );
                           })()
-                        : canWriteNotes
+                        : canWriteClient(writePops, r)
                           ? <span className="bnl-sub" style={{ opacity: 0.75 }}>＋ add note</span>
                           : <span className="bnl-sub">—</span>}
                     </td>
@@ -676,6 +678,7 @@ export default function BnlView({
       {noteEdit && (() => {
         const row = rows.find((r) => r.pid === noteEdit.pid);
         const notes = row?.notes2 ?? [];
+        const canWriteNotes = row ? canWriteClient(writePops, row) : writePops.includes('all');
         return (
           <>
             <div style={{ position: 'fixed', inset: 0, zIndex: 59 }}
