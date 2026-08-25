@@ -620,8 +620,10 @@ export default function BnlView({
           Services-Only and Prevention excluded). <b>Actively homeless</b> = open ES/SH/TH/SO enrollment,
           PH match awaiting move-in, or a literal-homeless street-outreach sighting within 90 days.
           <b> Housed</b> = PH enrollment with move-in, or most recent exit to a permanent destination.
-          <b> Inactive</b> = no open enrollment and no recent outreach sighting. Populations: Youth 18–24 ·
-          Veterans (self-reported) · Families (household includes a child) · Single adults 25+ · Seniors 62+.
+          <b> Inactive</b> = no open enrollment and no recent outreach sighting. Populations: Youth 18–24
+          (includes parenting and unaccompanied youth) · Veterans (self-reported) · Families (household
+          includes a child; parenting-youth households — HoH 18–24 — appear under Youth only) ·
+          Single adults 25+ · Seniors 62+.
           <b> Default ordering is acuity-first:</b> actively homeless before inactive before housed, then
           longest time homeless first — the top of the list is always the highest-need, longest-waiting
           person in the selected population. <b>Self-reported (3.917)</b> uses the HUD 3.917 fields from

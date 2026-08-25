@@ -120,7 +120,13 @@ export async function queryRoster(
   // Family = HOUSEHOLDS: one row per family — the representative (HoH when
   // recorded, else oldest member; fam_rep computed in bnl_core so no-HoH
   // households never vanish). Members surface in the drawer's household card.
-  else if (p.pop === 'family') qb = qb.eq('family', true).eq('fam_rep', true);
+  // Parenting-youth households (HoH 18–24) show ONLY under Youth (user
+  // directive 2026-08-25); the or() keeps an under-18-HoH edge case in
+  // Families instead of orphaning it from every population.
+  else if (p.pop === 'family') {
+    qb = qb.eq('family', true).eq('fam_rep', true)
+      .or('parenting.eq.false,age.lt.18,age.gte.25');
+  }
   else if (p.pop === 'single') qb = qb.gte('age', 25).eq('family', false);
   else if (p.pop === 'senior') qb = qb.gte('age', 62);
   // 'all' adds nothing. Note gte/lt on age also excludes NULL age, matching the
