@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type TdHTMLAttributes } from 'react';
 import {
   POP_DEFS, MILESTONES,
   type BnlAgg, type BnlClient, type CeMilestonesAgg, type PopKey,
@@ -29,6 +29,18 @@ const COLS: Array<[SortKey | 'flags' | 'notes', string]> = [
   // assessed FILTER, drawer tile, and CSV field all remain.
   ['notes', 'Last note'],
 ];
+
+/** Cell marks — right-click color highlights (case conferencing, user
+ *  2026-08-25). Colors are deliberately UNLABELED (values 1–4 in the DB);
+ *  team meanings can be layered on later without a migration. Shared state
+ *  via bnl_cell_marks (read = can_see_bnl, write = note-writing scopes). */
+const MARK_COLORS: Record<number, { name: string; c: string; bg: string }> = {
+  1: { name: 'Red',    c: '#ef4444', bg: 'rgba(239,68,68,0.14)' },
+  2: { name: 'Yellow', c: '#eab308', bg: 'rgba(234,179,8,0.14)' },
+  3: { name: 'Green',  c: '#22c55e', bg: 'rgba(34,197,94,0.14)' },
+  4: { name: 'Blue',   c: '#38bdf8', bg: 'rgba(56,189,248,0.14)' },
+};
+type CellMark = { color: number; author: string | null; at: string };
 
 /** '2026-08-05' → 'today' / '3d' / '2mo' — freshness for the notes column. */
 function noteAge(at: string): string {
@@ -99,6 +111,89 @@ export default function BnlView({
   const [noteBody, setNoteBody] = useState('');
   const [noteBusy, setNoteBusy] = useState(false);
   const [noteErr, setNoteErr] = useState<string | null>(null);
+
+  // ── Cell marks (right-click highlights) ──────────────────────────────────
+  // Whole table held client-side (conferencing-scale, a few hundred rows);
+  // keyed `${pid}:${col}` so paging/filtering never refetches marks.
+  const [marks, setMarks] = useState<Record<string, CellMark>>({});
+  const [markMenu, setMarkMenu] = useState<{ x: number; y: number; pid: string; col: string } | null>(null);
+  useEffect(() => {
+    fetch('/api/bnl/marks')
+      .then((r) => (r.ok ? r.json() : { marks: [] }))
+      .then((j) => setMarks(Object.fromEntries(
+        (j.marks as { pid: string; col: string; color: number; author_name: string | null; updated_at: string }[])
+          .map((m) => [`${m.pid}:${m.col}`, { color: m.color, author: m.author_name, at: m.updated_at }]))))
+      .catch(() => {}); // marks are an overlay — the roster never waits on them
+  }, []);
+  useEffect(() => {
+    if (!markMenu) return;
+    const close = () => setMarkMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [markMenu]);
+
+  async function setMark(pid: string, col: string, color: number) {
+    const key = `${pid}:${col}`;
+    const prev = marks[key];
+    setMarkMenu(null);
+    // optimistic — revert on failure
+    setMarks((m) => {
+      const n = { ...m };
+      if (color) n[key] = { color, author: 'you', at: new Date().toISOString() };
+      else delete n[key];
+      return n;
+    });
+    try {
+      const res = await fetch('/api/bnl/marks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pid, col, color }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.error || `mark failed (${res.status})`);
+      if (j.mark) {
+        setMarks((m) => ({ ...m, [key]: { color: j.mark.color, author: j.mark.author_name, at: j.mark.updated_at } }));
+      }
+    } catch (e) {
+      setMarks((m) => {
+        const n = { ...m };
+        if (prev) n[key] = prev; else delete n[key];
+        return n;
+      });
+      alert(String((e as Error).message));
+    }
+  }
+
+  /** td props for a markable cell: right-click menu (writers only), highlight
+   *  style, and attribution tooltip. Pass the cell's own inline style as
+   *  `base` so the highlight merges instead of clobbering it. Keys are
+   *  omitted (not set undefined) when inert, so spread order never matters. */
+  function mkTd(r: BnlClient, col: string, base?: CSSProperties) {
+    const m = marks[`${r.pid}:${col}`];
+    const mc = m ? MARK_COLORS[m.color] : null;
+    const props: TdHTMLAttributes<HTMLTableCellElement> = {};
+    if (canWriteClient(writePops, r)) {
+      props.onContextMenu = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setMarkMenu({ x: e.clientX, y: e.clientY, pid: r.pid, col });
+      };
+    }
+    if (mc) {
+      props.style = { ...base, background: mc.bg, boxShadow: `inset 3px 0 0 ${mc.c}` };
+      props.title = `${mc.name} — ${m!.author ?? '—'} · ${new Date(m!.at).toLocaleDateString()}`;
+    } else if (base) {
+      props.style = base;
+    }
+    return props;
+  }
 
   async function saveQuickNote() {
     if (!noteEdit || noteBusy) return;
@@ -508,7 +603,7 @@ export default function BnlView({
                 return (
                   <tr key={r.pid} className="bnl-row" onClick={() => openDrill(r)}
                     style={r.focused ? { background: 'rgba(234,179,8,0.08)', boxShadow: 'inset 3px 0 0 var(--warn)' } : undefined}>
-                    <td>
+                    <td {...mkTd(r, 'name')}>
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                         <span className="pp-noprint" role="button"
                           title={r.focused ? 'On the focus list — click to remove' : 'Focus this client for case conferencing'}
@@ -521,8 +616,8 @@ export default function BnlView({
                       </div>
                       <div className="bnl-sub">{r.detail}</div>
                     </td>
-                    <td className="num">{r.age ?? '—'}</td>
-                    <td className="num"
+                    <td className="num" {...mkTd(r, 'age')}>{r.age ?? '—'}</td>
+                    <td className="num" {...mkTd(r, 'hh_n')}
                       onMouseEnter={(e) => {
                         if ((r.hh_n ?? 1) <= 1 || !r.hh_members?.length) return;
                         const rect = e.currentTarget.getBoundingClientRect();
@@ -532,35 +627,37 @@ export default function BnlView({
                       {(r.hh_n ?? 1) > 1
                         ? <span style={{ textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>{r.hh_n}</span>
                         : <span className="bnl-sub">1</span>}</td>
-                    <td><span className={`bnl-chip bnl-${r.status}`}>{r.status === 'active' ? 'Active' : r.status === 'housed' ? 'Housed' : 'Inactive'}</span></td>
-                    <td><Flags r={r} /></td>
-                    <td style={{ minWidth: 220 }}>{r.project ? <><span className="ty">{r.ptype ?? '?'}</span> {r.project}{r.enrolled ? null : <span className="bnl-sub" title="not a current enrollment — last known project"> (former)</span>}</> : <span className="bnl-sub">—</span>}</td>
-                    <td>
+                    <td {...mkTd(r, 'status')}><span className={`bnl-chip bnl-${r.status}`}>{r.status === 'active' ? 'Active' : r.status === 'housed' ? 'Housed' : 'Inactive'}</span></td>
+                    <td {...mkTd(r, 'flags')}><Flags r={r} /></td>
+                    <td {...mkTd(r, 'project', { minWidth: 220 })}>{r.project ? <><span className="ty">{r.ptype ?? '?'}</span> {r.project}{r.enrolled ? null : <span className="bnl-sub" title="not a current enrollment — last known project"> (former)</span>}</> : <span className="bnl-sub">—</span>}</td>
+                    <td {...mkTd(r, 'days_homeless')}>
                       <div className="bnl-dh">
                         <div className="bnl-dh-tr"><div className="bnl-dh-fl" style={{ width: `${Math.min(100, (100 * r.days_homeless) / maxDays)}%`, background: col }} /></div>
                         <span className="num">{r.days_homeless.toLocaleString()}</span>
                       </div>
                     </td>
-                    <td className="num">{r.sys_days3.toLocaleString()} d <span className="bnl-sub">· {r.episodes3} ep</span></td>
-                    <td className="num">{r.ms_wait != null
+                    <td className="num" {...mkTd(r, 'sys_days3')}>{r.sys_days3.toLocaleString()} d <span className="bnl-sub">· {r.episodes3} ep</span></td>
+                    <td className="num" {...mkTd(r, 'ms_wait')}>{r.ms_wait != null
                       ? <>{r.ms_wait.toLocaleString()}d <span className="bnl-sub">· {MS_LABELS[r.ms_stage ?? ''] ?? r.ms_stage}</span></>
                       : <span className="bnl-sub">—</span>}</td>
-                    <td>{r.risk_pts == null ? <span className="bnl-sub">—</span> : (
+                    <td {...mkTd(r, 'risk_pts')}>{r.risk_pts == null ? <span className="bnl-sub">—</span> : (
                       // Youth prioritization bands per spec: Low 0–7, High 8+.
                       // Two colors only — matches the ETL's risk_band exactly.
                       <span className={`bnl-rp ${r.risk_pts >= 8 ? 'bnl-rp-hi' : 'bnl-rp-lo'}`}
                         title={`${r.risk_pts >= 8 ? 'High' : 'Low'} priority — ${r.risk_pts} of ${r.risk_max} points (Low 0–7 · High 8+ · HNA items pending)`}>
                         {r.risk_pts} pts{r.risk_pts >= 8 ? ' · High' : ''}</span>
                     )}</td>
-                    <td className="num">{r.income != null
+                    <td className="num" {...mkTd(r, 'income')}>{r.income != null
                       // $0 is a real answer (no income); only a missing record shows —
                       ? <>${r.income.toLocaleString()}{r.income_date && <div className="bnl-sub" title="date of the latest income record">{r.income_date}</div>}</>
                       : <span className="bnl-sub">—</span>}</td>
-                    <td>{r.ref_type ? (
+                    <td {...mkTd(r, 'ref_status')}>{r.ref_type ? (
                       <><div>{r.ref_type} · <b>{r.ref_status}</b></div><div className="bnl-sub">{r.ref_date}{r.ref_prov ? ` · ${r.ref_prov}` : ''}</div></>
                     ) : <span className="bnl-sub">—</span>}</td>
-                    <td style={{ maxWidth: 380, minWidth: 260, cursor: 'pointer' }}
-                      title={canWriteClient(writePops, r) ? 'Click to add a quick note' : 'Click to view recent notes'}
+                    <td title={canWriteClient(writePops, r) ? 'Click to add a quick note' : 'Click to view recent notes'}
+                      // mark spread AFTER title: a marked notes cell shows the
+                      // mark's attribution; unmarked keeps the composer hint
+                      {...mkTd(r, 'notes', { maxWidth: 380, minWidth: 260, cursor: 'pointer' })}
                       onMouseEnter={(e) => {
                         if (noteEdit || !r.notes2?.length) return;
                         const rect = e.currentTarget.getBoundingClientRect();
@@ -676,6 +773,44 @@ export default function BnlView({
           <div className="bnl-sub" style={{ marginTop: 8 }}>open the client for the full thread · click to add a note</div>
         </div>
       )}
+
+      {/* Cell-mark menu — right-click on any roster cell (writers only).
+          Click-away / Esc / scroll close it via the markMenu effect. */}
+      {markMenu && (() => {
+        const cur = marks[`${markMenu.pid}:${markMenu.col}`]?.color;
+        return (
+          <div className="panel" role="menu" onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed', zIndex: 70, minWidth: 150, padding: 5,
+              left: Math.min(markMenu.x, window.innerWidth - 170),
+              top: Math.min(markMenu.y, window.innerHeight - 230),
+              boxShadow: '0 12px 32px rgba(0,0,0,0.45)',
+            }}>
+            <div className="bnl-sub" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', padding: '4px 9px' }}>
+              Mark cell
+            </div>
+            {Object.entries(MARK_COLORS).map(([k, mc]) => (
+              <button key={k} type="button" className="btn"
+                onClick={() => setMark(markMenu.pid, markMenu.col, Number(k))}
+                style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%',
+                  border: 0, background: 'none', padding: '6px 9px', textAlign: 'left' }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: mc.c, flexShrink: 0 }} />
+                {mc.name}
+                {cur === Number(k) && <span className="bnl-sub" style={{ marginLeft: 'auto' }}>✓</span>}
+              </button>
+            ))}
+            {cur != null && (
+              <button type="button" className="btn"
+                onClick={() => setMark(markMenu.pid, markMenu.col, 0)}
+                style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%',
+                  border: 0, borderTop: '1px solid rgba(148,163,184,0.15)', borderRadius: 0,
+                  background: 'none', padding: '6px 9px', textAlign: 'left', marginTop: 4 }}>
+                ✕ Clear mark
+              </button>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Quick-note composer — the interactive sibling of the hover card.
           Backdrop closes it; Esc closes; Enter saves (Shift+Enter = newline).

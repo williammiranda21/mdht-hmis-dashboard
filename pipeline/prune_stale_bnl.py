@@ -118,6 +118,15 @@ def main() -> int:
         client.table("bnl_clients").delete().in_("pid", orphans[i:i + DELETE_BATCH]).execute()
         print(f"  deleted {min(i + DELETE_BATCH, len(orphans)):,}/{len(orphans):,}", flush=True)
 
+    # Cell marks ride on roster pids — sweep the departed clients' marks too.
+    # Guarded: the table only exists once supabase/bnl_cell_marks.sql has run.
+    try:
+        for i in range(0, len(orphans), DELETE_BATCH):
+            client.table("bnl_cell_marks").delete().in_("pid", orphans[i:i + DELETE_BATCH]).execute()
+        print("  swept bnl_cell_marks for departed pids", flush=True)
+    except Exception as e:
+        print(f"  (bnl_cell_marks sweep skipped: {e})", flush=True)
+
     total = client.table("bnl_clients").select("*", count="exact").limit(1).execute().count
     print(f"\nDone. bnl_clients now {total:,} rows "
           f"({'matches' if total == len(src) else 'DOES NOT MATCH'} roster {len(src):,}).")
