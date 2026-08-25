@@ -15,6 +15,9 @@ export interface AdminProfile {
    *  Admins always have it (can_see_bnl() ORs the two), so this only matters
    *  for non-admins. The BNL contains real names — grant sparingly. */
   bnlAccess: boolean;
+  /** May WRITE BNL notes (bnl_write.sql) — meaningful only with bnlAccess;
+   *  admins always write. Reading notes rides bnlAccess. */
+  bnlWrite: boolean;
   /** Youth Connect (intake list + review + invites). Admins always have it. */
   ycAccess: boolean;
   /** Helpline Triage (call intake + assignment). Admins always have it. */
@@ -100,6 +103,9 @@ export default function AdminUsers({
 
   const setBnlAccess = (r: AdminProfile, bnl: boolean) =>
     run(r.id, async () => db().from('profiles').update({ bnl_access: bnl }).eq('id', r.id));
+
+  const setBnlWrite = (r: AdminProfile, w: boolean) =>
+    run(r.id, async () => db().from('profiles').update({ bnl_write: w }).eq('id', r.id));
 
   const setYcAccess = (r: AdminProfile, yc: boolean) =>
     run(r.id, async () => db().from('profiles').update({ yc_access: yc }).eq('id', r.id));
@@ -205,6 +211,15 @@ export default function AdminUsers({
                   title="By-Name List contains real client names. Grant only to staff who need it."
                   onClick={() => setBnlAccess(r, !r.bnlAccess)}>
                   {r.bnlAccess ? 'Revoke BNL access' : 'Grant BNL access'}
+                </button>
+              )}
+              {/* Note-WRITING is a separate account-level grant (bnl_write.sql,
+                  user directive 2026-08-25) — only meaningful with BNL access. */}
+              {!r.isAdmin && r.status === 'approved' && r.bnlAccess && (
+                <button className={`tbtn${r.bnlWrite ? ' tbtn-on' : ''}`} disabled={busy === r.id}
+                  title="Whether this account may WRITE case notes on the By-Name List (all populations). Reading notes rides BNL access; writing is this switch."
+                  onClick={() => setBnlWrite(r, !r.bnlWrite)}>
+                  {r.bnlWrite ? 'Revoke notes' : 'Grant notes'}
                 </button>
               )}
               {!r.isAdmin && r.status === 'approved' && (

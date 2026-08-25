@@ -23,10 +23,13 @@ export default function WorklistNotes({ pid, name, onClose, onPosted }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Account-level write grant (bnl_write.sql) — the API says whether this
+  // account may write; the INSERT policy is the real boundary.
+  const [canWrite, setCanWrite] = useState(true);
   const load = () => {
     fetch(`/api/bnl/notes?pid=${encodeURIComponent(pid)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((j) => setNotes(j.notes ?? []))
+      .then((j) => { setNotes(j.notes ?? []); setCanWrite(j.canWrite !== false); })
       .catch(() => setErr('Could not load notes.'));
   };
   useEffect(load, [pid]);
@@ -54,15 +57,21 @@ export default function WorklistNotes({ pid, name, onClose, onPosted }: {
           {name} — shared with the By-Name List drawer (one thread per client)
         </div>
 
-        <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-          <textarea className="finput" rows={2} style={{ flex: 1, resize: 'vertical' }}
-            placeholder="What was decided / who is following up…"
-            value={body} onChange={(e) => setBody(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) post(); }} />
-          <button className="btn" disabled={!body.trim() || busy} onClick={post}>
-            {busy ? 'Saving…' : 'Add note'}
-          </button>
-        </div>
+        {canWrite ? (
+          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+            <textarea className="finput" rows={2} style={{ flex: 1, resize: 'vertical' }}
+              placeholder="What was decided / who is following up…"
+              value={body} onChange={(e) => setBody(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) post(); }} />
+            <button className="btn" disabled={!body.trim() || busy} onClick={post}>
+              {busy ? 'Saving…' : 'Add note'}
+            </button>
+          </div>
+        ) : (
+          <div className="bnl-sub" style={{ marginTop: 12 }}>
+            Notes are read-only for your account — an administrator can grant note-writing in Users.
+          </div>
+        )}
         {err && <div className="bnl-dq" style={{ marginTop: 8 }}>{err}</div>}
 
         <div style={{ marginTop: 14, display: 'grid', gap: 10, maxHeight: 320, overflowY: 'auto' }}>

@@ -50,12 +50,14 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 export default function BnlView({
   initialRows, initialTotal, agg, ceMilestones = null, isAdmin = false, projectOpts = [],
-  deepLinkPid = '',
+  deepLinkPid = '', canWriteNotes = true,
 }: { initialRows: BnlClient[]; initialTotal: number; agg: BnlAgg; ceMilestones?: CeMilestonesAgg | null; isAdmin?: boolean;
      projectOpts?: { id: number; name: string; type: string | null }[];
      /** ?pid= deep link (Youth Intake, worklists…): open this client's drawer
       *  over the default roster on load. */
-     deepLinkPid?: string }) {
+     deepLinkPid?: string;
+     /** account-level bnl_write grant (bnl_write.sql) — gates every composer */
+     canWriteNotes?: boolean }) {
   const [pop, setPop] = useState<PopKey>('all');
   const [q, setQ] = useState('');
   const [fStatus, setFStatus] = useState('');
@@ -551,7 +553,7 @@ export default function BnlView({
                       <><div>{r.ref_type} · <b>{r.ref_status}</b></div><div className="bnl-sub">{r.ref_date}{r.ref_prov ? ` · ${r.ref_prov}` : ''}</div></>
                     ) : <span className="bnl-sub">—</span>}</td>
                     <td style={{ maxWidth: 380, minWidth: 260, cursor: 'pointer' }}
-                      title="Click to add a quick note"
+                      title={canWriteNotes ? 'Click to add a quick note' : 'Click to view recent notes'}
                       onMouseEnter={(e) => {
                         if (noteEdit || !r.notes2?.length) return;
                         const rect = e.currentTarget.getBoundingClientRect();
@@ -560,6 +562,7 @@ export default function BnlView({
                       onMouseLeave={() => setNotePop(null)}
                       onClick={(e) => {
                         e.stopPropagation(); // the row itself opens the drawer
+                        if (!canWriteNotes && !r.notes2?.length) return; // nothing to view
                         const rect = e.currentTarget.getBoundingClientRect();
                         setNotePop(null);
                         setNoteBody(''); setNoteErr(null);
@@ -587,7 +590,9 @@ export default function BnlView({
                               </div>
                             );
                           })()
-                        : <span className="bnl-sub" style={{ opacity: 0.75 }}>＋ add note</span>}
+                        : canWriteNotes
+                          ? <span className="bnl-sub" style={{ opacity: 0.75 }}>＋ add note</span>
+                          : <span className="bnl-sub">—</span>}
                     </td>
                   </tr>
                 );
@@ -686,6 +691,12 @@ export default function BnlView({
                 {noteEdit.name} <span className="bnl-sub">· quick note</span>
               </div>
               {noteErr && <div className="lerror" role="alert" style={{ marginBottom: 8 }}>{noteErr}</div>}
+              {!canWriteNotes && (
+                <div className="bnl-sub" style={{ marginBottom: 8 }}>
+                  Notes are read-only for your account — an administrator can grant note-writing in Users.
+                </div>
+              )}
+              {canWriteNotes && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'flex-start' }}>
                 <textarea className="tinput" rows={2} autoFocus maxLength={4000}
                   style={{ flex: 1, resize: 'vertical' }} value={noteBody}
@@ -697,6 +708,7 @@ export default function BnlView({
                 <button className="btn primary" disabled={noteBusy || !noteBody.trim()}
                   onClick={saveQuickNote}>{noteBusy ? 'Saving…' : 'Add'}</button>
               </div>
+              )}
               {notes.map((n, i) => (
                 <div key={i} style={{ marginBottom: 8 }}>
                   <div className="bnl-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>

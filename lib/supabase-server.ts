@@ -59,6 +59,10 @@ export interface Viewer {
    * queries would come back empty.
    */
   canSeeBnl: boolean;
+  /** May WRITE BNL notes — account-level and separate from seeing the BNL
+   *  (user directive 2026-08-25). Admins always; non-admins need bnl_access
+   *  AND the bnl_write grant. Mirrors can_write_bnl_notes() SQL (bnl_write.sql). */
+  canWriteBnlNotes: boolean;
   /** May open Youth Connect (intake list, review queue, invites). Admins always
    *  qualify; non-admins via the `yc_access` grant. Mirrors can_see_yc() SQL. */
   canSeeYc: boolean;
@@ -100,6 +104,8 @@ export async function getViewer(): Promise<Viewer | null> {
     status,
     isApproved,
     canSeeBnl: isAdmin || (isApproved && Boolean(data?.bnl_access)),
+    canWriteBnlNotes: isAdmin
+      || (isApproved && Boolean(data?.bnl_access) && Boolean(data?.bnl_write)),
     canSeeYc: isAdmin || (isApproved && Boolean(data?.yc_access)),
     // TEMPORARY rollout lock (user directive 2026-08-20): Helpline is
     // limited to William Miranda ONLY while it's being shaped — the other

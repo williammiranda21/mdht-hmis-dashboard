@@ -36,12 +36,20 @@ export async function GET(req: Request) {
 
   // RLS returns an empty set (not an error) for users without BNL access.
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ notes: data ?? [] });
+  // canWrite rides along so every composer (drawer, quick note, worklists)
+  // self-gates without prop-drilling — the INSERT policy is the real boundary.
+  return NextResponse.json({ notes: data ?? [], canWrite: viewer.canWriteBnlNotes });
 }
 
 export async function POST(req: Request) {
   const viewer = await getViewer();
   if (!viewer) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!viewer.canWriteBnlNotes) {
+    return NextResponse.json(
+      { error: 'Notes are read-only for your account — ask an administrator for the BNL notes grant.' },
+      { status: 403 },
+    );
+  }
 
   let payload: { pid?: string; body?: string };
   try {

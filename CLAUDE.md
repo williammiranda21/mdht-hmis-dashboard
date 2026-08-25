@@ -404,6 +404,8 @@ Load half, in order (`py hmis-web/pipeline/<script>` — use SYSTEM `py`, the ro
 Skipping the load half leaves Supabase stale while local JSONs advance — the classic
 "which half ran" trap (§6). New SQL run-once files since 2026-07-31: `targets.sql`,
 `dq_snapshots.sql`, `user_dq.sql`, `cohorts.sql` (all already run in prod),
+`bnl_write.sql` (2026-08-25 — account-level BNL note-WRITING grant: profiles.bnl_write
++ can_write_bnl_notes() + INSERT policy swap; existing BNL users grandfathered),
 `youth_connect.sql` (2026-08-19 — Youth Connect: youth_intakes/intake_invites/
 client_index + profiles.yc_access + can_see_yc()),
 `last_seen.sql` (2026-08-20 — profiles.last_seen_at for the /api/seen

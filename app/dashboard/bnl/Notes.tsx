@@ -41,6 +41,10 @@ export default function Notes({ pid }: { pid: string }) {
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Account-level write grant (bnl_write.sql) — the API says whether this
+  // account may write; true until told otherwise so the composer doesn't
+  // flash away from grandfathered writers while loading.
+  const [canWrite, setCanWrite] = useState(true);
 
   useEffect(() => {
     let live = true;
@@ -48,7 +52,9 @@ export default function Notes({ pid }: { pid: string }) {
     setErr(null);
     fetch(`/api/bnl/notes?pid=${encodeURIComponent(pid)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((j: { notes: BnlNote[] }) => { if (live) setNotes(j.notes); })
+      .then((j: { notes: BnlNote[]; canWrite?: boolean }) => {
+        if (live) { setNotes(j.notes); setCanWrite(j.canWrite !== false); }
+      })
       .catch(() => { if (live) { setNotes([]); setErr('Could not load notes.'); } });
     return () => { live = false; };
   }, [pid]);
@@ -89,22 +95,30 @@ export default function Notes({ pid }: { pid: string }) {
         </span>
       </div>
 
-      <textarea
-        className="nc-input"
-        placeholder="Add a note — include what was observed or agreed, and any follow-up. Notes cannot be edited or deleted once saved."
-        value={body}
-        rows={3}
-        onChange={(e) => setBody(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(); }}
-      />
-      <div className="nc-actions">
-        <span className={`bnl-sub${over ? ' nc-over' : ''}`}>
-          {over ? `${body.length.toLocaleString()} / 4,000 — too long` : 'Ctrl+Enter to save · saved with your name and the date'}
-        </span>
-        <button className="nc-btn" onClick={submit} disabled={busy || !body.trim() || over}>
-          {busy ? 'Saving…' : 'Add note'}
-        </button>
-      </div>
+      {canWrite ? (
+        <>
+          <textarea
+            className="nc-input"
+            placeholder="Add a note — include what was observed or agreed, and any follow-up. Notes cannot be edited or deleted once saved."
+            value={body}
+            rows={3}
+            onChange={(e) => setBody(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(); }}
+          />
+          <div className="nc-actions">
+            <span className={`bnl-sub${over ? ' nc-over' : ''}`}>
+              {over ? `${body.length.toLocaleString()} / 4,000 — too long` : 'Ctrl+Enter to save · saved with your name and the date'}
+            </span>
+            <button className="nc-btn" onClick={submit} disabled={busy || !body.trim() || over}>
+              {busy ? 'Saving…' : 'Add note'}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="bnl-sub" style={{ padding: '4px 0 8px' }}>
+          Notes are read-only for your account — an administrator can grant note-writing in Users.
+        </div>
+      )}
       {err && <div className="nc-err">{err}</div>}
 
       {notes === null && <div className="hc-none">Loading notes…</div>}

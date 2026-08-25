@@ -96,6 +96,7 @@ export default async function BnlPage({ searchParams }: {
 
   return <BnlView initialRows={rows} initialTotal={pageRes.count ?? 0} agg={agg}
                   ceMilestones={ceMilestones} isAdmin={viewer.isAdmin}
+                  canWriteNotes={viewer.canWriteBnlNotes}
                   projectOpts={projectOpts}
                   deepLinkPid={(searchParams?.pid ?? '').trim()} />;
 }
