@@ -370,6 +370,10 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .bnl-table th.sorted{color:var(--secondary)}
 .bnl-table td{padding:9px 12px;border-bottom:1px solid var(--hair);vertical-align:middle}
 .bnl-table tbody tr{cursor:pointer} .bnl-table tbody tr:hover{background:var(--rowhover)}
+/* Helpline case tables: rows are tall multi-line cards, so the hairline reads
+   as one blur (user report 2026-08-25) — stronger separator + breathing room. */
+.hl-rows td{border-bottom:1px solid var(--border-strong);padding-top:12px;padding-bottom:12px}
+.hl-rows tbody tr:last-child td{border-bottom:0}
 .bnl-nm{font-weight:600;color:var(--strong)} .bnl-sub{font-size:11px;color:var(--muted)}
 .bnl-chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:700;white-space:nowrap;line-height:1.4}
 .bnl-chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}

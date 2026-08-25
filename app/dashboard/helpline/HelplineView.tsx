@@ -440,35 +440,41 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
 
   // Compact, wrapping control cluster — a nowrap one-liner here starved the
   // Caller column of the whole table's width (user report 2026-08-20).
+  // Two tidy rows, fixed width (user report 2026-08-25 "crowded"): the
+  // suggestion spans the top; select + Refer + icon-only Pin share one row.
   function AssignControls({ c }: { c: HlCase }) {
     const sug = suggestTeam(c, teams, openByTeam);
     return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end',
-        maxWidth: 260, marginLeft: 'auto' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 280,
+        marginLeft: 'auto', textAlign: 'left' }}>
         {sug && (
           <button className="btn primary" style={{ padding: '5px 12px', fontSize: 12,
-            maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
             disabled={busy} title={`Suggested: ${sug.why} — ${openByTeam.get(sug.team.id) ?? 0} open cases · full name: ${sug.team.name}`}
             onClick={() => assign(c, sug.team.id)}>
-            Assign → {sug.team.name.length > 22 ? `${sug.team.name.slice(0, 20)}…` : sug.team.name}
+            Assign → {sug.team.name.length > 26 ? `${sug.team.name.slice(0, 24)}…` : sug.team.name}
           </button>
         )}
-        <select className="fselect" aria-label="Assign to team" defaultValue=""
-          style={{ width: sug ? 118 : 150, padding: '5px 22px 5px 9px', fontSize: 12 }}
-          onChange={(e) => { if (e.target.value) assign(c, Number(e.target.value)); }}>
-          <option value="" disabled>{sug ? 'Other…' : 'Assign team…'}</option>
-          {teams.filter((x) => x.active).map((x) => (
-            <option key={x.id} value={x.id}>{x.name} ({openByTeam.get(x.id) ?? 0} open)</option>
-          ))}
-        </select>
-        <button className="tbtn" disabled={busy}
-          title="SOP refer-out (prevention · veterans · DV · youth · other-provider areas) — shows the script first"
-          onClick={() => setReferFor(c)}>↗ Refer</button>
-        {isAdmin && (
-          <button className="tbtn" disabled={busy}
-            title={c.pinned ? 'Unpin from the top of the queue' : 'Pin to the top of the queue — reason goes in the case log'}
-            onClick={() => togglePin(c)}>{c.pinned ? '📌 Unpin' : '📌 Pin'}</button>
-        )}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <select className="fselect" aria-label="Assign to team" defaultValue=""
+            style={{ flex: 1, minWidth: 0, padding: '5px 22px 5px 9px', fontSize: 12 }}
+            onChange={(e) => { if (e.target.value) assign(c, Number(e.target.value)); }}>
+            <option value="" disabled>{sug ? 'Other team…' : 'Assign team…'}</option>
+            {teams.filter((x) => x.active).map((x) => (
+              <option key={x.id} value={x.id}>{x.name} ({openByTeam.get(x.id) ?? 0} open)</option>
+            ))}
+          </select>
+          <button className="tbtn" disabled={busy} style={{ flexShrink: 0 }}
+            title="SOP refer-out (prevention · veterans · DV · youth · other-provider areas) — shows the script first"
+            onClick={() => setReferFor(c)}>↗ Refer</button>
+          {isAdmin && (
+            <button className="tbtn" disabled={busy}
+              style={{ flexShrink: 0, ...(c.pinned ? { borderColor: 'var(--warn)', color: 'var(--warn)' } : {}) }}
+              aria-label={c.pinned ? 'Unpin from the top of the queue' : 'Pin to the top of the queue'}
+              title={c.pinned ? 'Pinned — click to unpin' : 'Pin to the top of the queue — reason goes in the case log'}
+              onClick={() => togglePin(c)}>📌</button>
+          )}
+        </div>
       </div>
     );
   }
@@ -550,7 +556,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
           ) : null;
         })()}
         {triage.length > 0 && (
-          <div className="scroll"><table className="bnl-table">
+          <div className="scroll"><table className="bnl-table hl-rows">
             <thead><tr><th>Called</th><th>Caller</th><th>HMIS</th><th style={{ textAlign: 'right' }}>Assignment</th></tr></thead>
             <tbody>
               {[...triage.map((c) => ({ c, e: eff(c) }))]
@@ -609,7 +615,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
               })()}
               {team.dispatch ? ` · dispatch: ${team.dispatch}` : ''}</span>
             </div>
-            <div className="scroll"><table className="bnl-table">
+            <div className="scroll"><table className="bnl-table hl-rows">
               <thead><tr><th>Case</th><th>Status</th><th>Outreach trail</th>
                 <th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
@@ -721,7 +727,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
               <option value="gap">⚠ Enrollment gap</option>
             </select></div>
         </div>
-        <div className="scroll"><table className="bnl-table">
+        <div className="scroll"><table className="bnl-table hl-rows">
           <thead><tr>
             {([['name', 'Caller'], ['called', 'Called'], ['team', 'Team'], ['status', 'Status'],
                ['trail', 'Outreach trail'], ['enroll', 'Enrollment']] as const).map(([k, lbl]) => (
