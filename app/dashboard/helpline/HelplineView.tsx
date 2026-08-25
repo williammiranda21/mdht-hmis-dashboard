@@ -112,7 +112,18 @@ function statusDate(c: HlCase): string | null {
 }
 function ChipDated({ c }: { c: HlCase }) {
   const d = statusDate(c);
-  return <><Chip s={c.status} />{d && <div className="bnl-sub" style={{ marginTop: 2 }}>{d}</div>}</>;
+  return (
+    <>
+      <Chip s={c.status} />
+      {d && <div className="bnl-sub" style={{ marginTop: 2 }}>{d}</div>}
+      {c.status === 'referred_out' && c.referred_to && (
+        <div className="bnl-sub" style={{ marginTop: 2, maxWidth: 190, overflow: 'hidden',
+          textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`Referred to ${c.referred_to}`}>
+          → {c.referred_to}
+        </div>
+      )}
+    </>
+  );
 }
 
 const OPEN_STATUSES: CaseStatus[] = ['assigned', 'attempted', 'contacted'];
@@ -1006,15 +1017,44 @@ function Reporting({ cases, teams, events, callsByCase = {} }: {
         );
       })()}
       {(() => {
-        // SOP external referrals — the diversion tally by destination
+        // SOP external referrals — right-door diversion stats by destination
+        // (user report 2026-08-25: the one-line tally wasn't enough to "check
+        // stats"). Counts come from the loaded cases, same as the team table.
         const ro = cases.filter((c) => c.status === 'referred_out');
         if (!ro.length) return null;
-        const by = new Map<string, number>();
-        ro.forEach((c) => by.set(c.referred_to ?? '(unspecified)', (by.get(c.referred_to ?? '(unspecified)') ?? 0) + 1));
+        const now = Date.now();
+        const by = new Map<string, { total: number; d30: number; last: string }>();
+        for (const c of ro) {
+          const k = c.referred_to ?? '(unspecified)';
+          const e = by.get(k) ?? { total: 0, d30: 0, last: '' };
+          e.total += 1;
+          if (now - new Date(c.created_at).getTime() < 30 * 86_400_000) e.d30 += 1;
+          const d = c.created_at.slice(0, 10);
+          if (d > e.last) e.last = d;
+          by.set(k, e);
+        }
+        const refRows = [...by.entries()].sort((a, b) => b[1].total - a[1].total);
         return (
-          <div className="bnl-sub" style={{ padding: '0 18px 10px' }}>
-            ↗ External referrals: {[...by.entries()].sort((a, b) => b[1] - a[1])
-              .map(([k, v]) => `${k} — ${v}`).join(' · ')}
+          <div style={{ padding: '0 18px 12px' }}>
+            <div className="bnl-sub" style={{ fontWeight: 700, textTransform: 'uppercase',
+              letterSpacing: '.05em', margin: '2px 0 6px' }}>
+              ↗ External referrals — right-door diversions</div>
+            <table className="bnl-table" style={{ maxWidth: 660 }}>
+              <thead><tr>
+                <th>Destination</th><th className="num">Total</th>
+                <th className="num">Last 30d</th><th className="num">Most recent</th>
+              </tr></thead>
+              <tbody>
+                {refRows.map(([k, v]) => (
+                  <tr key={k} style={{ cursor: 'default' }}>
+                    <td>{k}</td>
+                    <td className="num">{fmtInt(v.total)}</td>
+                    <td className="num">{v.d30 ? fmtInt(v.d30) : <span className="bnl-sub">—</span>}</td>
+                    <td className="num">{v.last}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         );
       })()}
