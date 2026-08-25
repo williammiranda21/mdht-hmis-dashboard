@@ -227,7 +227,12 @@ export default function CallIntakeForm({ me }: { me: string }) {
   // In-page attach confirmation (user: no browser alert popups). Shows what
   // will attach, warns when the form is empty; the summary reads LIVE state,
   // so Go back → type notes → Confirm includes them.
-  const [confirmAttach, setConfirmAttach] = useState<{ p: PriorCase; reopen: boolean } | null>(null);
+  const [confirmAttach, setConfirmAttach] = useState<{
+    p: PriorCase;
+    /** attach = log only · reopen = closed case back to the board ·
+     *  outreach = CONFIRMED case back to the field (user ask 2026-08-25) */
+    mode: 'attach' | 'reopen';
+  } | null>(null);
   const [confirmNewCase, setConfirmNewCase] = useState(false);
   const [armCancel, setArmCancel] = useState(false);
   const attachPreview = (p: PriorCase): string[] => {
@@ -245,21 +250,37 @@ export default function CallIntakeForm({ me }: { me: string }) {
   };
 
   // open-case matches from every channel, deduped — labeled by WHAT matched
+  // Collapsed by default — a call is in progress; the summary line whispers
+  // and the full match list is opt-in (user: the banner was too intrusive).
+  const [dupOpen, setDupOpen] = useState(false);
+  // Match channels ranked by IDENTIFIER STRENGTH (user directive 2026-08-25):
+  // SSN-4 › name › DOB › phone. idHits pushes in that order so hits[0] is the
+  // strongest; the strongest match leads the summary line and is the one the
+  // save-guard's attach shortcut targets.
   const idHits = (p: PriorCase): string[] => {
     const hits: string[] = [];
     const fn = f.first_name.trim().toLowerCase(), ln = f.last_name.trim().toLowerCase();
+    if (/^\d{4}$/.test(f.ssn4) && p.ssn4 === f.ssn4) hits.push('SSN-4');
     if (fn && ln && (p.first_name ?? '').toLowerCase() === fn
       && (p.last_name ?? '').toLowerCase() === ln) hits.push('name');
     if (f.dob && p.dob === f.dob) hits.push('DOB');
-    if (/^\d{4}$/.test(f.ssn4) && p.ssn4 === f.ssn4) hits.push('SSN-4');
     return hits;
   };
-  const phoneOpen = prior.filter((p) => STILL_OPEN.includes(p.status));
-  const openMatches = [
-    ...phoneOpen.map((p) => ({ p, via: ['same number', ...idHits(p)].join(' + ') })),
-    ...priorName.filter((p) => !phoneOpen.some((q) => q.id === p.id))
-      .map((p) => ({ p, via: idHits(p).join(' + ') || 'possible match' })),
-  ];
+  const MATCH_RANK = ['SSN-4', 'name', 'DOB'];
+  const openMatches = (() => {
+    const phoneOpenIds = new Set(prior.filter((p) => STILL_OPEN.includes(p.status)).map((p) => p.id));
+    const seen = new Map<number, PriorCase>();
+    for (const p of prior) if (STILL_OPEN.includes(p.status)) seen.set(p.id, p);
+    for (const p of priorName) if (!seen.has(p.id)) seen.set(p.id, p);
+    return [...seen.values()]
+      .map((p) => {
+        const hits = idHits(p);
+        if (phoneOpenIds.has(p.id)) hits.push('same number');
+        const rank = hits.length && MATCH_RANK.includes(hits[0]) ? MATCH_RANK.indexOf(hits[0]) : 3;
+        return { p, via: hits.join(' + ') || 'possible match', rank };
+      })
+      .sort((a, b) => a.rank - b.rank || b.p.created_at.localeCompare(a.p.created_at));
+  })();
   // identifiers changed → any pending confirmations are stale
   const matchKey = openMatches.map((m) => m.p.id).join(',');
   useEffect(() => { setConfirmNewCase(false); setConfirmAttach(null); }, [matchKey]);
@@ -267,7 +288,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
   /** Automated duplicate handling (user pick 2026-08-20): the system tells
    *  the operator this number has an OPEN case and one click logs the new
    *  call (and any fresher location) onto it — no duplicate queue row. */
-  async function attachToCase(p: PriorCase, reopen = false) {
+  async function attachToCase(p: PriorCase, mode: 'attach' | 'reopen' | 'outreach' = 'attach') {
     if (busy) return;
     const locBits = [f.address.trim(), f.landmark.trim(),
       pin ? `pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''].filter(Boolean).join(' · ');
@@ -281,8 +302,10 @@ export default function CallIntakeForm({ me }: { me: string }) {
     const ev = await db.from('helpline_calls').insert({
       case_id: p.id, operator: me,
       kind: 'repeat', // a real incoming CALL — counts toward call volume
-      notes: (reopen
+      notes: (mode === 'reopen'
         ? 'Caller called again — case REOPENED, failed-attempt counter reset. '
+        : mode === 'outreach'
+        ? 'Caller called again — sent BACK TO OUTREACH from confirmed (confirmed-date history stays in this log); failed-attempt counter reset. '
         : `Repeat call${newNumber ? ` from a different number (${newNumber})` : ' (same number)'}. `)
         + (f.notes.trim() || 'No new information given.')
         + (locBits ? ` — location now: ${locBits}` : ''),
@@ -296,7 +319,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
       if (pin) { patch.lat = pin.lat; patch.lng = pin.lng; }
       if (countyDist) patch.county_district = countyDist;
       if (newNumber) patch.phone_callback = newNumber; // reach them at the NEW number
-      if (reopen) {
+      if (mode === 'reopen' || mode === 'outreach') {
         // back to its team (or triage) with a FRESH 3-strike clock — the
         // dated ✗ history stays in the log; without the reset, one more
         // failed try would instantly re-close a reopened case
@@ -421,63 +444,72 @@ export default function CallIntakeForm({ me }: { me: string }) {
               placeholder="“But reach me at…”" onChange={(e) => set('phone_callback')(e.target.value)} />
           </div>
         </div>
-        {openMatches.length > 0 && (
-          <div style={{ background: 'var(--danger-light)', border: '1px solid var(--danger)',
-            borderRadius: 8, padding: '10px 13px', fontSize: 12.5, margin: '10px 0 0' }}>
-            <b style={{ color: 'var(--danger)' }}>⚠ This caller may already have an open case</b>
-            {openMatches.map(({ p, via }) => (
-              <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center',
-                flexWrap: 'wrap', marginTop: 6 }}>
-                <span>#{p.id} <b>{[p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous'}</b>
-                  {' '}· {p.status}
-                  {p.team_id != null && teams.find((t) => t.id === p.team_id)
-                    ? ` · ${teams.find((t) => t.id === p.team_id)!.name}` : ''}
-                  {p.area ? ` · ${p.area}` : ''}
-                  {p.dob ? ` · DOB ${p.dob}` : ''}
-                  {' '}<span className="bnl-fp bnl-fp-sch">{via}</span></span>
-                <button className="btn primary" type="button" style={{ padding: '4px 12px', fontSize: 12 }}
-                  disabled={busy} onClick={() => setConfirmAttach({ p, reopen: false })}>
-                  Log this call on case #{p.id}</button>
-              </div>
-            ))}
-            <div className="bnl-sub" style={{ marginTop: 6 }}>
-              Adds these notes, any new location, AND the new number to the open case — no
-              duplicate is created. Verify identity on the call (DOB shown when known); a
-              different person → save a new call below as usual.
-            </div>
-          </div>
-        )}
-        {prior.some((p) => !STILL_OPEN.includes(p.status)) && (
-          <div style={{ background: 'var(--primary-soft)', border: '1px solid var(--primary-light)',
-            borderRadius: 8, padding: '9px 13px', fontSize: 12.5, margin: '10px 0 0' }}>
-            ☎ This number has called before:
-            {prior.filter((p) => !STILL_OPEN.includes(p.status)).map((p) => (
-              <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center',
-                flexWrap: 'wrap', marginTop: 5 }}>
-                <span>
-                  <b>{[p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous'}</b>
-                  {' '}({new Date(p.created_at).toLocaleDateString()}, {p.status}
-                  {p.area ? `, ${p.area}` : ''})
+        {(openMatches.length > 0 || prior.some((p) => !STILL_OPEN.includes(p.status))) && (() => {
+          const closed = prior.filter((p) => !STILL_OPEN.includes(p.status));
+          const top = openMatches[0];
+          const nm = (p: PriorCase) => [p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous';
+          return (
+            <div style={{ margin: '10px 0 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5,
+                background: top ? 'var(--info-light)' : 'var(--primary-soft)',
+                border: `1px solid ${top ? 'var(--info)' : 'var(--primary-light)'}`,
+                borderRadius: dupOpen ? '8px 8px 0 0' : 8, padding: '5px 11px' }}>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {top
+                    ? <>🔎 Possible existing case: <b>#{top.p.id} {nm(top.p)}</b>
+                        <span className="bnl-sub"> · {top.via} · {top.p.status}
+                        {openMatches.length > 1 ? ` · +${openMatches.length - 1} more` : ''}</span></>
+                    : <>☎ Called before <span className="bnl-sub">· {closed.length} earlier
+                        case{closed.length === 1 ? '' : 's'}, all closed</span></>}
                 </span>
-                <button className="tbtn" type="button" style={{ padding: '3px 10px', fontSize: 12 }}
-                  disabled={busy}
-                  title="Same person calling again? Reopen the closed case — it returns to its team (or the queue) with a fresh attempt counter, and these notes attach to it"
-                  onClick={() => setConfirmAttach({ p, reopen: true })}>
-                  Reopen #{p.id} + log this call</button>
+                <button className="tbtn" type="button" style={{ padding: '2px 10px', fontSize: 12 }}
+                  onClick={() => setDupOpen(!dupOpen)}>{dupOpen ? 'Hide' : 'Review'}</button>
               </div>
-            ))}
-            <div className="bnl-sub" style={{ marginTop: 5 }}>
-              A shared phone isn&rsquo;t proof of identity; confirm on the call. Different person →
-              save a new call below as usual.
+              {dupOpen && (
+                <div style={{ border: '1px solid var(--border-strong)', borderTop: 0,
+                  borderRadius: '0 0 8px 8px', padding: '8px 12px', fontSize: 12.5,
+                  background: 'var(--card)' }}>
+                  {openMatches.map(({ p, via }) => (
+                    <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center',
+                      flexWrap: 'wrap', padding: '4px 0' }}>
+                      <span>#{p.id} <b>{nm(p)}</b> · {p.status}
+                        {p.team_id != null && teams.find((t) => t.id === p.team_id)
+                          ? ` · ${teams.find((t) => t.id === p.team_id)!.name}` : ''}
+                        {p.area ? ` · ${p.area}` : ''}{p.dob ? ` · DOB ${p.dob}` : ''}
+                        {' '}<span className="bnl-fp bnl-fp-sch">{via}</span></span>
+                      <button className="btn primary" type="button" style={{ padding: '3px 11px', fontSize: 12 }}
+                        disabled={busy} onClick={() => setConfirmAttach({ p, mode: 'attach' })}>
+                        Log this call on #{p.id}</button>
+                    </div>
+                  ))}
+                  {closed.map((p) => (
+                    <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center',
+                      flexWrap: 'wrap', padding: '4px 0' }}>
+                      <span className="bnl-sub">#{p.id} <b style={{ color: 'var(--text)' }}>{nm(p)}</b>
+                        {' '}· {new Date(p.created_at).toLocaleDateString()} · {p.status}
+                        {p.area ? ` · ${p.area}` : ''}</span>
+                      <button className="tbtn" type="button" style={{ padding: '2px 10px', fontSize: 12 }}
+                        disabled={busy}
+                        title="Same person calling again? Returns the case to its team (or the queue) with a fresh attempt counter; these notes attach to it"
+                        onClick={() => setConfirmAttach({ p, mode: 'reopen' })}>
+                        Reopen #{p.id} + log call</button>
+                    </div>
+                  ))}
+                  <div className="bnl-sub" style={{ marginTop: 4 }}>
+                    Attaching adds the notes, fresher location, and new number — no duplicate.
+                    A shared phone isn&rsquo;t proof of identity; a different person → just save a new call.
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {confirmAttach && (
           <div style={{ background: 'var(--info-light)', border: '1px solid var(--info)',
             borderRadius: 8, padding: '10px 13px', fontSize: 12.5, margin: '10px 0 0' }}>
             <b style={{ color: 'var(--strong)' }}>
-              {confirmAttach.reopen
+              {confirmAttach.mode === 'reopen'
                 ? `Reopen case #${confirmAttach.p.id} and log this call?`
                 : `Log this call on open case #${confirmAttach.p.id}?`}</b>
             {attachPreview(confirmAttach.p).length > 0
@@ -493,9 +525,20 @@ export default function CallIntakeForm({ me }: { me: string }) {
                 onClick={() => {
                   const a = confirmAttach;
                   setConfirmAttach(null);
-                  if (a) attachToCase(a.p, a.reopen);
+                  if (a) attachToCase(a.p, a.mode);
                 }}>
-                {confirmAttach.reopen ? 'Confirm — reopen + log call' : 'Confirm — log call'}</button>
+                {confirmAttach.mode === 'reopen' ? 'Confirm — reopen + log call' : 'Confirm — log call'}</button>
+              {confirmAttach.mode === 'attach' && confirmAttach.p.status === 'confirmed' && (
+                <button className="btn primary" type="button" disabled={busy}
+                  style={{ background: 'var(--info)' }}
+                  title="They're confirmed but outreach needs to come back — moved, situation changed, enrollment stalled. Returns the case to its team (or the queue) with a fresh attempt counter; the confirmed history stays in the log."
+                  onClick={() => {
+                    const a = confirmAttach;
+                    setConfirmAttach(null);
+                    if (a) attachToCase(a.p, 'outreach');
+                  }}>
+                  Log call + send back to outreach</button>
+              )}
               <button className="tbtn" type="button" onClick={() => setConfirmAttach(null)}>← Go back</button>
             </div>
           </div>
@@ -644,7 +687,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
             <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               <button className="btn primary" type="button" disabled={busy}
                 style={{ background: 'var(--info)' }}
-                onClick={() => { setConfirmNewCase(false); setConfirmAttach({ p: openMatches[0].p, reopen: false }); }}>
+                onClick={() => { setConfirmNewCase(false); setConfirmAttach({ p: openMatches[0].p, mode: 'attach' }); }}>
                 Attach to #{openMatches[0].p.id} instead</button>
               <button className="btn primary" type="button" disabled={busy}
                 style={{ background: 'var(--accent)' }}
