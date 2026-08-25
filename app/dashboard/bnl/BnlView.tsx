@@ -341,7 +341,9 @@ export default function BnlView({
                 (user-approved mockup 2026-08-11). All populations regardless
                 of the selector; lower is faster; green ▼ = latest quarter
                 faster than the prior one. Quarters with no completed pairs
-                are gaps, not zeros. */}
+                are gaps, not zeros. Avg shown beside the median (user
+                2026-08-25): accepted→movein medians pin at 0 because >half
+                of housing enrollments are created on move-in day. */}
             {(ceMilestones.trend?.length ?? 0) >= 2 && (() => {
               const tr = ceMilestones.trend!;
               const legPairs = ord.slice(0, -1).map((a, i) =>
@@ -357,8 +359,8 @@ export default function BnlView({
                     {cards.map(([k, lbl]) => {
                       const isE2E = k === e2eKey;
                       const pts = tr
-                        .map((t) => ({ q: t.q, n: t.legs[k]?.n ?? 0, median: t.legs[k]?.median ?? null }))
-                        .filter((p): p is { q: string; n: number; median: number } => p.median != null);
+                        .map((t) => ({ q: t.q, n: t.legs[k]?.n ?? 0, median: t.legs[k]?.median ?? null, mean: t.legs[k]?.mean ?? null }))
+                        .filter((p): p is { q: string; n: number; median: number; mean: number | null } => p.median != null);
                       const base = {
                         flex: isE2E ? 1.2 : 1, minWidth: isE2E ? 132 : 118,
                         border: `1px solid ${isE2E ? 'var(--primary)' : 'rgba(148,163,184,0.2)'}`,
@@ -383,13 +385,16 @@ export default function BnlView({
                       const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.median).toFixed(1)}`).join(' ');
                       return (
                         <div key={k} style={base}
-                          title={pts.map((p) => `${p.q}: median ${Math.round(p.median)}d (n=${p.n})`).join('\n')}>
+                          title={pts.map((p) => `${p.q}: median ${Math.round(p.median)}d${p.mean != null ? ` · avg ${Math.round(p.mean)}d` : ''} (n=${p.n})`).join('\n')}>
                           <div style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lbl}</div>
-                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, margin: '2px 0 4px' }}>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, margin: '2px 0 0' }}>
                             <span style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{Math.round(last.median)}d</span>
                             <span style={{ fontSize: 10.5, color: col, whiteSpace: 'nowrap' }}>
                               {d < 0 ? `▼ ${Math.abs(Math.round(d))}d faster` : d > 0 ? `▲ ${Math.round(d)}d slower` : '— flat'}
                             </span>
+                          </div>
+                          <div style={{ fontSize: 10.5, color: 'var(--muted)', margin: '0 0 4px', minHeight: 14 }}>
+                            {last.mean != null ? `avg ${Math.round(last.mean)}d` : ''}
                           </div>
                           <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: H, display: 'block' }} aria-hidden="true">
                             <polyline points={line} fill="none" stroke={col} strokeWidth={1.8}

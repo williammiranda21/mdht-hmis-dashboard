@@ -153,7 +153,7 @@ export interface CeMilestonesAgg {
   }>;
   /** per-leg medians by MOVE-IN fiscal quarter (all populations, trailing
    *  24 months) — the "is the system getting faster?" trend strip. */
-  trend?: { q: string; legs: Record<string, { n: number; median: number | null }> }[];
+  trend?: { q: string; legs: Record<string, { n: number; median: number | null; mean?: number | null }> }[];
 }
 
 /**
