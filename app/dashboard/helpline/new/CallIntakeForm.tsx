@@ -279,8 +279,17 @@ export default function CallIntakeForm({ me }: { me: string }) {
         const rank = hits.length && MATCH_RANK.includes(hits[0]) ? MATCH_RANK.indexOf(hits[0]) : 3;
         return { p, via: hits.join(' + ') || 'possible match', rank };
       })
+      // A phone number ALONE is too weak to suggest a match — shared and
+      // recycled phones invite wrong-case attaches (user directive
+      // 2026-08-25). Phone only ever corroborates a real identifier; the
+      // phone-only open cases still show as neutral context under Review.
+      .filter((m) => m.via !== 'same number')
       .sort((a, b) => a.rank - b.rank || b.p.created_at.localeCompare(a.p.created_at));
   })();
+  /** open cases sharing the number but with NO identity agreement — context
+   *  only, never a suggestion */
+  const phoneOnlyOpen = prior.filter((p) =>
+    STILL_OPEN.includes(p.status) && idHits(p).length === 0);
   // identifiers changed → any pending confirmations are stale
   const matchKey = openMatches.map((m) => m.p.id).join(',');
   useEffect(() => { setConfirmNewCase(false); setConfirmAttach(null); }, [matchKey]);
@@ -444,9 +453,11 @@ export default function CallIntakeForm({ me }: { me: string }) {
               placeholder="“But reach me at…”" onChange={(e) => set('phone_callback')(e.target.value)} />
           </div>
         </div>
-        {(openMatches.length > 0 || prior.some((p) => !STILL_OPEN.includes(p.status))) && (() => {
+        {(openMatches.length > 0 || phoneOnlyOpen.length > 0
+          || prior.some((p) => !STILL_OPEN.includes(p.status))) && (() => {
           const closed = prior.filter((p) => !STILL_OPEN.includes(p.status));
           const top = openMatches[0];
+          const ctxN = closed.length + phoneOnlyOpen.length;
           const nm = (p: PriorCase) => [p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous';
           return (
             <div style={{ margin: '10px 0 0' }}>
@@ -459,8 +470,8 @@ export default function CallIntakeForm({ me }: { me: string }) {
                     ? <>🔎 Possible existing case: <b>#{top.p.id} {nm(top.p)}</b>
                         <span className="bnl-sub"> · {top.via} · {top.p.status}
                         {openMatches.length > 1 ? ` · +${openMatches.length - 1} more` : ''}</span></>
-                    : <>☎ Called before <span className="bnl-sub">· {closed.length} earlier
-                        case{closed.length === 1 ? '' : 's'}, all closed</span></>}
+                    : <>☎ Number called before <span className="bnl-sub">· {ctxN} earlier
+                        case{ctxN === 1 ? '' : 's'} from this number</span></>}
                 </span>
                 <button className="tbtn" type="button" style={{ padding: '2px 10px', fontSize: 12 }}
                   onClick={() => setDupOpen(!dupOpen)}>{dupOpen ? 'Hide' : 'Review'}</button>
@@ -480,6 +491,13 @@ export default function CallIntakeForm({ me }: { me: string }) {
                       <button className="btn primary" type="button" style={{ padding: '3px 11px', fontSize: 12 }}
                         disabled={busy} onClick={() => setConfirmAttach({ p, mode: 'attach' })}>
                         Log this call on #{p.id}</button>
+                    </div>
+                  ))}
+                  {phoneOnlyOpen.map((p) => (
+                    <div key={p.id} style={{ padding: '4px 0' }}>
+                      <span className="bnl-sub">#{p.id} <b style={{ color: 'var(--text)' }}>{nm(p)}</b>
+                        {' '}· {p.status} · same number only — not treated as a match; it
+                        becomes one if SSN-4, name, or DOB agree</span>
                     </div>
                   ))}
                   {closed.map((p) => (
