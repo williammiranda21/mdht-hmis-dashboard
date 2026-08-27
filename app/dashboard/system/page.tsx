@@ -29,8 +29,14 @@ export default async function SystemPerformancePage({
     return <div className="panel"><div className="empty">No system performance data found.</div></div>;
   }
 
-  const [combos, monthlyAll, sysReturns] = await Promise.all([
+  // Prior period of the SAME granularity (periods are newest-first) — drives
+  // the period-over-period delta on every card (user 2026-08-27: deltas were
+  // monthly-only because prev came from the monthly series alone).
+  const prevPeriod = periods[periods.indexOf(period) + 1] ?? null;
+
+  const [combos, prevCombos, monthlyAll, sysReturns] = await Promise.all([
     getSystemPeriodCombos(granularity, period),
+    prevPeriod ? getSystemPeriodCombos(granularity, prevPeriod) : Promise.resolve([]),
     getSystemMonthlyAllSeries(),
     getSystemReturns(),
   ]);
@@ -40,8 +46,10 @@ export default async function SystemPerformancePage({
       periods={periods}
       granularity={granularity}
       period={period}
+      prevPeriod={prevPeriod}
       household={household}
       combos={combos}
+      prevCombos={prevCombos}
       monthlyAll={monthlyAll}
       sysReturns={sysReturns}
     />

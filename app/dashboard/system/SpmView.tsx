@@ -8,7 +8,10 @@
  *
  * Conventions matched exactly:
  *  - Card value uses the selected household (subpop fixed 'All'): combos[hh|All].
- *  - 12-month average + prior-period delta come from the All|All MONTHLY series.
+ *  - 12-month average comes from the All|All MONTHLY series.
+ *  - Period-over-period delta compares the PRIOR PERIOD OF THE SELECTED
+ *    GRANULARITY (month/quarter/FY), same household slice (prevCombos) —
+ *    2026-08-27: was monthly-only and All|All-only before.
  *  - M2 returns aggregate at household 'All', subpop 'All' (meta.sys_returns).
  *  - Heatmap: Clients, M5_FirstTime, M1a_AvgLOS_ESSTH, M7b1_PHRate, M7a_Rate,
  *    M7b2_Rate, 2-yr return rate (Σ Returns2yr / Σ TotalPHExits per subpop).
@@ -26,8 +29,12 @@ type Props = {
   periods: string[];
   granularity: Granularity;
   period: string;
+  /** prior period of the SAME granularity (null on the earliest period) */
+  prevPeriod: string | null;
   household: string;
   combos: SystemCombo[];
+  /** combos for prevPeriod — the period-over-period delta source */
+  prevCombos: SystemCombo[];
   monthlyAll: Record<string, SysRec>;
   sysReturns: Record<string, Record<string, ReturnsBucket>>;
 };
@@ -82,7 +89,7 @@ function Gauge({ valP, avgP, tgtP, avgL, tgtL }: { valP: number; avgP: number; t
   );
 }
 
-function CardView({ c }: { c: Card }) {
+function CardView({ c, dt }: { c: Card; dt?: string }) {
   if (c.val == null) return null;
   const isPct = c.suf === '%';
   let d: number | null = null;
@@ -109,7 +116,7 @@ function CardView({ c }: { c: Card }) {
             <div className="pc-val">{isPct ? c.val : fmt(c.val)}<span className="suf">{c.suf || ''}</span></div>
             {d != null && (
               <div className={`pc-delta ${dgood ? 'good' : 'bad'}`}>
-                {d < 0 ? '▼' : '▲'} {Math.abs(d)}{c.deltaUnit || '%'} <span className="mut">{c.deltaText || 'vs prior'}</span>
+                {d < 0 ? '▼' : '▲'} {Math.abs(d)}{c.deltaUnit || '%'} <span className="mut">{c.deltaText || dt || 'vs prior'}</span>
               </div>
             )}
           </div>
@@ -140,18 +147,24 @@ function CardView({ c }: { c: Card }) {
   );
 }
 
-export default function SpmView({ periods, granularity, period, household, combos, monthlyAll, sysReturns }: Props) {
+export default function SpmView({ periods, granularity, period, prevPeriod, household, combos, prevCombos, monthlyAll, sysReturns }: Props) {
   const router = useRouter();
 
   const byKey: Record<string, SysRec> = {};
   combos.forEach((c) => { byKey[`${c.household_type}|${c.subpopulation}`] = c.data as SysRec; });
   const e = byKey[`${household}|All`] || byKey['All|All'];
 
-  // 12-month trailing window + prior period, both on the All|All MONTHLY series.
+  // 12-month trailing window on the All|All MONTHLY series (the avg marker).
   const mk = Object.keys(monthlyAll).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
   const idx = mk.indexOf(period);
   const recent = idx < 0 ? mk.slice(-12) : mk.slice(Math.max(0, idx - 11), idx + 1);
-  const prev = idx > 0 ? monthlyAll[mk[idx - 1]] : null;
+  // Period-over-period: prior period of the SELECTED granularity, same
+  // household slice — so quarterly and fiscal views get deltas too.
+  const prevByKey: Record<string, SysRec> = {};
+  prevCombos.forEach((c) => { prevByKey[`${c.household_type}|${c.subpopulation}`] = c.data as SysRec; });
+  const prev = prevByKey[`${household}|All`] || prevByKey['All|All'] || null;
+  const deltaLabel = granularity === 'monthly' ? 'vs prior month'
+    : granularity === 'quarterly' ? 'vs prior quarter' : 'vs prior FY';
   const avgOf = (f: string): number | null => {
     const vs = recent.map((k) => monthlyAll[k]?.[f]).filter((v): v is number => v != null);
     return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
@@ -173,6 +186,11 @@ export default function SpmView({ periods, granularity, period, household, combo
   const rb = sysReturns[period]?.['All'];
   const rExit = rb?.exits || 0;
   const rate = (v: number) => (rExit > 0 ? +((v / rExit) * 100).toFixed(1) : 0);
+  // prior-period return rates, for the same period-over-period delta the
+  // other cards carry (user 2026-08-27)
+  const prb = prevPeriod ? sysReturns[prevPeriod]?.['All'] : null;
+  const prevRate = (f: (b: ReturnsBucket) => number): number | null =>
+    prb && prb.exits > 0 ? +((f(prb) / prb.exits) * 100).toFixed(1) : null;
   const ret24 = rExit > 0 && rb ? +((rb.r2 / rExit) * 100).toFixed(1) : null;
   const ret24avg = (() => {
     const xs = recent.map((k) => {
@@ -211,13 +229,17 @@ export default function SpmView({ periods, granularity, period, household, combo
       { icon: 'home', tag: 'M7', title: 'Total PH exits', vlabel: 'SO/ES/TH/SH/PSH/RRH → PH', val: num('M_AllPHExits'), avg: avgOf('M_AllPHExits'), prev: prev?.M_AllPHExits, deltaMode: 'pct', gl: 'to permanent housing', gr: `<b>${(num('M_AllPHExits') || 0).toLocaleString()}</b> clients` },
       { icon: 'home', tag: '7b.1', title: '7b.1 PH exits', vlabel: 'ES/TH/SH/RRH leavers → PH', val: num('M7b1_PHExits'), avg: avgOf('M7b1_PHExits'), prev: prev?.M7b1_PHExits, deltaMode: 'pct', gl: `of ${num('M7b1_Denom') || 0} leavers`, gr: `<b>${num('M7b1_PHExits') || 0}</b> exits` },
       { icon: 'pct', tag: '7b.1', title: '7b.1 PH exit rate', vlabel: 'ES/TH/SH/RRH leavers → PH', val: num('M7b1_PHRate'), suf: '%', avg: avgOf('M7b1_PHRate'), prev: prev?.M7b1_PHRate, deltaMode: 'pts', deltaUnit: 'pts', target: 50, gl: 'PH exit rate', gr: `<b>${num('M7b1_PHExits') || 0}</b> of ${num('M7b1_Denom') || 0}` },
-      { icon: 'key', tag: '7b.1', title: '7b.1 unsubsidized rate', vlabel: 'ES/TH/SH/RRH → own income', val: num('M7b1_UnsubRate'), suf: '%', avg: avgOf('M7b1_UnsubRate'), prev: prev?.M7b1_UnsubRate, deltaMode: 'pts', deltaUnit: 'pts', gl: 'unsubsidized', gr: `<b>${num('M7b1_UnsubExits') || 0}</b> of ${num('M7b1_Denom') || 0}` },
+      // HUD NOFO threshold, NOT a formal SPM (user correction 2026-08-27 —
+      // previously mislabeled 7b.1 and rode the ES/TH/SH/RRH universe):
+      // "% of participants who exited TH/RRH/PSH collectively to
+      // unsubsidized housing" (destinations 410/411).
+      { icon: 'key', tag: 'NOFO', title: 'Unsubsidized exit rate', vlabel: 'TH/RRH/PSH → unsubsidized', val: num('NOFO_UnsubRate'), suf: '%', avg: avgOf('NOFO_UnsubRate'), prev: prev?.NOFO_UnsubRate, deltaMode: 'pts', deltaUnit: 'pts', gl: 'unsubsidized', gr: `<b>${num('NOFO_UnsubExits') || 0}</b> of ${num('NOFO_UnsubDenom') || 0}` },
       { icon: 'flag', tag: '7a.1', title: '7a SO success rate', vlabel: 'SO leavers → positive dest.', val: num('M7a_Rate'), suf: '%', avg: avgOf('M7a_Rate'), prev: prev?.M7a_Rate, deltaMode: 'pts', deltaUnit: 'pts', gl: 'positive exits', gr: `<b>${num('M7a_Positive') || 0}</b> of ${num('M7a_Denom') || 0}` },
       { icon: 'star', tag: '7b.2', title: '7b.2 PH retention', vlabel: 'PSH/PH-HO/HwS w/ move-in', val: num('M7b2_Rate'), suf: '%', avg: avgOf('M7b2_Rate'), prev: prev?.M7b2_Rate, deltaMode: 'pts', deltaUnit: 'pts', target: 95, gl: 'stayed / re-housed', gr: `<b>${(num('M7b2_Retained') || 0).toLocaleString()}</b> of ${(num('M7b2_Universe') || 0).toLocaleString()}` },
     ]],
     ['Returns to homelessness (M2)', [
-      { icon: 'ret', tag: 'M2', title: 'Return rate < 6 mo', vlabel: 'Within 180 days of PH exit', val: rb ? rate(rb.lt6) : null, suf: '%', scale: 40, target: 20, tgtL: 'flag 20%', lowerBetter: true, gl: 'early returns', gr: `<b>${(rb?.lt6 || 0).toLocaleString()}</b> returns` },
-      { icon: 'ret', tag: 'M2', title: '2-yr return rate', vlabel: 'Within 2 years of PH exit', val: ret24, avg: ret24avg, suf: '%', scale: 40, target: 20, tgtL: 'flag 20%', lowerBetter: true, gl: '2-yr return rate', gr: `<b>${(rb?.r2 || 0).toLocaleString()}</b> of ${rExit.toLocaleString()}`, secTitle: 'By time since exit', rowsLowerBetter: true, rows: rb ? [
+      { icon: 'ret', tag: 'M2', title: 'Return rate < 6 mo', vlabel: 'Within 180 days of PH exit', val: rb ? rate(rb.lt6) : null, suf: '%', prev: prevRate((b) => b.lt6), deltaMode: 'pts', deltaUnit: 'pts', scale: 40, target: 20, tgtL: 'flag 20%', lowerBetter: true, gl: 'early returns', gr: `<b>${(rb?.lt6 || 0).toLocaleString()}</b> returns` },
+      { icon: 'ret', tag: 'M2', title: '2-yr return rate', vlabel: 'Within 2 years of PH exit', val: ret24, avg: ret24avg, suf: '%', prev: prevRate((b) => b.r2), deltaMode: 'pts', deltaUnit: 'pts', scale: 40, target: 20, tgtL: 'flag 20%', lowerBetter: true, gl: '2-yr return rate', gr: `<b>${(rb?.r2 || 0).toLocaleString()}</b> of ${rExit.toLocaleString()}`, secTitle: 'By time since exit', rowsLowerBetter: true, rows: rb ? [
         { n: 'Within 6 months', of: `${rb.lt6.toLocaleString()} returns`, v: rate(rb.lt6), pct: true },
         { n: '6–12 months', of: `${rb.r6.toLocaleString()} returns`, v: rate(rb.r6), pct: true },
         { n: '13–24 months', of: `${rb.r13.toLocaleString()} returns`, v: rate(rb.r13), pct: true },
@@ -272,7 +294,7 @@ export default function SpmView({ periods, granularity, period, household, combo
         <div key={label}>
           <div className="grouplabel">{label}</div>
           <div className="spmgrid">
-            {cards.map((c, i) => <CardView key={i} c={c} />)}
+            {cards.map((c, i) => <CardView key={i} c={c} dt={deltaLabel} />)}
           </div>
         </div>
       ))}
