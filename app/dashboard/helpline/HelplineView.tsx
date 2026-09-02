@@ -110,11 +110,30 @@ function statusDate(c: HlCase): string | null {
     default: return null;
   }
 }
+/** Days since a date-ish string; null when absent/unparseable. */
+function daysSince(s: string | null): number | null {
+  if (!s) return null;
+  const t = new Date(s.length <= 10 ? `${s}T00:00:00` : s).getTime();
+  return Number.isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+
 function ChipDated({ c }: { c: HlCase }) {
   const d = statusDate(c);
+  // "How long has this client been sitting here?" (user 2026-09-02) — days
+  // since the CALL came in, shown until outreach reaches them. Amber at 3d,
+  // red at 7d. Once contacted the waiting question is answered, so it hides.
+  const wait = (c.contacts ?? 0) === 0 && (c.status === 'assigned' || c.status === 'attempted')
+    ? daysSince(c.created_at) : null;
+  const wc = wait == null ? null : wait >= 7 ? 'var(--danger)' : wait >= 3 ? 'var(--warn)' : 'var(--muted)';
   return (
     <>
       <Chip s={c.status} />
+      {wait != null && (
+        <div style={{ marginTop: 3, fontSize: 11, fontWeight: 700, color: wc! }}
+          title={`Called ${c.created_at.slice(0, 10)} — no successful contact yet`}>
+          ⏳ waiting {wait === 0 ? '<1' : wait}d
+        </div>
+      )}
       {d && <div className="bnl-sub" style={{ marginTop: 2 }}>{d}</div>}
       {c.status === 'referred_out' && c.referred_to && (
         <div className="bnl-sub" style={{ marginTop: 2, maxWidth: 190, overflow: 'hidden',
