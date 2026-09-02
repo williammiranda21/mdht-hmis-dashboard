@@ -41,8 +41,12 @@ const ELEMENTS = [
   { key: 'psd', label: 'Overlapping or impossible project stays',
     fix: 'This client has a stay that starts before an earlier stay in the same project ended, or an exit dated before its entry. Correct the entry/exit dates so the stays don’t overlap.',
     denomKey: 'DQ_ActiveTotal' },
-  { key: 'relhoh', label: 'Household has no (or multiple) heads of household',
-    fix: 'Every household needs exactly one member with Relationship to HoH = Self. Fix the relationship values for the listed household members.',
+  // ONE household section (user 2026-09-02): this Q6b element's mask already
+  // covers all three failure modes — no head, multiple heads, and missing/
+  // invalid relationship — so the Eva household checks (ids 2/3/4) fold their
+  // records in here instead of rendering as separate near-duplicate cards.
+  { key: 'relhoh', label: 'Household head missing, duplicated, or relationship not set',
+    fix: 'Every household needs exactly one member with Relationship to Head of Household = "Self". Set Self on the true head (usually the adult who did intake), change any extra "Self" members to their actual relationship (spouse, child, other), and fill in any member whose relationship is blank or "data not collected".',
     denomKey: 'DQ_ActiveTotal' },
   { key: 'coc', label: 'Enrollment CoC missing or invalid',
     fix: 'Record the Enrollment CoC (FL-600) on the head of household’s enrollment at project start.',
@@ -75,6 +79,10 @@ const ELEMENTS = [
 ] as const;
 
 interface DetailRow { pid: string; entry: string | null; eid?: string | null }
+
+/** Eva household-integrity checks folded into the Q6b card: 2 = no head,
+ *  3 = multiple heads, 4 = relationship missing. */
+const HH_EVA_IDS = new Set(['2', '3', '4']);
 interface EvaFinding { id: string; ids: string[]; detail: DetailRow[] | null }
 interface Category {
   key: string;
@@ -302,19 +310,45 @@ export default function DqFixList({
     () => new Map((cats ?? []).map((c) => [c.key, c])), [cats],
   );
 
+  // Household merge: Eva 2/3/4 records join the Q6b relhoh card (deduped by
+  // client — the Q6b mask already flags every failure mode, so Eva only adds
+  // clients its latest-month snapshot caught that the selected month's
+  // universe missed).
+  const relhohMerged = useMemo(() => {
+    const base = byKey.get('relhoh');
+    const extras = eva.filter((f) => HH_EVA_IDS.has(f.id));
+    if (!extras.some((f) => f.ids.length)) return base;
+    const seen = new Set(base?.ids ?? []);
+    const ids = [...seen];
+    const detail: DetailRow[] = [
+      ...(base?.detail ?? (base?.ids ?? []).map((id) => ({ pid: id, entry: null }))),
+    ];
+    extras.forEach((f) => {
+      (f.detail ?? f.ids.map((id) => ({ pid: id, entry: null }))).forEach((d) => {
+        if (!seen.has(d.pid)) { seen.add(d.pid); ids.push(d.pid); detail.push(d); }
+      });
+    });
+    return { key: 'relhoh', ids, detail, trend: base?.trend ?? [] } as Category;
+  }, [byKey, eva]);
+  const catFor = (k: string) => (k === 'relhoh' ? relhohMerged : byKey.get(k));
+
   // Only elements that apply to this project (have a denominator) AND have records.
   const shown = ELEMENTS
-    .map((e) => ({ e, cat: byKey.get(e.key) }))
+    .map((e) => ({ e, cat: catFor(e.key) }))
     .filter(({ e, cat }) => (data[e.denomKey] ?? 0) > 0 && (cat?.ids.length ?? 0) > 0);
 
   // count of rows to fix: enrollments when we have per-stay detail, else clients
   const rowCount = (cat?: Category) => cat?.detail?.length ?? cat?.ids.length ?? 0;
   const totalToFix = shown.reduce((s, { cat }) => s + rowCount(cat), 0);
 
-  // Eva findings joined to the guided registry, worst severity first then size.
-  const evaRecords = eva.reduce((s, f) => s + (f.detail?.length ?? f.ids.length), 0);
+  // Eva findings joined to the guided registry, worst severity first then
+  // size. Household checks (HH_EVA_IDS) are excluded — their records render
+  // on the merged Q6b household card above instead.
+  const evaRecords = eva.filter((f) => !HH_EVA_IDS.has(f.id))
+    .reduce((s, f) => s + (f.detail?.length ?? f.ids.length), 0);
   const evaSorted = useMemo(() =>
     eva
+      .filter((f) => !HH_EVA_IDS.has(f.id))
       .map((f) => ({ f, check: EVA_BY_ID.get(f.id) }))
       .filter((x): x is { f: EvaFinding; check: EvaCheck } => !!x.check && x.f.ids.length > 0)
       .sort((a, b) =>
