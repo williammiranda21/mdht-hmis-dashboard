@@ -32,7 +32,11 @@ export async function GET(req: Request) {
   const projectId = Number(sp.get('project'));
   const period = sp.get('period') ?? '';
   if (!Number.isFinite(projectId)) return NextResponse.json({ error: 'project required' }, { status: 400 });
-  if (!/^\d{4}-\d{2}$/.test(period)) return NextResponse.json({ error: 'monthly period required' }, { status: 400 });
+  // Monthly (2026-08), quarterly (FY2026-Q3), or fiscal (FY2026) — drills
+  // exist for every DQ granularity since 2026-09-03.
+  if (!/^(\d{4}-\d{2}|FY\d{4}(-Q[1-4])?)$/.test(period)) {
+    return NextResponse.json({ error: 'unrecognized period' }, { status: 400 });
+  }
 
   const sb = supabaseServer();
 
