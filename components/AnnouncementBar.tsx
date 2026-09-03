@@ -7,6 +7,9 @@ import AnnDetails from './AnnDetails';
  *  can throw (blocked site data, some embedded contexts) — treat any failure
  *  as "seen" so the pulse can never get stuck on. */
 const SEEN_KEY = 'hmis-ann-seen';
+/** Dismissed banner id — hides THIS announcement in this browser; a newly
+ *  posted announcement (different id) brings the banner back. */
+const DISMISS_KEY = 'hmis-ann-dismissed';
 
 /**
  * Admin broadcast banner — shown on every dashboard page when an announcement
@@ -36,14 +39,23 @@ export default function AnnouncementBar({ initial, isAdmin }: {
   // clicks the banner. Read in an effect — localStorage isn't available
   // during SSR/hydration, and starting false avoids a hydration mismatch.
   const [isNew, setIsNew] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
   useEffect(() => {
-    if (!ann) { setIsNew(false); return; }
-    try { setIsNew(localStorage.getItem(SEEN_KEY) !== String(ann.id)); } catch { setIsNew(false); }
+    if (!ann) { setIsNew(false); setDismissed(false); return; }
+    try {
+      setIsNew(localStorage.getItem(SEEN_KEY) !== String(ann.id));
+      setDismissed(localStorage.getItem(DISMISS_KEY) === String(ann.id));
+    } catch { setIsNew(false); setDismissed(false); }
   }, [ann]);
   const markSeen = (id?: number) => {
     const target = id ?? ann?.id;
     if (target != null) { try { localStorage.setItem(SEEN_KEY, String(target)); } catch { /* fine */ } }
     setIsNew(false);
+  };
+  const dismiss = () => {
+    if (ann) { try { localStorage.setItem(DISMISS_KEY, String(ann.id)); } catch { /* fine */ } }
+    markSeen();
+    setDismissed(true);
   };
 
   if (!ann && !isAdmin) return null;
@@ -137,6 +149,23 @@ export default function AnnouncementBar({ initial, isAdmin }: {
     );
   }
 
+  // Dismissed in THIS browser: regular users see nothing until the next
+  // announcement; admins keep a compact handle so they can still manage it.
+  if (dismissed) {
+    return isAdmin ? (
+      <div style={{ margin: '0 0 10px' }}>
+        <button className="btn" style={{ fontSize: 11.5, padding: '2px 10px' }}
+          title="You dismissed the live banner in this browser — it is still shown to everyone else"
+          onClick={() => {
+            setVal(ann.body); setDetails(ann.details ?? '');
+            setKind(ann.kind === 'update' ? 'update' : 'notice'); setEditing(true);
+          }}>
+          📣 Manage announcement
+        </button>
+      </div>
+    ) : null;
+  }
+
   return (
     <div style={{
       margin: '0 0 14px', padding: '8px 14px', borderRadius: 8, fontSize: 13,
@@ -174,6 +203,11 @@ export default function AnnouncementBar({ initial, isAdmin }: {
             edit
           </button>
         )}
+        <button className="btn" onClick={dismiss} aria-label="Dismiss announcement"
+          title="Dismiss — hides this banner in this browser only; the next announcement brings the bar back"
+          style={{ fontSize: 11, padding: '2px 8px' }}>
+          ✕
+        </button>
       </div>
       {expanded && ann.details && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--accent)' }}>
