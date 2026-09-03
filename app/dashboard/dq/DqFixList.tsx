@@ -300,10 +300,26 @@ export default function DqFixList({
       });
     }
   };
-  // Chip meta line: entry date + how long the unit has been on the list.
-  const chipSuffix = (metric: string, pid: string, entry: string | null) => {
-    const a = openAges[`${metric}|${pid}`];
-    return [entry, a != null ? `${a}d open` : null].filter(Boolean).join(' · ') || null;
+  // Aligned record rows (user 2026-09-03: the wrapped chip cloud read as a
+  // jumble) — ID · entry date · days-on-list, sorted oldest entry first.
+  const recordRows = (metric: string, detail: DetailRow[] | null, ids: string[]) => {
+    const rows = (detail ?? ids.map((id) => ({ pid: id, entry: null as string | null })))
+      .slice()
+      .sort((a, b) => (a.entry ?? '9999').localeCompare(b.entry ?? '9999'));
+    return (
+      <div className="dqfx-rows">
+        {rows.map((d, i) => {
+          const age = openAges[`${metric}|${d.pid}`];
+          return (
+            <div className="dqfx-row" key={`${d.pid}-${i}`}>
+              <CopyId pid={d.pid} />
+              <span className="dqfx-row-date">{d.entry ?? ''}</span>
+              {age != null && <span className="dqfx-row-age">{age}d open</span>}
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   const byKey = useMemo(
@@ -404,12 +420,7 @@ export default function DqFixList({
                     <TrendSpark trend={cat!.trend} />
                   </div>
                   <div className="dqfx-fix">→ {e.fix}</div>
-                  <div className="dr-ids">
-                    {(cat!.detail ?? cat!.ids.map((id) => ({ pid: id, entry: null }))).map((d, i) => (
-                      <CopyId key={`${d.pid}-${i}`} pid={d.pid}
-                        suffix={chipSuffix(`dq:${e.key}`, d.pid, d.entry)} />
-                    ))}
-                  </div>
+                  {recordRows(`dq:${e.key}`, cat!.detail, cat!.ids)}
                   <button className="btn dqfx-copy" onClick={(ev) => {
                     navigator.clipboard?.writeText((cat!.detail?.map((d) => d.pid) ?? cat!.ids).join('\n'));
                     const el = ev.currentTarget; el.textContent = 'Copied ✓';
@@ -450,12 +461,7 @@ export default function DqFixList({
                         <div className="bnl-sub" style={{ marginTop: 4 }}>{check.meaning}</div>
                         <div className="dqfx-fix">→ {check.fix}</div>
                         <div className="bnl-sub" style={{ marginTop: 2 }}>Affects: {check.breaks}</div>
-                        <div className="dr-ids">
-                          {(f.detail ?? f.ids.map((id) => ({ pid: id, entry: null }))).map((d, i) => (
-                            <CopyId key={`${d.pid}-${i}`} pid={d.pid}
-                              suffix={chipSuffix(`eva:${f.id}`, d.pid, d.entry)} />
-                          ))}
-                        </div>
+                        {recordRows(`eva:${f.id}`, f.detail, f.ids)}
                         <button className="btn dqfx-copy" onClick={(ev) => {
                           navigator.clipboard?.writeText(f.ids.join('\n'));
                           const el = ev.currentTarget; el.textContent = 'Copied ✓';

@@ -497,7 +497,7 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
                   max-height: none !important; overflow: visible !important;
                   box-shadow: none !important; border: 0 !important; }
   /* scroll containers must not clip when printing */
-  .pp-hist, .dr-ids, .scroll, .bnl-tl { max-height: none !important; overflow: visible !important; }
+  .pp-hist, .dr-ids, .dqfx-rows, .scroll, .bnl-tl { max-height: none !important; overflow: visible !important; }
   .pp-hist thead th { position: static !important; }
   .hc-sub { break-after: avoid; }
   .peer-row, .hc-t, tr { break-inside: avoid; }
@@ -541,6 +541,11 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .dr-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
   margin:14px 0 8px;font-size:13px;color:var(--text);flex-wrap:wrap}
 .dr-head b{color:var(--strong)}
+.dqfx-rows{display:grid;grid-template-columns:repeat(auto-fill,minmax(370px,1fr));column-gap:26px;row-gap:2px;max-height:340px;overflow-y:auto;margin-top:8px;padding:6px 10px;background:var(--bg-inset,rgba(126,103,254,0.05));border-radius:8px}
+.dqfx-row{display:flex;align-items:center;gap:10px;min-width:0}
+.dqfx-row .dd-pid{flex:none;margin-top:2px}
+.dqfx-row-date{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dqfx-row-age{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--warn);white-space:nowrap;font-variant-numeric:tabular-nums}
 .dr-ids{display:flex;flex-wrap:wrap;gap:6px;max-height:340px;overflow-y:auto;
   border:1px solid var(--hair);border-radius:10px;padding:11px;background:var(--primary-soft)}
 .dr-ids code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
