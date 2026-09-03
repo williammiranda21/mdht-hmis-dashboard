@@ -1,7 +1,12 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import AnnDetails from './AnnDetails';
+
+/** Per-browser "have I acknowledged this announcement" marker. localStorage
+ *  can throw (blocked site data, some embedded contexts) — treat any failure
+ *  as "seen" so the pulse can never get stuck on. */
+const SEEN_KEY = 'hmis-ann-seen';
 
 /**
  * Admin broadcast banner — shown on every dashboard page when an announcement
@@ -27,6 +32,19 @@ export default function AnnouncementBar({ initial, isAdmin }: {
   const [kind, setKind] = useState<'notice' | 'update'>('notice');
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  // NEW pulse (user ask 2026-09-03): shows until this browser expands or
+  // clicks the banner. Read in an effect — localStorage isn't available
+  // during SSR/hydration, and starting false avoids a hydration mismatch.
+  const [isNew, setIsNew] = useState(false);
+  useEffect(() => {
+    if (!ann) { setIsNew(false); return; }
+    try { setIsNew(localStorage.getItem(SEEN_KEY) !== String(ann.id)); } catch { setIsNew(false); }
+  }, [ann]);
+  const markSeen = (id?: number) => {
+    const target = id ?? ann?.id;
+    if (target != null) { try { localStorage.setItem(SEEN_KEY, String(target)); } catch { /* fine */ } }
+    setIsNew(false);
+  };
 
   if (!ann && !isAdmin) return null;
 
@@ -39,8 +57,10 @@ export default function AnnouncementBar({ initial, isAdmin }: {
         body: JSON.stringify({ body: val.trim(), details: details.trim() || null, kind }),
       });
       if (r.ok) {
-        setAnn((await r.json()).announcement as Announcement);
+        const posted = (await r.json()).announcement as Announcement;
+        setAnn(posted);
         setEditing(false); setExpanded(false); setVal(''); setDetails('');
+        markSeen(posted.id);   // the author has obviously seen their own post
       }
     } finally { setBusy(false); }
   };
@@ -125,6 +145,7 @@ export default function AnnouncementBar({ initial, isAdmin }: {
     }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <span aria-hidden="true">{ann.kind === 'update' ? '✨' : '📣'}</span>
+        {isNew && <span className="ann-new" aria-label="new announcement">NEW</span>}
         {ann.kind === 'update' && (
           <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent)',
             border: '1px solid var(--accent)', borderRadius: 999, padding: '0 7px',
@@ -135,11 +156,11 @@ export default function AnnouncementBar({ initial, isAdmin }: {
         <span style={{ flex: 1 }}>{ann.body}</span>
         {ann.details && (
           <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }}
-            onClick={() => setExpanded((x) => !x)}>
+            onClick={() => { setExpanded((x) => !x); markSeen(); }}>
             {expanded ? 'less ▴' : 'read more ▾'}
           </button>
         )}
-        <a className="btn" href="/dashboard/announcements"
+        <a className="btn" href="/dashboard/announcements" onClick={() => markSeen()}
           title="Every notice and dashboard update, newest first"
           style={{ fontSize: 11, padding: '2px 8px', whiteSpace: 'nowrap', textDecoration: 'none' }}>
           🗂 All announcements
