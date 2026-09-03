@@ -34,7 +34,48 @@ type Props = {
   /** project_id → metrics past their Homeless Trust due date with records
    *  still on the list (computed server-side in page.tsx). */
   overdue?: Record<number, string[]>;
+  /** System KPI strip aggregates (2026-09-03) — computed server-side, always
+   *  system-wide (never scoped by the table's type/search filters). */
+  sysKpi?: {
+    scoreSeries: { period: string; score: number | null }[];
+    fixTotal: number; fixProjects: number; topMetric: string | null; topCount: number;
+    fixedN: number; medianFix: number | null;
+    overdueItems: number; overdueProjects: number;
+  };
 };
+
+/** Short element names for the KPI strip (fix-list drill metric → label). */
+const METRIC_SHORT: Record<string, string> = {
+  'dq:dest': 'exit destinations', 'dq:movein': 'move-in dates',
+  'dq:income': 'income at entry', 'dq:incexit': 'income at exit',
+  'dq:annual': 'annual assessments', 'dq:veteran': 'veteran status',
+  'dq:psd': 'overlapping stays', 'dq:relhoh': 'household heads',
+  'dq:coc': 'enrollment CoC', 'dq:disabling': 'disabling condition',
+  'dq:chronic': 'homeless history', 'dq:openstay': 'left-open enrollments',
+  'dq:name': 'names', 'dq:ssn': 'SSNs', 'dq:dob': 'DOBs',
+  'dq:race': 'race/ethnicity', 'dq:sex': 'sex',
+};
+
+/** [label, pctKey, denomKey] for the dynamic weakest-element card. */
+const WEAK_ELEMENTS: [string, string, string][] = [
+  ['Exit destination', 'DQ_Dest_pct', 'DQ_ExitsTotal'],
+  ['Income at entry (DK/refused)', 'DQ_IncDK_pct', 'DQ_ActiveTotal'],
+  ['Income at entry (missing)', 'DQ_IncMiss_pct', 'DQ_ActiveTotal'],
+  ['Income at entry (inconsistent)', 'DQ_IncConflict_pct', 'DQ_ActiveTotal'],
+  ['Income at exit', 'DQ_IncExit_pct', 'DQ_ExitsTotal'],
+  ['Annual assessment income', 'DQ_Annual_pct', 'DQ_AnnualDue'],
+  ['Move-in dates', 'DQ_MoveIn_pct', 'DQ_PHEnrolls'],
+  ['SSN quality', 'DQ_SSN_pct', 'DQ_Clients'],
+  ['Names', 'DQ_Name_pct', 'DQ_Clients'],
+  ['Date of birth', 'DQ_DOB_pct', 'DQ_Clients'],
+  ['Race/ethnicity', 'DQ_Race_pct', 'DQ_Clients'],
+  ['Veteran status', 'DQ_Veteran_pct', 'DQ_ActiveTotal'],
+  ['Household heads', 'DQ_RelHoH_pct', 'DQ_ActiveTotal'],
+  ['Overlapping stays', 'DQ_PSD_pct', 'DQ_ActiveTotal'],
+  ['Enrollment CoC', 'DQ_CoC_pct', 'DQ_ActiveTotal'],
+  ['Disabling condition', 'DQ_Disabling_pct', 'DQ_ActiveTotal'],
+  ['Homeless history (3.917)', 'DQ_Chronic_pct', 'DQ_ChronicUniverse'],
+];
 
 /** Compact severity chips (high-priority / error / warning) for one category. */
 function ChecksCell({ c, bare }: { c?: EvaCount; bare?: boolean }) {
@@ -104,7 +145,7 @@ function PctCell({ pct, thr, sub }: { pct: number | null; thr: number; sub?: str
 
 type SortKey = 'name' | 'type_name' | string;
 
-export default function DqView({ periods, granularity, period, rows, evaCounts, evaPeriod, focusProject = null, overdue = {} }: Props) {
+export default function DqView({ periods, granularity, period, rows, evaCounts, evaPeriod, focusProject = null, overdue = {}, sysKpi }: Props) {
   // Check-column tooltips carry the fallback month on non-monthly views.
   const evaWhen = granularity === 'monthly' ? '' : ` · shown for ${evaPeriod ?? 'the latest complete month'} (checks are monthly)`;
   const router = useRouter();
@@ -128,8 +169,10 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('DQ_Score');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
-  // Fix-list drills into client IDs, which drill_clients only holds monthly.
-  const canFix = granularity === 'monthly';
+  // Fix-list drills exist for EVERY DQ granularity since 2026-09-03 — a
+  // quarterly/fiscal list is the union of its months (review view); the
+  // monthly list stays the working cadence (due dates + days-open ledger).
+  const canFix = true;
   const [fixRow, setFixRow] = useState<Row | null>(null);
 
   // Deep-link support: land with a project's fix-list already open.
@@ -165,27 +208,37 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
     });
   }, [filtered, sortKey, sortDir]);
 
-  // KPI aggregates (client-weighted), matching renderDQ.
+  // System KPI strip (2026-09-03) — ALWAYS system-wide over `rows`, never the
+  // table's filters: the strip answers "how is the SYSTEM doing", the
+  // filterable table below handles subsets.
   const kpi = useMemo(() => {
-    const sum = (f: (r: Row) => number) => filtered.reduce((s, r) => s + f(r), 0);
-    const totalActive = sum((r) => r.d.DQ_ActiveTotal || 0);
-    const totalExits = sum((r) => r.d.DQ_ExitsTotal || 0);
-    const annualDue = sum((r) => r.d.DQ_AnnualDue || 0);
-    const valid = filtered.map((r) => r.d.DQ_Score).filter((v): v is number => v != null);
+    const valid = rows.map((r) => r.d.DQ_Score).filter((v): v is number => v != null);
     const avgScore = valid.length ? +(valid.reduce((a, b) => a + b, 0) / valid.length).toFixed(1) : null;
-    const agg = (pctKey: string, wKey: string) => {
-      const w = sum((r) => r.d[wKey] || 0);
-      if (!w) return null;
-      const v = filtered.reduce((s, r) => s + ((r.d[pctKey] || 0) / 100) * (r.d[wKey] || 0), 0);
-      return +(v / w * 100).toFixed(1);
-    };
-    return {
-      avgScore, totalActive, totalExits, annualDue,
-      destPct: agg('DQ_Dest_pct', 'DQ_ExitsTotal'),
-      incMissPct: agg('DQ_IncMiss_pct', 'DQ_ActiveTotal'),
-      annualPct: agg('DQ_Annual_pct', 'DQ_AnnualDue'),
-    };
-  }, [filtered]);
+    // Weakest element: universe-weighted system rate per element, worst wins.
+    // Min universe 50 so a 3-client denominator can't claim the headline.
+    let weakest: { label: string; pct: number; denom: number } | null = null;
+    for (const [label, pctKey, denomKey] of WEAK_ELEMENTS) {
+      let num = 0, den = 0;
+      for (const r of rows) {
+        const dv = (r.d[denomKey] ?? 0) as number, pv = r.d[pctKey];
+        if (dv > 0 && pv != null) { den += dv; num += (pv / 100) * dv; }
+      }
+      if (den >= 50) {
+        const pct = +((num / den) * 100).toFixed(1);
+        if (!weakest || pct > weakest.pct) weakest = { label, pct, denom: den };
+      }
+    }
+    return { avgScore, weakest };
+  }, [rows]);
+  // score direction vs the prior period of the SAME granularity
+  const prevScore = sysKpi?.scoreSeries?.[1]?.score ?? null;
+  const scoreDelta = kpi.avgScore != null && prevScore != null
+    ? +(kpi.avgScore - prevScore).toFixed(1) : null;
+  const sparkPts = useMemo(() => {
+    const s = [...(sysKpi?.scoreSeries ?? [])].reverse()
+      .filter((p): p is { period: string; score: number } => p.score != null);
+    return s;
+  }, [sysKpi]);
 
   function navigate(patch: Partial<{ g: string; p: string }>) {
     const sp = new URLSearchParams();
@@ -239,30 +292,66 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
         </div>
       </div>
 
+      {/* System strip (2026-09-03): direction · workload · momentum ·
+          accountability · weakest spot. Replaces three hardcoded Q6c element
+          cards; every figure is system-wide (the table below filters). */}
       <div className="dq-kpi-grid">
-        <div className="dq-kpi">
+        <div className="dq-kpi" title="Average DQ score across all active projects — delta vs the prior period of this view's granularity">
           <div className="dq-kpi-label">System DQ Score</div>
-          <div className="dq-kpi-val">{kpi.avgScore != null ? <span className={`dq-score-pill ${scoreClass(kpi.avgScore)}`} style={{ fontSize: 20 }}>{kpi.avgScore}%</span> : '—'}</div>
-          <div className="dq-kpi-sub">avg across {fmtInt(filtered.length)} active projects</div>
+          <div className="dq-kpi-val" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {kpi.avgScore != null ? <span className={`dq-score-pill ${scoreClass(kpi.avgScore)}`} style={{ fontSize: 20 }}>{kpi.avgScore}%</span> : '—'}
+            {scoreDelta != null && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: scoreDelta >= 0 ? 'var(--accent)' : 'var(--danger)' }}>
+                {scoreDelta >= 0 ? '▲' : '▼'} {Math.abs(scoreDelta)}
+              </span>
+            )}
+            {sparkPts.length >= 2 && (() => {
+              const W = 84, H = 22, P = 2;
+              const vals = sparkPts.map((p) => p.score);
+              const mn = Math.min(...vals), mx = Math.max(...vals);
+              const x = (i: number) => P + (i * (W - 2 * P)) / (sparkPts.length - 1);
+              const y = (v: number) => (mx === mn ? H / 2 : (H - P) - ((v - mn) / (mx - mn)) * (H - 2 * P));
+              return (
+                <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} aria-hidden="true"
+                  style={{ opacity: 0.9 }}>
+                  <title>{sparkPts.map((p) => `${p.period}: ${p.score}`).join(' · ')}</title>
+                  <polyline fill="none" stroke="var(--secondary)" strokeWidth={1.5}
+                    strokeLinejoin="round" strokeLinecap="round"
+                    points={sparkPts.map((p, i) => `${x(i).toFixed(1)},${y(p.score).toFixed(1)}`).join(' ')} />
+                  <circle cx={x(sparkPts.length - 1)} cy={y(vals[vals.length - 1])} r={2} fill="var(--secondary)" />
+                </svg>
+              );
+            })()}
+          </div>
+          <div className="dq-kpi-sub">avg across {fmtInt(rows.length)} active projects · vs prior {granularity === 'monthly' ? 'month' : granularity === 'quarterly' ? 'quarter' : 'FY'}</div>
         </div>
-        {/* FY2026 alignment (2026-08-13): Destination lives in Q6c now (it was
-            never Q6b in the APR sense); entry income = the stage-1 record
-            DATED at entry over adult/HoH clients; annual = INCOME at the
-            annual assessment (Q6c row 4), HoH calendar anniversary. */}
-        <div className="dq-kpi" title="Q6c row 2 — leavers with destination don't-know/refused, no exit interview, or missing">
-          <div className="dq-kpi-label">Missing Destination (Q6c)</div>
-          <div className="dq-kpi-val">{kpi.destPct != null ? `${kpi.destPct}%` : '—'}</div>
-          <div className="dq-kpi-sub">of {fmtInt(kpi.totalExits)} exits</div>
+        <div className="dq-kpi" title="Every record on every project's fix-list for this period — the actual cleanup workload">
+          <div className="dq-kpi-label">Records to Fix</div>
+          <div className="dq-kpi-val">{sysKpi ? fmtInt(sysKpi.fixTotal) : '—'}</div>
+          <div className="dq-kpi-sub">
+            {sysKpi ? <>across {fmtInt(sysKpi.fixProjects)} projects{sysKpi.topMetric ? <> · biggest: {METRIC_SHORT[sysKpi.topMetric] ?? sysKpi.topMetric} ({fmtInt(sysKpi.topCount)})</> : null}</> : 'no fix-list data'}
+          </div>
         </div>
-        <div className="dq-kpi" title="Q6c row 3 — adult/HoH clients with no income record dated at project start, or the record is blank/not collected">
-          <div className="dq-kpi-label">Missing Entry Income (Q6c)</div>
-          <div className="dq-kpi-val">{kpi.incMissPct != null ? `${kpi.incMissPct}%` : '—'}</div>
-          <div className="dq-kpi-sub">no record dated at entry · adult/HoH universe</div>
+        <div className="dq-kpi" title="Fix-list items cleared, per the refresh-over-refresh ledger (items detected in the last 180 days). Median = typical days from a record appearing on a fix-list to it being fixed.">
+          <div className="dq-kpi-label">Fixed · Last 180d</div>
+          <div className="dq-kpi-val" style={{ color: 'var(--accent)' }}>{sysKpi ? fmtInt(sysKpi.fixedN) : '—'}</div>
+          <div className="dq-kpi-sub">{sysKpi?.medianFix != null ? <>median fix time {sysKpi.medianFix}d</> : 'fix times pending ledger history'}</div>
         </div>
-        <div className="dq-kpi" title="Q6c row 4 — adult/HoH stayers due an annual (head-of-household anniversary ±30d, capped at report end) whose stage-5 income record is missing, unknown, or contradicts its sources">
-          <div className="dq-kpi-label">Annual Assessment Income (Q6c)</div>
-          <div className="dq-kpi-val">{kpi.annualPct != null ? `${kpi.annualPct}%` : '—'}</div>
-          <div className="dq-kpi-sub">of {fmtInt(kpi.annualDue)} due (HoH anniversary ±30d)</div>
+        <div className="dq-kpi" title="Fix-list elements past a Homeless Trust due date with records still on the list">
+          <div className="dq-kpi-label">Overdue</div>
+          <div className="dq-kpi-val" style={{ color: (sysKpi?.overdueItems ?? 0) > 0 ? 'var(--danger)' : 'var(--accent)' }}>
+            {sysKpi ? fmtInt(sysKpi.overdueItems) : '—'}
+          </div>
+          <div className="dq-kpi-sub">
+            {(sysKpi?.overdueItems ?? 0) > 0
+              ? <>past due · {fmtInt(sysKpi!.overdueProjects)} project{sysKpi!.overdueProjects === 1 ? '' : 's'}</>
+              : 'nothing past a due date'}
+          </div>
+        </div>
+        <div className="dq-kpi" title="The element with the worst system-wide error rate this period (universe-weighted across projects; universes under 50 excluded)">
+          <div className="dq-kpi-label">Weakest Spot</div>
+          <div className="dq-kpi-val">{kpi.weakest ? `${kpi.weakest.pct}%` : '—'}</div>
+          <div className="dq-kpi-sub">{kpi.weakest ? <>{kpi.weakest.label} · of {fmtInt(kpi.weakest.denom)}</> : 'no qualifying universes'}</div>
         </div>
       </div>
 
@@ -271,9 +360,7 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
           <div><h3>Data Quality · APR Q6</h3><div className="meta">
             {fmtInt(sorted.length)} projects · {periodLabel(period)} · click a column to sort
             {' '}· <a href="/dashboard/dq/users">error rates by user →</a>
-            {canFix
-              ? ' · click a project name for its fix-list'
-              : ' · switch to the monthly view for the per-record fix-list'}
+            {' · click a project name for its fix-list'}
           </div></div>
           <div style={{ position: 'relative' }}>
             <button className="btn" onClick={() => setColsOpen((o) => !o)}>Columns {colsOpen ? '▴' : '▾'}</button>

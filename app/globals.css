@@ -329,7 +329,8 @@ table.hm{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
 @media(max-width:680px){.rkrow .pnm{width:160px}}
 
 /* ── Data Quality ── */
-.dq-kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:18px}
+.dq-kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-bottom:18px}
+@media(max-width:1100px){.dq-kpi-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:780px){.dq-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .dq-kpi{background:linear-gradient(180deg,var(--card-top),var(--card));border:1px solid var(--border-strong);border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:14px 16px}
 .dq-kpi-label{font-size:10px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}

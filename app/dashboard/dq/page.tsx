@@ -87,6 +87,49 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     if (remains) (overdue[pid] ??= []).push(dRow.metric);
   }
 
+  // ── System KPI strip (2026-09-03): direction · workload · momentum ·
+  // accountability · weakest spot. All system-wide (never filter-scoped).
+  // Score series: system average per period, one small query each (~165 rows,
+  // safely under the PostgREST cap); `periods` is newest-first.
+  const scoreSeries = await Promise.all(periods.slice(0, 13).map(async (p) => {
+    const { data } = await sb.from('dq_metrics')
+      .select('score:data->DQ_Score').eq('granularity', granularity).eq('period', p);
+    const vals = ((data ?? []) as Array<{ score: number | null }>)
+      .map((r) => r.score).filter((v): v is number => typeof v === 'number');
+    return { period: p, score: vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : null };
+  }));
+
+  // Workload: every dq:* fix-list for the selected period (paged past the cap).
+  let fixRows: Array<{ project_id: number; metric: string; personal_ids: string[] | null }> = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await sb.from('drill_clients')
+      .select('project_id, metric, personal_ids')
+      .eq('period', period).like('metric', 'dq:%').range(from, from + 999);
+    fixRows = fixRows.concat((data ?? []) as typeof fixRows);
+    if (!data || data.length < 1000) break;
+  }
+  const byElement: Record<string, number> = {};
+  for (const r of fixRows) byElement[r.metric] = (byElement[r.metric] ?? 0) + (r.personal_ids?.length ?? 0);
+  const topEl = Object.entries(byElement).sort((a, b) => b[1] - a[1])[0] ?? null;
+
+  // Momentum: ledger rollup — n_fixed counts fixed items detected in the last
+  // 180 days (snapshot_dq STATS_DAYS); median of project medians.
+  const tlAll = [...tl.values()];
+  const fixMeds = tlAll.map((t) => t.median_fix_days)
+    .filter((v): v is number => v != null).sort((a, b) => a - b);
+  const sysKpi = {
+    scoreSeries,
+    fixTotal: Object.values(byElement).reduce((s, n) => s + n, 0),
+    fixProjects: new Set(fixRows.filter((r) => (r.personal_ids?.length ?? 0) > 0)
+      .map((r) => Number(r.project_id))).size,
+    topMetric: topEl?.[0] ?? null,
+    topCount: topEl?.[1] ?? 0,
+    fixedN: tlAll.reduce((s, t) => s + (t.n_fixed ?? 0), 0),
+    medianFix: fixMeds.length ? fixMeds[Math.floor(fixMeds.length / 2)] : null,
+    overdueItems: Object.values(overdue).reduce((s, l) => s + l.length, 0),
+    overdueProjects: Object.keys(overdue).length,
+  };
+
   const merged = rows.map((r) => ({
     project_id: r.project_id,
     name: projects[r.project_id]?.name ?? `Project ${r.project_id}`,
@@ -107,5 +150,6 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     ? Number(searchParams.focus) : null;
 
   return <DqView periods={periods} granularity={granularity} period={period} rows={merged}
-    evaCounts={evaCounts} evaPeriod={evaPeriod} focusProject={focusProject} overdue={overdue} />;
+    evaCounts={evaCounts} evaPeriod={evaPeriod} focusProject={focusProject} overdue={overdue}
+    sysKpi={sysKpi} />;
 }
