@@ -644,7 +644,7 @@ export default function BnlView({
                       // Youth prioritization bands per spec: Low 0–7, High 8+.
                       // Two colors only — matches the ETL's risk_band exactly.
                       <span className={`bnl-rp ${r.risk_pts >= 8 ? 'bnl-rp-hi' : 'bnl-rp-lo'}`}
-                        title={`${r.risk_pts >= 8 ? 'High' : 'Low'} priority — ${r.risk_pts} of ${r.risk_max} points (Low 0–7 · High 8+ · HNA items pending)`}>
+                        title={`${r.risk_pts >= 8 ? 'High' : 'Low'} priority — ${r.risk_pts} of ${r.risk_max} points (Low 0–7 · High 8+)`}>
                         {r.risk_pts} pts{r.risk_pts >= 8 ? ' · High' : ''}</span>
                     )}</td>
                     <td className="num" {...mkTd(r, 'income')}>{r.income != null

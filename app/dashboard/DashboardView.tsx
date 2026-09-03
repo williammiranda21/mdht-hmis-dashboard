@@ -32,7 +32,12 @@ const EXTRA_COLUMNS: { key: string; label: string; pct?: boolean }[] = [
   { key: 'PosOutreachRate', label: 'Pos Rate', pct: true },
   { key: 'SOContacts', label: 'Contacts' },
   { key: 'SOEngagements', label: 'Engaged' },
+  // APR-based (2026-09-02): leavers = Q19a2 universe (adult exits in period,
+  // entry→exit earned); stayers = Q19a1 universe (adult stayers, entry→latest
+  // annual); Earned Inc % = both pooled (Σ improved / Σ assessed).
   { key: 'EarnedIncomeImprovementRate', label: 'Earned Inc %', pct: true },
+  { key: 'EarnedIncomeImprovementRateLeavers', label: 'Earned Lv %', pct: true },
+  { key: 'EarnedIncomeImprovementRateStayers', label: 'Earned St %', pct: true },
   { key: 'LOS_0_30', label: 'LOS 0–30' },
   { key: 'LOS_31_90', label: 'LOS 31–90' },
   { key: 'LOS_91_180', label: 'LOS 91–180' },
