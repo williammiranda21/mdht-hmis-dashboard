@@ -1,7 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
 import { fmtInt } from '../../../lib/format';
 
@@ -45,7 +44,12 @@ export interface ProjectOption { id: number; name: string; type: string }
 export default function AdminUsers({
   me, rows, projects,
 }: { me: string; rows: AdminProfile[]; projects: ProjectOption[] }) {
-  const router = useRouter();
+  // The account list lives in CLIENT state and mutations patch one row in
+  // place. The earlier router.refresh() re-rendered the whole page on every
+  // grant/revoke and threw the admin back to the top of a long list (user
+  // 2026-08-27). Props re-sync it whenever the server actually re-renders.
+  const [list, setList] = useState(rows);
+  useEffect(() => setList(rows), [rows]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openFor, setOpenFor] = useState<string | null>(null);
@@ -73,8 +77,8 @@ export default function AdminUsers({
     }
   }
 
-  const pending = rows.filter((r) => r.status === 'pending');
-  const others = rows.filter((r) => r.status !== 'pending');
+  const pending = list.filter((r) => r.status === 'pending');
+  const others = list.filter((r) => r.status !== 'pending');
   const t = q.trim().toLowerCase();
   const shown = t
     ? others.filter((r) =>
@@ -83,12 +87,12 @@ export default function AdminUsers({
         || (r.agency ?? '').toLowerCase().includes(t))
     : others;
 
-  async function run(id: string, fn: () => Promise<{ error: unknown }>) {
+  async function run(id: string, fn: () => Promise<{ error: unknown }>, patch?: Partial<AdminProfile>) {
     setBusy(id); setError(null);
     const { error } = await fn();
     setBusy(null);
     if (error) { setError(String((error as any)?.message ?? error)); return; }
-    router.refresh();
+    if (patch) setList((l) => l.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
   const db = () => supabaseBrowser();
@@ -98,13 +102,13 @@ export default function AdminUsers({
       status,
       approved_at: status === 'approved' ? new Date().toISOString() : null,
       approved_by: status === 'approved' ? me : null,
-    }).eq('id', r.id));
+    }).eq('id', r.id), { status });
 
   const setAdmin = (r: AdminProfile, isAdmin: boolean) =>
-    run(r.id, async () => db().from('profiles').update({ is_admin: isAdmin }).eq('id', r.id));
+    run(r.id, async () => db().from('profiles').update({ is_admin: isAdmin }).eq('id', r.id), { isAdmin });
 
   const setBnlAccess = (r: AdminProfile, bnl: boolean) =>
-    run(r.id, async () => db().from('profiles').update({ bnl_access: bnl }).eq('id', r.id));
+    run(r.id, async () => db().from('profiles').update({ bnl_access: bnl }).eq('id', r.id), { bnlAccess: bnl });
 
   // 'all' supersedes the specific scopes: turning it on clears them, and
   // picking a specific scope turns 'all' off.
@@ -115,14 +119,14 @@ export default function AdminUsers({
       const base = r.bnlWritePops.filter((x) => x !== 'all');
       next = base.includes(k) ? base.filter((x) => x !== k) : [...base, k];
     }
-    return run(r.id, async () => db().from('profiles').update({ bnl_write_pops: next }).eq('id', r.id));
+    return run(r.id, async () => db().from('profiles').update({ bnl_write_pops: next }).eq('id', r.id), { bnlWritePops: next });
   };
 
   const setYcAccess = (r: AdminProfile, yc: boolean) =>
-    run(r.id, async () => db().from('profiles').update({ yc_access: yc }).eq('id', r.id));
+    run(r.id, async () => db().from('profiles').update({ yc_access: yc }).eq('id', r.id), { ycAccess: yc });
 
   const setHlAccess = (r: AdminProfile, hl: boolean) =>
-    run(r.id, async () => db().from('profiles').update({ helpline_access: hl }).eq('id', r.id));
+    run(r.id, async () => db().from('profiles').update({ helpline_access: hl }).eq('id', r.id), { hlAccess: hl });
 
   async function saveProjects(r: AdminProfile, ids: number[]) {
     await run(r.id, async () => {
@@ -132,7 +136,7 @@ export default function AdminUsers({
       return db().from('user_projects')
         .upsert(ids.map((project_id) => ({ user_id: r.id, project_id })),
           { onConflict: 'user_id,project_id' });
-    });
+    }, { projectIds: ids });
     setOpenFor(null);
   }
 
@@ -342,7 +346,7 @@ export default function AdminUsers({
           <div>
             <h3>All accounts</h3>
             <div className="meta">
-              {t ? `${fmtInt(shown.length)} of ${fmtInt(others.length)} shown` : `${fmtInt(rows.length)} total`}
+              {t ? `${fmtInt(shown.length)} of ${fmtInt(others.length)} shown` : `${fmtInt(list.length)} total`}
               {' '}· admins see every project
             </div>
           </div>
