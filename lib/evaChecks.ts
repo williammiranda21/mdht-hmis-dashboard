@@ -75,16 +75,10 @@ export const EVA_CHECKS: EvaCheck[] = [
     fix: 'Compare against case notes and correct whichever date is wrong.',
     breaks: 'Length of stay, utilization, every date-window count.',
   },
-  {
-    // Severity matches Eva (Warning) — downgraded from our earlier 'error'
-    // per the 2026-08-13 parity audit. PSH/OPH entries before 10/1/2017 are
-    // excused pipeline-side, also per Eva.
-    id: '75', label: 'Entry date after record creation', slug: 'entry_after_created',
-    severity: 'warning', category: 'Dates',
-    meaning: 'The entry date is later than the day the record was created — a future-dated entry.',
-    fix: 'Correct the entry date to the actual project start date.',
-    breaks: 'Clients-served counts, entry cohorts, time-to-housing.',
-  },
+  // Check 75 (entry-after-created) RETIRED 2026-09-03 by user directive:
+  // pre-registered enrollments are this CoC's standard workflow, so the
+  // check was permanent noise. recompute_eva no longer emits it; leaving it
+  // out of the registry also hides any stale eva:75 rows defensively.
   {
     id: '84', label: 'Entered project before born', slug: 'entered_before_born',
     severity: 'error', category: 'Dates',

@@ -166,12 +166,11 @@ def main():
         # ── Impossible dates ─────────────────────────────────────────────────
         flag("14", e["ExitDate"].notna() & (e["ExitDate"] > as_of))
         flag("99", e["ExitDate"].notna() & (e["ExitDate"] < e["EntryDate"]))
-        # 75: Eva excuses PSH/OPH entries before 10/1/2017 (long-tenure stays
-        # predate the data standard that made DateCreated meaningful).
-        flag("75", e["DateCreated"].notna()
-                   & (e["EntryDate"].dt.normalize() > e["DateCreated"].dt.normalize())
-                   & ~(e["ProjectType"].isin(PSH_OPH_TYPES)
-                       & (e["EntryDate"] < ENTRY_CREATED_FLOOR)))
+        # 75 (entry-after-created) RETIRED 2026-09-03, user directive: advance
+        # data entry is this CoC's standard workflow (pre-registered
+        # enrollments, typically dated the 1st of the coming month), so the
+        # check was permanent noise. It was already score-exempt; now it is
+        # not emitted at all. Do not re-add without a new user decision.
         flag("84", e["age_entry"].notna() & (e["age_entry"] < 0))
         flag("143", e["age_entry"].notna() & (e["age_entry"] > 100))
         # 40: outside the stay OR dated after the export end (future move-in on
