@@ -32,7 +32,10 @@ export default function MfaSettings({ bnlGranted }: { bnlGranted: boolean }) {
   const load = async () => {
     const { data, error: e } = await sb().auth.mfa.listFactors();
     if (e) { setError(e.message); setFactors([]); return; }
-    setFactors((data?.totp ?? []) as Factor[]);
+    // data.totp holds only VERIFIED factors — a dangling unverified factor
+    // from an abandoned attempt appears only in data.all, and it's exactly
+    // what startEnroll must clear ("friendly name already exists" otherwise).
+    setFactors(((data?.all ?? []).filter((f) => f.factor_type === 'totp')) as Factor[]);
   };
   useEffect(() => { load(); }, []);
 
