@@ -5,11 +5,15 @@ import { useEffect, useState } from 'react';
 export interface BnlNote {
   id: number;
   body: string;
+  /** Author's auth id — lets the thread offer edit ONLY on own notes. */
+  author_id?: string | null;
   /** Display name captured when the note was written. */
   author_name: string | null;
   /** Fallback when the author had no display name set. */
   author_email: string | null;
   created_at: string;
+  /** Stamped by the edit trigger; null/absent = never edited. */
+  edited_at?: string | null;
 }
 
 /** Prefer the person's name; fall back to their email, then to a neutral label.
@@ -45,19 +49,56 @@ export default function Notes({ pid }: { pid: string }) {
   // account may write; true until told otherwise so the composer doesn't
   // flash away from grandfathered writers while loading.
   const [canWrite, setCanWrite] = useState(true);
+  // Note-EDIT grant (bnl_note_edit.sql, default off): pencil appears only on
+  // the caller's OWN notes; the UPDATE policy is the real boundary.
+  const [canEdit, setCanEdit] = useState(false);
+  const [viewerId, setViewerId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editBody, setEditBody] = useState('');
 
   useEffect(() => {
     let live = true;
     setNotes(null);
     setErr(null);
+    setEditing(null);
     fetch(`/api/bnl/notes?pid=${encodeURIComponent(pid)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((j: { notes: BnlNote[]; canWrite?: boolean }) => {
-        if (live) { setNotes(j.notes); setCanWrite(j.canWrite !== false); }
+      .then((j: { notes: BnlNote[]; canWrite?: boolean; canEdit?: boolean; viewerId?: string }) => {
+        if (live) {
+          setNotes(j.notes);
+          setCanWrite(j.canWrite !== false);
+          setCanEdit(j.canEdit === true);
+          setViewerId(j.viewerId ?? null);
+        }
       })
       .catch(() => { if (live) { setNotes([]); setErr('Could not load notes.'); } });
     return () => { live = false; };
   }, [pid]);
+
+  async function saveEdit(id: number) {
+    const text = editBody.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch('/api/bnl/notes', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, body: text }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        setErr(j.error ?? 'Could not save the edit.');
+      } else {
+        setNotes((prev) => (prev ?? []).map((n) => (n.id === id ? (j.note as BnlNote) : n)));
+        setEditing(null);
+      }
+    } catch {
+      setErr('Could not save. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit() {
     const text = body.trim();
@@ -99,7 +140,9 @@ export default function Notes({ pid }: { pid: string }) {
         <>
           <textarea
             className="nc-input"
-            placeholder="Add a note — include what was observed or agreed, and any follow-up. Notes cannot be edited or deleted once saved."
+            placeholder={canEdit
+              ? 'Add a note — include what was observed or agreed, and any follow-up. You can fix your own notes later; every change keeps its history.'
+              : 'Add a note — include what was observed or agreed, and any follow-up. Notes cannot be edited or deleted once saved.'}
             value={body}
             rows={3}
             onChange={(e) => setBody(e.target.value)}
@@ -127,9 +170,43 @@ export default function Notes({ pid }: { pid: string }) {
         <div className="nc-note" key={n.id}>
           <div className="nc-meta">
             <b title={n.author_email ?? undefined}>{authorOf(n)}</b>
-            <span>{stamp(n.created_at)}</span>
+            <span>
+              {stamp(n.created_at)}
+              {n.edited_at && (
+                <span className="bnl-sub" title={`Edited ${stamp(n.edited_at)} — the previous text is kept in the audit history`}>
+                  {' '}· edited
+                </span>
+              )}
+              {canEdit && viewerId && n.author_id === viewerId && editing !== n.id && (
+                <button className="tbtn" style={{ marginLeft: 8, padding: '0 7px', fontSize: 11 }}
+                  title="Fix this note — your change is saved with an audit history"
+                  onClick={() => { setEditing(n.id); setEditBody(n.body); setErr(null); }}>
+                  ✎ edit
+                </button>
+              )}
+            </span>
           </div>
-          <div className="nc-body">{n.body}</div>
+          {editing === n.id ? (
+            <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+              <textarea className="nc-input" rows={3} value={editBody} autoFocus
+                onChange={(e) => setEditBody(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) saveEdit(n.id);
+                  if (e.key === 'Escape') setEditing(null);
+                }} />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span className="bnl-sub">the previous text stays in the audit history</span>
+                <span style={{ flex: 1 }} />
+                <button className="nc-btn" disabled={busy || !editBody.trim() || editBody.length > 4000}
+                  onClick={() => saveEdit(n.id)}>
+                  {busy ? 'Saving…' : 'Save'}
+                </button>
+                <button className="tbtn" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div className="nc-body">{n.body}</div>
+          )}
         </div>
       ))}
     </div>

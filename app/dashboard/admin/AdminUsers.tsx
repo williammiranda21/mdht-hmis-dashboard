@@ -19,6 +19,9 @@ export interface AdminProfile {
    *  youth/vet/family/single/senior; empty = read-only. Meaningful only with
    *  bnlAccess; admins always write everywhere. */
   bnlWritePops: string[];
+  /** May edit their OWN notes (bnl_note_edit.sql) — default off; every edit
+   *  is history-archived by trigger. Admins always may. */
+  bnlNoteEdit: boolean;
   /** Youth Connect (intake list + review + invites). Admins always have it. */
   ycAccess: boolean;
   /** Helpline Triage (call intake + assignment). Admins always have it. */
@@ -121,6 +124,9 @@ export default function AdminUsers({
     }
     return run(r.id, async () => db().from('profiles').update({ bnl_write_pops: next }).eq('id', r.id), { bnlWritePops: next });
   };
+
+  const setNoteEdit = (r: AdminProfile, on: boolean) =>
+    run(r.id, async () => db().from('profiles').update({ bnl_note_edit: on }).eq('id', r.id), { bnlNoteEdit: on });
 
   const setYcAccess = (r: AdminProfile, yc: boolean) =>
     run(r.id, async () => db().from('profiles').update({ yc_access: yc }).eq('id', r.id), { ycAccess: yc });
@@ -247,6 +253,13 @@ export default function AdminUsers({
                       {lbl}
                     </button>
                   ))}
+                  <button disabled={busy === r.id}
+                    className={`tbtn${r.bnlNoteEdit ? ' tbtn-on' : ''}`}
+                    style={{ padding: '2px 8px', fontSize: 11 }}
+                    title="May EDIT their own notes (typo fixes). Default off; every edit keeps the previous text in an audit history. Deleting is never possible."
+                    onClick={() => setNoteEdit(r, !r.bnlNoteEdit)}>
+                    ✎ Edit own
+                  </button>
                 </span>
               )}
               {!r.isAdmin && r.status === 'approved' && (

@@ -70,6 +70,7 @@ export default async function AdminPage() {
     bnlAccess: Boolean(p.bnl_access),
     bnlWritePops: (p.bnl_write_pops as string[] | null)
       ?? (p.bnl_write ? ['all'] : []),
+    bnlNoteEdit: Boolean(p.bnl_note_edit),
     ycAccess: Boolean(p.yc_access),
     hlAccess: Boolean(p.helpline_access),
     status: p.status,

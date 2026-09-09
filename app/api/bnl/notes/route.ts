@@ -41,9 +41,12 @@ export async function GET(req: Request) {
   const pid = assertPid(req);
   if (!pid) return NextResponse.json({ error: 'pid required' }, { status: 400 });
 
+  // '*' on purpose: naming edited_at explicitly would ERROR until the
+  // run-once bnl_note_edit.sql adds it — with '*' a missing column simply
+  // reads undefined (same deploy-to-SQL-gap convention as getViewer).
   const { data, error } = await supabaseServer()
     .from('bnl_notes')
-    .select('id, body, author_name, author_email, created_at')
+    .select('*')
     .eq('pid', pid)
     .order('created_at', { ascending: false });
 
@@ -51,7 +54,58 @@ export async function GET(req: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   // canWrite rides along so every composer (drawer, quick note, worklists)
   // self-gates without prop-drilling — the INSERT policy is the real boundary.
-  return NextResponse.json({ notes: data ?? [], canWrite: await canWriteOn(pid, viewer.bnlWritePops) });
+  // canEdit + viewerId let the thread show a pencil ONLY on the caller's own
+  // notes when they hold the edit grant; the UPDATE policy is the boundary.
+  return NextResponse.json({
+    notes: data ?? [],
+    canWrite: await canWriteOn(pid, viewer.bnlWritePops),
+    canEdit: viewer.canEditBnlNotes,
+    viewerId: viewer.id,
+  });
+}
+
+/** Edit ONE OWN note's body (per-account grant; trigger archives the old
+ *  text and stamps edited_at — see supabase/bnl_note_edit.sql). */
+export async function PATCH(req: Request) {
+  const viewer = await getViewer();
+  if (!viewer) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!viewer.canEditBnlNotes) {
+    return NextResponse.json(
+      { error: 'Note editing is not enabled for your account — an administrator assigns it in Users.' },
+      { status: 403 },
+    );
+  }
+
+  let payload: { id?: number; body?: string };
+  try {
+    payload = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'invalid JSON' }, { status: 400 });
+  }
+  const id = Number(payload.id);
+  const body = (payload.body ?? '').trim();
+  if (!Number.isFinite(id)) return NextResponse.json({ error: 'id required' }, { status: 400 });
+  if (!body) return NextResponse.json({ error: 'note cannot be empty' }, { status: 400 });
+  if (body.length > MAX_BODY) {
+    return NextResponse.json({ error: `note too long (max ${MAX_BODY} characters)` }, { status: 400 });
+  }
+
+  // Session client: the "granted authors edit own notes" policy (author =
+  // caller + grant) is the real boundary; .eq('author_id') keeps the error
+  // message honest when someone tries to edit another author's note.
+  const { data, error } = await supabaseServer()
+    .from('bnl_notes')
+    .update({ body })
+    .eq('id', id)
+    .eq('author_id', viewer.id)
+    .select('*')
+    .maybeSingle();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) {
+    return NextResponse.json({ error: 'You can only edit your own notes.' }, { status: 403 });
+  }
+  return NextResponse.json({ note: data });
 }
 
 export async function POST(req: Request) {
