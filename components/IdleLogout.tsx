@@ -8,7 +8,7 @@ import { IDLE_MS, IDLE_WARN_MS, IDLE_LOCAL_KEY, IDLE_PING_MS } from '../lib/idle
  * lib/idle.ts for the whole design). Measures idleness with the CLIENT clock
  * only (localStorage stamp, shared so activity in ANY tab keeps every tab
  * alive), shows a "still there?" card 5 minutes before the deadline, and at
- * the hour signs out via the server-side signout route — the only reliable
+ * IDLE_MS signs out via the server-side signout route — the only reliable
  * way to clear the middleware-set session cookies (CLAUDE.md §4).
  *
  * While the user is active it pings /api/seen (throttled), which refreshes

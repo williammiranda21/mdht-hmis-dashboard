@@ -106,7 +106,7 @@ export default function LoginForm() {
         <div role="status" style={{ background: 'var(--warn-light)', color: 'var(--warn)',
           border: '1px solid var(--warn)', borderRadius: 8, padding: '9px 13px',
           fontSize: 13, marginBottom: 12, fontWeight: 600 }}>
-          You were signed out after an hour of inactivity. Sign back in to continue.
+          You were signed out after 20 minutes of inactivity. Sign back in to continue.
         </div>
       )}
       <label className="lfield">

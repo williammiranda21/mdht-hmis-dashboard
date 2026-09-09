@@ -1,7 +1,8 @@
 /**
- * Idle sign-out policy (user directive 2026-08-20): away for 1 hour = signed
- * out. HMIS security baseline expects automatic logoff, and Supabase sessions
- * otherwise persist indefinitely in cookies.
+ * Idle sign-out policy: away for 20 minutes = signed out (user directive
+ * 2026-09-09; originally 1 hour, 2026-08-20). HMIS security baseline expects
+ * automatic logoff, and Supabase sessions otherwise persist indefinitely in
+ * cookies.
  *
  * Design — CLOCKS NEVER MIX (a client PC with a skewed clock must not be able
  * to lock itself out, so no client-written time is ever compared to server
@@ -14,13 +15,13 @@
  *   middleware idle check — it's the seeding endpoint (chicken-and-egg).
  * - CLIENT side: components/IdleLogout.tsx measures idleness with the CLIENT
  *   clock (localStorage, shared across tabs), warns IDLE_WARN_MS before the
- *   hour, signs out through /auth/signout at the hour, and pings /api/seen
+ *   deadline, signs out through /auth/signout at IDLE_MS, and pings /api/seen
  *   (throttled) while the user is active so the server stamp stays fresh.
  * - Middleware deliberately never refreshes the stamp from request traffic:
  *   requests aren't proof a human is present (a future polling feature would
  *   silently defeat the timeout). Only the client's activity ping refreshes.
  */
-export const IDLE_MS = 60 * 60 * 1000;          // 1 hour of inactivity
+export const IDLE_MS = 20 * 60 * 1000;          // 20 minutes of inactivity
 export const IDLE_WARN_MS = 5 * 60 * 1000;      // warn 5 minutes before
 export const IDLE_COOKIE = 'hmis-last-active';  // server-written, httpOnly
 export const IDLE_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
