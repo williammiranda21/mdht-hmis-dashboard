@@ -35,7 +35,7 @@ type Props = {
   combos: SystemCombo[];
   /** combos for prevPeriod — the period-over-period delta source */
   prevCombos: SystemCombo[];
-  monthlyAll: Record<string, SysRec>;
+  seriesAll: Record<string, SysRec>;
   sysReturns: Record<string, Record<string, ReturnsBucket>>;
 };
 
@@ -147,17 +147,23 @@ function CardView({ c, dt }: { c: Card; dt?: string }) {
   );
 }
 
-export default function SpmView({ periods, granularity, period, prevPeriod, household, combos, prevCombos, monthlyAll, sysReturns }: Props) {
+export default function SpmView({ periods, granularity, period, prevPeriod, household, combos, prevCombos, seriesAll, sysReturns }: Props) {
   const router = useRouter();
 
   const byKey: Record<string, SysRec> = {};
   combos.forEach((c) => { byKey[`${c.household_type}|${c.subpopulation}`] = c.data as SysRec; });
   const e = byKey[`${household}|All`] || byKey['All|All'];
 
-  // 12-month trailing window on the All|All MONTHLY series (the avg marker).
-  const mk = Object.keys(monthlyAll).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
+  // Trailing window on the All|All series of the SELECTED granularity (the
+  // avg marker): 12 months / 4 quarters / 3 fiscal years, ending at the
+  // selected period. Same-granularity on purpose (user 2026-09-09) — a FY
+  // headline against a typical-month tick read as "10x above average" while
+  // the FY-over-FY delta said +27%. Keys sort lexically within a granularity
+  // ('2026-08', 'FY2026-Q3', 'FY2026').
+  const AVG_WINDOW = granularity === 'monthly' ? 12 : granularity === 'quarterly' ? 4 : 3;
+  const mk = Object.keys(seriesAll).sort();
   const idx = mk.indexOf(period);
-  const recent = idx < 0 ? mk.slice(-12) : mk.slice(Math.max(0, idx - 11), idx + 1);
+  const recent = idx < 0 ? mk.slice(-AVG_WINDOW) : mk.slice(Math.max(0, idx - (AVG_WINDOW - 1)), idx + 1);
   // Period-over-period: prior period of the SELECTED granularity, same
   // household slice — so quarterly and fiscal views get deltas too.
   const prevByKey: Record<string, SysRec> = {};
@@ -166,7 +172,7 @@ export default function SpmView({ periods, granularity, period, prevPeriod, hous
   const deltaLabel = granularity === 'monthly' ? 'vs prior month'
     : granularity === 'quarterly' ? 'vs prior quarter' : 'vs prior FY';
   const avgOf = (f: string): number | null => {
-    const vs = recent.map((k) => monthlyAll[k]?.[f]).filter((v): v is number => v != null);
+    const vs = recent.map((k) => seriesAll[k]?.[f]).filter((v): v is number => v != null);
     return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
   };
 

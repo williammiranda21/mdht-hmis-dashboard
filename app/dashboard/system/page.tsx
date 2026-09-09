@@ -1,7 +1,7 @@
 import {
   getSystemPeriods,
   getSystemPeriodCombos,
-  getSystemMonthlyAllSeries,
+  getSystemAllSeries,
   getSystemReturns,
 } from '../../../lib/queries';
 import type { Granularity } from '../../../lib/types';
@@ -34,10 +34,10 @@ export default async function SystemPerformancePage({
   // monthly-only because prev came from the monthly series alone).
   const prevPeriod = periods[periods.indexOf(period) + 1] ?? null;
 
-  const [combos, prevCombos, monthlyAll, sysReturns] = await Promise.all([
+  const [combos, prevCombos, seriesAll, sysReturns] = await Promise.all([
     getSystemPeriodCombos(granularity, period),
     prevPeriod ? getSystemPeriodCombos(granularity, prevPeriod) : Promise.resolve([]),
-    getSystemMonthlyAllSeries(),
+    getSystemAllSeries(granularity),
     getSystemReturns(),
   ]);
 
@@ -50,7 +50,7 @@ export default async function SystemPerformancePage({
       household={household}
       combos={combos}
       prevCombos={prevCombos}
-      monthlyAll={monthlyAll}
+      seriesAll={seriesAll}
       sysReturns={sysReturns}
     />
   );

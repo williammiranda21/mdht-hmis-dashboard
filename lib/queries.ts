@@ -152,14 +152,17 @@ export async function getSystemMetrics(
   return (data?.data as SystemRecord) ?? null;
 }
 
-/** All monthly SPM records at household 'All' / subpop 'All', keyed by period.
- *  Drives the 12-month average line and prior-period deltas on the SPM cards.
- *  (~371 rows — safely under PostgREST's 1000-row cap.) */
-export async function getSystemMonthlyAllSeries(): Promise<Record<string, SystemRecord>> {
+/** All|All SPM records for ONE granularity, keyed by period — the avg-tick
+ *  series on the SPM cards. Same-granularity ON PURPOSE (user 2026-09-09):
+ *  the tick used to come from the monthly series at every granularity, so a
+ *  fiscal-year headline sat next to a typical-month tick and every FY card
+ *  looked ~10x above average. (~60 monthly / ~20 quarterly / ~6 fiscal rows
+ *  — safely under PostgREST's 1000-row cap.) */
+export async function getSystemAllSeries(granularity: Granularity): Promise<Record<string, SystemRecord>> {
   const { data, error } = await supabaseServer()
     .from('system_metrics')
     .select('period, data')
-    .eq('granularity', 'monthly')
+    .eq('granularity', granularity)
     .eq('household_type', 'All')
     .eq('subpopulation', 'All');
   if (error) throw error;
