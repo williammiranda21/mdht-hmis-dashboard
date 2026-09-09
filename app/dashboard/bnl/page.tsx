@@ -1,4 +1,5 @@
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
+import { audit } from '../../../lib/audit';
 import { parseRosterQuery, queryRoster, PAGE_SIZE } from '../../../lib/bnl-query';
 import { enrichRoster } from '../../../lib/bnl-enrich';
 import BnlView from './BnlView';
@@ -28,6 +29,29 @@ export default async function BnlPage({ searchParams }: {
   const viewer = await getViewer();
   if (!viewer) return null; // middleware redirects to /login
 
+  // MFA gate (compliance gap #1): the name-bearing roster requires an
+  // enrolled authenticator AND a session that verified one (AAL2). Enrolled
+  // users on a pre-MFA session just need to sign back in.
+  if (viewer.canSeeBnl && (!viewer.mfaEnrolled || !viewer.aal2)) {
+    return (
+      <div className="panel">
+        <div className="empty" style={{ maxWidth: 560 }}>
+          <strong>🔐 Two-factor authentication required</strong>
+          <p style={{ marginTop: 8 }}>
+            {viewer.mfaEnrolled
+              ? 'Your authenticator is set up, but this session signed in before two-factor was verified. Sign out and back in — you’ll be asked for your 6-digit code.'
+              : <>The By-Name List contains client names, so it requires two-factor
+                 authentication. Set it up in <a href="/dashboard/account">My account</a> —
+                 it takes about a minute with any authenticator app.</>}
+          </p>
+        </div>
+      </div>
+    );
+  }
+  if (viewer.canSeeBnl) {
+    // Read-audit (compliance gap #2): every render of the name-bearing roster.
+    await audit('bnl_view', viewer);
+  }
   if (!viewer.canSeeBnl) {
     return (
       <div className="panel">

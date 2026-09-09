@@ -310,6 +310,13 @@ export default function BnlView({
 
   function openDrill(r: BnlClient) {
     setDrill(r);   // detail/timeline/hist3 load inside ClientDrawer
+    // Read-audit beacon (compliance gap #2): opening a client's drawer is a
+    // person-level record view. Fire-and-forget — never blocks the drawer.
+    fetch('/api/audit', {
+      method: 'POST', keepalive: true,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'bnl_drawer', pid: r.pid }),
+    }).catch(() => {});
   }
 
   // Focus toggle — optimistic; reverts if the POST fails. Updates the open

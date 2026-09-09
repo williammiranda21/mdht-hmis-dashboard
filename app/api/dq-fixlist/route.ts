@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
+import { audit } from '../../../lib/audit';
 import { EVA_BY_ID } from '../../../lib/evaChecks';
 import { DQ_ELEMENTS } from '../../../lib/dq-elements';
 
@@ -37,6 +38,9 @@ export async function GET(req: Request) {
   if (!/^(\d{4}-\d{2}|FY\d{4}(-Q[1-4])?)$/.test(period)) {
     return NextResponse.json({ error: 'unrecognized period' }, { status: 400 });
   }
+  // Read-audit (compliance gap #2): fix-lists carry person-level record IDs.
+  await audit(sp.get('format') === 'csv' ? 'fixlist_export' : 'fixlist_view',
+    viewer, { project: projectId, period });
 
   const sb = supabaseServer();
 

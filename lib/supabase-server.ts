@@ -71,6 +71,14 @@ export interface Viewer {
   /** May open Helpline Triage. Admins always; non-admins via `helpline_access`.
    *  Mirrors can_see_helpline() SQL. */
   canSeeHelpline: boolean;
+  /** May edit their OWN BNL notes (per-account grant, default off — mirrors
+   *  can_edit_bnl_notes() SQL; every edit is history-archived by trigger). */
+  canEditBnlNotes: boolean;
+  /** Has a VERIFIED TOTP factor enrolled (county-compliance gap #1). */
+  mfaEnrolled: boolean;
+  /** This session passed a second factor (JWT aal = 'aal2'). An enrolled user
+   *  on a pre-MFA session reads enrolled=true, aal2=false → re-login. */
+  aal2: boolean;
 }
 
 /**
@@ -97,7 +105,19 @@ export async function getViewer(): Promise<Viewer | null> {
   const status = (data?.status as ViewerStatus) ?? 'pending';
   const isApproved = status === 'approved';
   const isAdmin = Boolean(data?.is_admin) && isApproved;
+  // MFA state (gap #1): enrolled = a verified TOTP factor exists on the user;
+  // aal2 = THIS session's token was elevated by a second factor. Both fail
+  // closed to false on any error so a hiccup can't grant BNL access.
+  const mfaEnrolled = (user.factors ?? []).some(
+    (f) => f.factor_type === 'totp' && f.status === 'verified');
+  let aal2 = false;
+  try {
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    aal2 = aal?.currentLevel === 'aal2';
+  } catch { /* fail closed */ }
   return {
+    mfaEnrolled,
+    aal2,
     id: user.id,
     email: data?.email ?? user.email ?? null,
     displayName: data?.display_name ?? null,
@@ -113,6 +133,8 @@ export async function getViewer(): Promise<Viewer | null> {
       : !isApproved || !data?.bnl_access ? []
       : (data?.bnl_write_pops as string[] | undefined)
         ?? (((data?.bnl_write as boolean | undefined) ?? true) ? ['all'] : []),
+    canEditBnlNotes: isAdmin
+      || (isApproved && Boolean(data?.bnl_access) && Boolean(data?.bnl_note_edit)),
     canSeeYc: isAdmin || (isApproved && Boolean(data?.yc_access)),
     // TEMPORARY rollout lock (user directive 2026-08-20): Helpline is
     // limited to William Miranda ONLY while it's being shaped — the other

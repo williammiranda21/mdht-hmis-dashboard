@@ -1,4 +1,5 @@
 import { getViewer, supabaseServer } from '../../../../lib/supabase-server';
+import { audit } from '../../../../lib/audit';
 import { parseRosterQuery, queryRoster, ROSTER_COLS } from '../../../../lib/bnl-query';
 import { enrichRoster } from '../../../../lib/bnl-enrich';
 import { MILESTONES } from '../../../dashboard/bnl/types';
@@ -62,9 +63,15 @@ export async function GET(req: Request) {
   const viewer = await getViewer();
   if (!viewer) return new Response('unauthorized', { status: 401 });
   if (!viewer.canSeeBnl) return new Response('forbidden', { status: 403 });
+  // Same MFA bar as the BNL page (gap #1) — names leave the system here.
+  if (!viewer.mfaEnrolled || !viewer.aal2) {
+    return new Response('two-factor authentication required', { status: 403 });
+  }
 
   const base = parseRosterQuery(new URL(req.url).searchParams);
   const sb = supabaseServer();
+  // Name-bearing data leaving the system — always on the access log (gap #2).
+  await audit('bnl_export', viewer, { query: new URL(req.url).search.slice(0, 500) });
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

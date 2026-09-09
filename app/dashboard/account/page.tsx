@@ -1,5 +1,6 @@
 import { getViewer } from '../../../lib/supabase-server';
 import ChangePassword from './ChangePassword';
+import MfaSettings from './MfaSettings';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +35,8 @@ export default async function AccountPage() {
           </table>
         </div>
       </div>
+
+      <MfaSettings bnlGranted={viewer.canSeeBnl} />
 
       <ChangePassword />
     </>

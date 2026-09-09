@@ -34,7 +34,10 @@ const MARK_COLS = new Set([
   'sys_days3', 'ms_wait', 'risk_pts', 'income', 'ref_status', 'notes',
 ]);
 
-const TABLE_MISSING = /relation .*bnl_cell_marks.* does not exist|42P01/i;
+// Postgres wording (42P01) AND PostgREST's schema-cache wording (PGRST205) —
+// the latter is what actually surfaces through supabase-js when the run-once
+// SQL hasn't been applied (observed 2026-09-03).
+const TABLE_MISSING = /relation .*bnl_cell_marks.* does not exist|42P01|PGRST205|schema cache/i;
 
 export async function GET() {
   const viewer = await getViewer();
