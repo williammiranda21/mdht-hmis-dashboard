@@ -74,6 +74,9 @@ export interface Viewer {
   /** May edit their OWN BNL notes (per-account grant, default off — mirrors
    *  can_edit_bnl_notes() SQL; every edit is history-archived by trigger). */
   canEditBnlNotes: boolean;
+  /** When this user last acknowledged the HMIS Policies & Procedures (null =
+   *  never). The dashboard layout gates on this annually. */
+  policiesAttestedAt: string | null;
   /** Has a VERIFIED TOTP factor enrolled (county-compliance gap #1). */
   mfaEnrolled: boolean;
   /** This session passed a second factor (JWT aal = 'aal2'). An enrolled user
@@ -133,6 +136,7 @@ export async function getViewer(): Promise<Viewer | null> {
       : !isApproved || !data?.bnl_access ? []
       : (data?.bnl_write_pops as string[] | undefined)
         ?? (((data?.bnl_write as boolean | undefined) ?? true) ? ['all'] : []),
+    policiesAttestedAt: (data?.policies_attested_at as string | null) ?? null,
     canEditBnlNotes: isAdmin
       || (isApproved && Boolean(data?.bnl_access) && Boolean(data?.bnl_note_edit)),
     canSeeYc: isAdmin || (isApproved && Boolean(data?.yc_access)),

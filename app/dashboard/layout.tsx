@@ -5,6 +5,7 @@ import TabNav from '../../components/TabNav';
 import UserMenu from '../../components/UserMenu';
 import IdleLogout from '../../components/IdleLogout';
 import AnnouncementBar, { type Announcement } from '../../components/AnnouncementBar';
+import PolicyAttestation from '../../components/PolicyAttestation';
 import { getViewer, supabaseServer } from '../../lib/supabase-server';
 
 /** '2026-08-10' → '8/10/2026' without a Date parse (timezone-safe). */
@@ -136,6 +137,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <ThemeToggle />
         </header>
         <div className="wrap">
+          {/* Annual P&P acknowledgment (gap #6): approved users must (re)accept
+              every 365 days — mirrors the Trust's paper User's Acknowledgement
+              Form. Blocks everything until agreed; sign-out is the only exit. */}
+          {viewer?.isApproved && (() => {
+            const at = viewer.policiesAttestedAt ? new Date(viewer.policiesAttestedAt).getTime() : null;
+            const stale = at == null || Number.isNaN(at)
+              || (Date.now() - at) > 365 * 24 * 60 * 60 * 1000;
+            return stale
+              ? <PolicyAttestation renewal={at != null && !Number.isNaN(at)} email={viewer.email} />
+              : null;
+          })()}
           <AnnouncementBar initial={announcement} isAdmin={viewer?.isAdmin ?? false} />
           {children}
         </div>

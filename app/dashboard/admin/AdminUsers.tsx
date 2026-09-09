@@ -22,6 +22,9 @@ export interface AdminProfile {
   /** May edit their OWN notes (bnl_note_edit.sql) — default off; every edit
    *  is history-archived by trigger. Admins always may. */
   bnlNoteEdit: boolean;
+  /** Last HMIS P&P acknowledgment (policies_attestation.sql) — null = never;
+   *  the dashboard gate renews it annually. Shown for compliance review. */
+  policiesAttestedAt: string | null;
   /** Youth Connect (intake list + review + invites). Admins always have it. */
   ycAccess: boolean;
   /** Helpline Triage (call intake + assignment). Admins always have it. */
@@ -166,6 +169,29 @@ export default function AdminUsers({
       : <span title={title}>{label}</span>;
   }
 
+  // Annual P&P acknowledgment — compliance review at a glance. Green = current
+  // (within 365d), amber = coming due is implicit (the gate renews it), red =
+  // never acknowledged (pre-gate account that hasn't signed in since).
+  function attestSub(r: AdminProfile) {
+    if (r.status !== 'approved') return null;
+    if (!r.policiesAttestedAt) {
+      return (
+        <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2 }}
+          title="Has not acknowledged the HMIS Policies & Procedures in-app — the gate will require it at their next visit">
+          P&amp;P: not acknowledged
+        </div>
+      );
+    }
+    const d = new Date(r.policiesAttestedAt);
+    const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+    return (
+      <div style={{ fontSize: 11, color: days > 365 ? 'var(--danger)' : 'var(--accent)', marginTop: 2 }}
+        title={`HMIS Policies & Procedures acknowledged ${d.toLocaleString()} — renewed annually by the sign-in gate`}>
+        P&amp;P ✓ {days === 0 ? 'today' : `${days}d ago`}
+      </div>
+    );
+  }
+
   // Real usage (profiles.last_seen_at) — the answer to "sign-in says 20d ago
   // but I know they were in here yesterday": persistent sessions don't stamp
   // a sign-in, the /api/seen heartbeat stamps this.
@@ -194,7 +220,7 @@ export default function AdminUsers({
           </td>
           <td>{r.agency || <span style={{ color: 'var(--faint)' }}>—</span>}</td>
           <td>{statusPill(r.status)}</td>
-          <td style={{ whiteSpace: 'nowrap' }}>{lastSignInCell(r)}{lastSeenSub(r)}</td>
+          <td style={{ whiteSpace: 'nowrap' }}>{lastSignInCell(r)}{lastSeenSub(r)}{attestSub(r)}</td>
           <td className="num">
             {r.isAdmin ? (
               <span className="pill good" title="Admins see every project — grants aren't used">
