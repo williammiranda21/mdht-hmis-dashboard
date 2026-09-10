@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
@@ -11,6 +11,7 @@ import { AREAS, COUNTY_ZONES, DEFAULT_RULES, EMERGENCY_SLEEPING, FACTORS, HOUSEH
   MAX_FAILED_ATTEMPTS, SLEEPING_OPTIONS, agingPts, priorityBand, priorityOf, suggestTeam,
   type CaseStatus, type PriorityRules } from '../../../lib/helpline-options';
 import { fetchPriorityRules, invalidatePriorityRules } from '../../../lib/priority-rules';
+import { inFeature, project, type GeoFC } from '../../../lib/slippy';
 import { fetchCustomAreas } from '../../../lib/custom-areas';
 import ReferOut, { type ReferralResource } from '../../../components/ReferOut';
 
@@ -154,12 +155,14 @@ const OPEN_STATUSES: CaseStatus[] = ['assigned', 'attempted', 'contacted'];
 type HlTab = 'queue' | 'board' | 'cases' | 'map' | 'admin';
 const HL_TAB_KEY = 'hl-tab';
 
-export default function HelplineView({ me, isAdmin, cases, teams, events = {}, callsByCase = {}, sqlMissing }: {
+export default function HelplineView({ me, isAdmin, cases, teams, events = {}, callsByCase = {}, callLog = [], sqlMissing }: {
   me: string; isAdmin: boolean; cases: HlCase[]; teams: Team[];
   /** outreach trail per open case: chronological attempt/contact events */
   events?: Record<number, { at: string; kind: string }[]>;
   /** phone calls received per case (initial + repeat) — the VOLUME record */
   callsByCase?: Record<number, number>;
+  /** every phone call's timestamp+kind — demand patterns (day × hour) */
+  callLog?: { at: string; kind: string }[];
   sqlMissing: boolean;
 }) {
   const router = useRouter();
@@ -844,7 +847,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
       {shownTab === 'map' && (
         <>
           <ReportMap cases={cases} teams={teams} isAdmin={isAdmin} onOpen={(c) => setDrawerC(c)} />
-          <Reporting cases={cases} teams={teams} events={events} callsByCase={callsByCase} />
+          <Reporting cases={cases} teams={teams} events={events} callsByCase={callsByCase}
+            callLog={callLog} rules={rules} />
         </>
       )}
 
@@ -944,16 +948,363 @@ function median(xs: number[]): number | null {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+// ── Reporting helpers ─────────────────────────────────────────────────────────
+// Day/hour bucketing is MIAMI-local on purpose: timestamps are UTC and the
+// question "when do calls come in" is about local staffing hours. Client
+// clocks are usually already Eastern, but the explicit zone makes the report
+// deterministic anywhere (and matches the server-rendered monthly PDF).
+const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function miamiDowHour(iso: string): { dow: number; hour: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', hourCycle: 'h23',
+  }).formatToParts(new Date(iso));
+  const dow = DOW_LABELS.indexOf(parts.find((p) => p.type === 'weekday')?.value ?? 'Sun');
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0') % 24;
+  return { dow: dow < 0 ? 0 : dow, hour };
+}
+function fmtHour(h: number): string {
+  return h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`;
+}
+const pctOf = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : '—');
+
+/** One bordered card per report section (user 2026-09-10: "everything looks
+ *  too together") — a title rule on top, optional full-row span in the grid. */
+function ReportCard({ title, span, children }: {
+  title: React.ReactNode; span?: boolean; children: React.ReactNode;
+}) {
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 10,
+      padding: '12px 16px 14px', minWidth: 0,
+      ...(span ? { gridColumn: '1 / -1' } : {}) }}>
+      <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase',
+        letterSpacing: '.06em', color: 'var(--strong)',
+        borderBottom: '2px solid var(--accent)', paddingBottom: 7, marginBottom: 12 }}>
+        {title}</div>
+      {children}
+    </div>
+  );
+}
+
+/** Outcome funnel — call → case → assigned → contacted → confirmed → HMIS-verified.
+ *  The last stage is the module's promise: outcomes proven by enrollment data
+ *  (verify_helpline.py), never self-reported. */
+function Funnel({ cases, callsN }: { cases: HlCase[]; callsN: number }) {
+  const opened = cases.length;
+  const stages = [
+    ['Cases opened', opened],
+    ['Assigned to outreach', cases.filter((c) => c.assigned_at).length],
+    ['Contacted', cases.filter((c) => (c.contacts ?? 0) > 0 || c.confirmed_at
+      || c.verified_entry || ['contacted', 'confirmed'].includes(c.status)).length],
+    ['Confirmed homeless', cases.filter((c) => c.confirmed_at || c.status === 'confirmed'
+      || c.verified_entry).length],
+    ['Verified HMIS enrollment', cases.filter((c) => c.verified_entry).length],
+  ] as [string, number][];
+  const medVerifyDays = median(cases
+    .filter((c) => c.verified_entry && c.confirmed_at)
+    .map((c) => (new Date(c.verified_entry!).getTime() - new Date(c.confirmed_at!).getTime()) / 86_400_000)
+    .filter((d) => d >= 0));
+  if (!opened) return null;
+  return (
+    <ReportCard title="Outcome funnel — from phone call to proven enrollment">
+      <div style={{ display: 'grid', gap: 4, maxWidth: 640 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 13 }}>
+          <span style={{ width: 210, color: 'var(--muted)' }}>☎ Calls received</span>
+          <b>{fmtInt(callsN)}</b>
+          {callsN > opened && <span className="bnl-sub">({fmtInt(callsN - opened)} repeat
+            call{callsN - opened === 1 ? '' : 's'} joined an existing case)</span>}
+        </div>
+        {stages.map(([label, n], i) => (
+          <div key={label} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
+            <span style={{ width: 210, color: 'var(--muted)', flex: 'none' }}>{label}</span>
+            <div style={{ flex: 1, height: 16, background: 'var(--track)', borderRadius: 4,
+              overflow: 'hidden' }}>
+              <div style={{ width: `${opened ? Math.max(2, (n / opened) * 100) : 0}%`, height: '100%',
+                background: i === stages.length - 1 ? 'var(--accent)' : 'var(--primary)',
+                opacity: i === stages.length - 1 ? 1 : 0.45 + i * 0.12, borderRadius: 4 }} />
+            </div>
+            <b style={{ width: 40, textAlign: 'right' }}>{fmtInt(n)}</b>
+            <span className="bnl-sub" style={{ width: 78 }}>
+              {i === 0 ? '100%' : `${pctOf(n, opened)} of cases`}</span>
+          </div>
+        ))}
+      </div>
+      {medVerifyDays != null && (
+        <div className="bnl-sub" style={{ marginTop: 5 }}>
+          Median confirmed → verified HMIS entry: <b style={{ color: 'var(--text)' }}>
+            {Math.round(medVerifyDays)}d</b> (enrollment dates read from the HMIS export, not self-reported)
+        </div>
+      )}
+    </ReportCard>
+  );
+}
+
+/** Demand patterns — when the phone actually rings (Miami-local day × hour). */
+function DemandHeat({ calls }: { calls: { at: string; kind: string }[] }) {
+  const grid = useMemo(() => {
+    const g: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+    for (const c of calls) { const { dow, hour } = miamiDowHour(c.at); g[dow][hour] += 1; }
+    return g;
+  }, [calls]);
+  if (!calls.length) return null;
+  const max = Math.max(1, ...grid.flat());
+  const dayTotals = grid.map((r) => r.reduce((a, b) => a + b, 0));
+  const hourTotals = Array.from({ length: 24 }, (_, h) => grid.reduce((s, r) => s + r[h], 0));
+  const busiestDay = dayTotals.indexOf(Math.max(...dayTotals));
+  const busiestHour = hourTotals.indexOf(Math.max(...hourTotals));
+  const initial = calls.filter((c) => c.kind === 'initial').length;
+  return (
+    <ReportCard title="Demand patterns — when calls come in (Miami time)">
+      <div style={{ display: 'grid', gridTemplateColumns: '36px repeat(24, minmax(9px, 1fr))',
+        gap: 2, maxWidth: 640, alignItems: 'center' }}>
+        <span />
+        {Array.from({ length: 24 }, (_, h) => (
+          <span key={h} className="bnl-sub" style={{ fontSize: 9.5, textAlign: 'center' }}>
+            {h % 6 === 0 ? fmtHour(h) : ''}</span>
+        ))}
+        {grid.map((row, d) => (
+          <Fragment key={d}>
+            <span className="bnl-sub" style={{ fontSize: 10.5 }}>{DOW_LABELS[d]}</span>
+            {row.map((n, h) => (
+              <div key={h} title={`${DOW_LABELS[d]} ${fmtHour(h)} — ${n} call${n === 1 ? '' : 's'}`}
+                style={{ height: 15, borderRadius: 2,
+                  background: n ? 'var(--accent)' : 'var(--track)',
+                  opacity: n ? 0.25 + 0.75 * (n / max) : 0.45 }} />
+            ))}
+          </Fragment>
+        ))}
+      </div>
+      <div className="bnl-sub" style={{ marginTop: 6 }}>
+        Busiest: <b style={{ color: 'var(--text)' }}>{DOW_LABELS[busiestDay]}s</b> and the{' '}
+        <b style={{ color: 'var(--text)' }}>{fmtHour(busiestHour)}–{fmtHour((busiestHour + 1) % 24)}</b> hour
+        · {fmtInt(initial)} first-time call{initial === 1 ? '' : 's'}, {fmtInt(calls.length - initial)} repeat
+      </div>
+    </ReportCard>
+  );
+}
+
+/** Geography — the leadership cut: cases by County Commission District (the
+ *  pin-stamped county_district), with the finer area/municipality list beside. */
+function Districts({ cases }: { cases: HlCase[] }) {
+  if (!cases.length) return null;
+  const count = (key: (c: HlCase) => string | null) => {
+    const m = new Map<string, number>();
+    for (const c of cases) { const k = key(c) || '(no pin)'; m.set(k, (m.get(k) ?? 0) + 1); }
+    return [...m.entries()];
+  };
+  const dist = count((c) => c.county_district).sort((a, b) =>
+    (parseInt(a[0].replace(/\D/g, ''), 10) || 99) - (parseInt(b[0].replace(/\D/g, ''), 10) || 99));
+  const areas = count((c) => c.area).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const max = Math.max(1, ...dist.map(([, n]) => n));
+  const bar = (n: number) => (
+    <div style={{ width: 90, height: 9, background: 'var(--track)', borderRadius: 3,
+      display: 'inline-block', verticalAlign: 'middle' }}>
+      <div style={{ width: `${(n / max) * 100}%`, height: '100%', background: 'var(--accent)',
+        borderRadius: 3 }} />
+    </div>
+  );
+  const table = (title: string, rows: [string, number][], withBar: boolean) => (
+    <ReportCard title={title}>
+      <table className="bnl-table" style={{ maxWidth: 360 }}>
+        <thead><tr><th>{withBar ? 'District' : 'Area'}</th>
+          <th className="num">Cases</th><th className="num">{withBar ? '' : 'Share'}</th></tr></thead>
+        <tbody>
+          {rows.map(([k, n]) => (
+            <tr key={k} style={{ cursor: 'default' }}>
+              <td style={k === '(no pin)' ? { color: 'var(--faint)' } : undefined}>{k}</td>
+              <td className="num">{fmtInt(n)}</td>
+              <td className="num">{withBar ? bar(n) : <span className="bnl-sub">{pctOf(n, cases.length)}</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </ReportCard>
+  );
+  return (
+    <>
+      {table('Cases by County Commission District', dist, true)}
+      {areas.length > 0 && table('Top areas / municipalities', areas, false)}
+    </>
+  );
+}
+
+/** Call volume by ZIP CODE — a choropleth of the county's official zip
+ *  boundaries (public/gis/zipcodes.geojson, Miami-Dade GIS). Zips are
+ *  resolved from each case's geocoded pin at report time (point-in-polygon),
+ *  so no schema change and history lights up too; volume weights each case
+ *  by its call count. */
+function ZipHeat({ cases, callsByCase }: {
+  cases: HlCase[]; callsByCase: Record<number, number>;
+}) {
+  const [geo, setGeo] = useState<GeoFC | null>(null);
+  useEffect(() => {
+    fetch('/gis/zipcodes.geojson')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => setGeo(j))
+      .catch(() => setGeo(null));
+  }, []);
+
+  const { counts, unpinned } = useMemo(() => {
+    const m = new Map<string, number>();
+    let missed = 0;
+    if (geo) {
+      for (const c of cases) {
+        if (c.lat == null || c.lng == null) { missed += 1; continue; }
+        const hit = geo.features.find((f) => inFeature(c.lng!, c.lat!, f.geometry));
+        const zip = hit?.properties?.ZIPCODE != null ? String(hit.properties.ZIPCODE) : null;
+        if (zip) m.set(zip, (m.get(zip) ?? 0) + Math.max(1, callsByCase[c.id] ?? 1));
+        else missed += 1;
+      }
+    }
+    return { counts: m, unpinned: missed };
+  }, [geo, cases, callsByCase]);
+
+  // Web-Mercator projection of every ring into one viewBox — the same math
+  // as the tile maps, so shapes look right, not squashed.
+  const shapes = useMemo(() => {
+    if (!geo) return null;
+    const Z = 10;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const rings: { zip: string; rings: { x: number; y: number }[][] }[] = [];
+    for (const f of geo.features) {
+      const zip = f.properties?.ZIPCODE != null ? String(f.properties.ZIPCODE) : '';
+      const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates]
+        : f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [];
+      const rs: { x: number; y: number }[][] = [];
+      for (const p of polys) for (const ring of p as number[][][]) {
+        rs.push(ring.map(([lng, lat]) => {
+          const { px, py } = project(lat, lng, Z);
+          if (px < x0) x0 = px; if (px > x1) x1 = px;
+          if (py < y0) y0 = py; if (py > y1) y1 = py;
+          return { x: px, y: py };
+        }));
+      }
+      rings.push({ zip, rings: rs });
+    }
+    return { rings, x0, y0, w: x1 - x0, h: y1 - y0 };
+  }, [geo]);
+
+  if (!geo || !shapes || !cases.length) return null;
+  const max = Math.max(1, ...counts.values());
+  const W = 400, H = Math.round((shapes.h / shapes.w) * W);
+  const sc = W / shapes.w;
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const totalCalls = [...counts.values()].reduce((a, b) => a + b, 0);
+  return (
+    <ReportCard title="Call volume by zip code" span>
+      <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: 'min(400px, 100%)', height: 'auto' }}
+          role="img" aria-label="Call volume by zip code choropleth">
+          {shapes.rings.map(({ zip, rings }, i) => {
+            const n = counts.get(zip) ?? 0;
+            const d = rings.map((r) => r.map((pt, j) =>
+              `${j ? 'L' : 'M'}${((pt.x - shapes.x0) * sc).toFixed(1)} ${((pt.y - shapes.y0) * sc).toFixed(1)}`)
+              .join('') + 'Z').join('');
+            return (
+              <path key={`${zip}-${i}`} d={d} fillRule="evenodd"
+                fill={n ? 'var(--accent)' : 'var(--track)'}
+                fillOpacity={n ? 0.3 + 0.7 * (n / max) : 0.45}
+                stroke="var(--border)" strokeWidth={0.6}>
+                <title>{zip || '(unlabeled)'} — {n} call{n === 1 ? '' : 's'}</title>
+              </path>
+            );
+          })}
+        </svg>
+        <div style={{ minWidth: 190 }}>
+          <table className="bnl-table" style={{ maxWidth: 260 }}>
+            <thead><tr><th>Zip</th><th className="num">Calls</th><th className="num">Share</th></tr></thead>
+            <tbody>
+              {top.length ? top.map(([zip, n]) => (
+                <tr key={zip} style={{ cursor: 'default' }}>
+                  <td>{zip}</td><td className="num">{fmtInt(n)}</td>
+                  <td className="num"><span className="bnl-sub">{pctOf(n, totalCalls)}</span></td>
+                </tr>
+              )) : (
+                <tr><td colSpan={3} className="bnl-sub">No mapped calls yet — zips light up as
+                  pinned calls come in.</td></tr>
+              )}
+            </tbody>
+          </table>
+          {unpinned > 0 && (
+            <div className="bnl-sub" style={{ marginTop: 6 }}>
+              {fmtInt(unpinned)} case{unpinned === 1 ? '' : 's'} without a map pin — use 📍 Locate
+              on intake so every call lands on the map.
+            </div>
+          )}
+        </div>
+      </div>
+    </ReportCard>
+  );
+}
+
+/** What need is calling in — factor frequencies, priority bands, emergency sleeping. */
+function FactorMix({ cases, rules }: { cases: HlCase[]; rules: PriorityRules }) {
+  if (!cases.length) return null;
+  const counts = FACTORS
+    .map((f) => [f.key, cases.filter((c) => (c.factors ?? []).includes(f.key)).length] as [string, number])
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1]);
+  const bands = { HIGH: 0, MED: 0, LOW: 0 };
+  for (const c of cases) bands[priorityBand(c.priority ?? 0, rules)] += 1;
+  const emergency = cases.filter((c) =>
+    (EMERGENCY_SLEEPING as readonly string[]).includes(c.sleeping ?? '')).length;
+  return (
+    <ReportCard title="Who is calling — factors &amp; priority mix">
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+        {(['HIGH', 'MED', 'LOW'] as const).map((b) => (
+          <span key={b} className="bnl-chip" style={{ background: 'var(--track)', color: bandColor(b) }}>
+            {b} {fmtInt(bands[b])} · {pctOf(bands[b], cases.length)}</span>
+        ))}
+        <span className="bnl-chip" style={{ background: 'var(--danger-light)', color: 'var(--danger)' }}
+          title={`Sleeping: ${(EMERGENCY_SLEEPING as readonly string[]).join(' or ')}`}>
+          ⚠ unsheltered/car {fmtInt(emergency)} · {pctOf(emergency, cases.length)}</span>
+      </div>
+      {counts.length > 0 && (
+        <div style={{ display: 'grid', gap: 3, maxWidth: 520 }}>
+          {counts.map(([k, n]) => (
+            <div key={k} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 12.5 }}>
+              <span style={{ width: 170, color: 'var(--muted)', flex: 'none' }}>{k}</span>
+              <div style={{ flex: 1, height: 11, background: 'var(--track)', borderRadius: 3 }}>
+                <div style={{ width: `${(n / cases.length) * 100}%`, height: '100%',
+                  background: 'var(--accent)', borderRadius: 3, minWidth: 2 }} />
+              </div>
+              <span className="bnl-sub" style={{ width: 86, textAlign: 'right' }}>
+                {fmtInt(n)} · {pctOf(n, cases.length)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </ReportCard>
+  );
+}
+
 /**
  * Per-team performance table (user ask 2026-08-19): assigned / open /
  * confirmed / verified-enrolled / no-locate / declined, plus median hours
  * from call to assignment. Computed from the loaded cases (newest 500) —
  * when volume outgrows that, this moves server-side; the columns won't change.
  */
-function Reporting({ cases, teams, events, callsByCase = {} }: {
+function Reporting({ cases: allCases, teams, events, callsByCase = {}, callLog = [], rules }: {
   cases: HlCase[]; teams: Team[]; events: Record<number, { at: string; kind: string }[]>;
   callsByCase?: Record<number, number>;
+  callLog?: { at: string; kind: string }[];
+  rules: PriorityRules;
 }) {
+  // One period filter feeds EVERY section below (cases by created_at, calls
+  // by received_at) so the funnel, heat grid, districts, factors, team table
+  // and refer-outs always describe the same window.
+  const [period, setPeriod] = useState<'all' | '30' | '90'>('all');
+  const cutoff = period === 'all' ? 0 : Date.now() - Number(period) * 86_400_000;
+  const cases = useMemo(() => (cutoff
+    ? allCases.filter((c) => new Date(c.created_at).getTime() >= cutoff) : allCases),
+    [allCases, cutoff]);
+  const calls = useMemo(() => (cutoff
+    ? callLog.filter((e) => new Date(e.at).getTime() >= cutoff) : callLog),
+    [callLog, cutoff]);
+  // Calls in the window; falls back to per-case counts for sessions loaded
+  // before timestamps rode along.
+  const callsN = calls.length
+    || cases.reduce((s, c) => s + Math.max(1, callsByCase[c.id] ?? 1), 0);
+
   const rows = useMemo(() => {
     const byTeam = new Map<number | null, HlCase[]>();
     for (const c of cases) {
@@ -1016,25 +1367,28 @@ function Reporting({ cases, teams, events, callsByCase = {} }: {
     <div className="panel" style={{ marginTop: 18 }}>
       <div className="panel-h">
         <div>
-          <h3>Team reporting</h3>
-          <div className="meta">Latest {fmtInt(cases.length)} cases · confirmed → enrolled is the
-            promise; median call→assignment is the dispatch speed</div>
+          <h3>Helpline reporting</h3>
+          <div className="meta">{period === 'all' ? `Latest ${fmtInt(cases.length)} cases` :
+            `${fmtInt(cases.length)} cases opened in the last ${period} days`} · confirmed →
+            enrolled is the promise; every outcome verified against HMIS data</div>
         </div>
+        <select className="tinput" value={period} style={{ width: 130, padding: '5px 8px' }}
+          onChange={(e) => setPeriod(e.target.value as 'all' | '30' | '90')}>
+          <option value="all">All loaded</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+        <Link href="/dashboard/helpline/report" className="tbtn"
+          title="Board-ready monthly report — print or save as PDF">🖨 Monthly report</Link>
         <button className="tbtn" onClick={downloadCsv}>⬇ CSV</button>
       </div>
-      {(() => {
-        // calls ≠ cases: this is how many times the phone actually rang
-        const totalCalls = cases.reduce((s, c) => s + Math.max(1, callsByCase[c.id] ?? 1), 0);
-        const repeats = totalCalls - cases.length;
-        return (
-          <div className="bnl-sub" style={{ padding: '0 18px 6px' }}>
-            ☎ Call volume: <b style={{ color: 'var(--text)' }}>{fmtInt(totalCalls)}</b> calls
-            across {fmtInt(cases.length)} cases
-            {repeats > 0 && <> · {fmtInt(repeats)} repeat call{repeats === 1 ? '' : 's'} attached
-              rather than duplicated</>}
-          </div>
-        );
-      })()}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
+        gap: 14, padding: '4px 18px 16px' }}>
+      <Funnel cases={cases} callsN={callsN} />
+      <DemandHeat calls={calls} />
+      <ZipHeat cases={cases} callsByCase={callsByCase} />
+      <Districts cases={cases} />
+      <FactorMix cases={cases} rules={rules} />
       {(() => {
         // SOP external referrals — right-door diversion stats by destination
         // (user report 2026-08-25: the one-line tally wasn't enough to "check
@@ -1054,10 +1408,7 @@ function Reporting({ cases, teams, events, callsByCase = {} }: {
         }
         const refRows = [...by.entries()].sort((a, b) => b[1].total - a[1].total);
         return (
-          <div style={{ padding: '0 18px 12px' }}>
-            <div className="bnl-sub" style={{ fontWeight: 700, textTransform: 'uppercase',
-              letterSpacing: '.05em', margin: '2px 0 6px' }}>
-              ↗ External referrals — right-door diversions</div>
+          <ReportCard title="↗ External referrals — right-door diversions">
             <table className="bnl-table" style={{ maxWidth: 660 }}>
               <thead><tr>
                 <th>Destination</th><th className="num">Total</th>
@@ -1074,9 +1425,10 @@ function Reporting({ cases, teams, events, callsByCase = {} }: {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ReportCard>
         );
       })()}
+      <ReportCard title="Team performance" span>
       <div className="scroll"><table className="bnl-table">
         <thead><tr>
           <th>Team</th><th className="num">Cases</th><th className="num">Open now</th>
@@ -1110,6 +1462,8 @@ function Reporting({ cases, teams, events, callsByCase = {} }: {
           ))}
         </tbody>
       </table></div>
+      </ReportCard>
+      </div>
     </div>
   );
 }

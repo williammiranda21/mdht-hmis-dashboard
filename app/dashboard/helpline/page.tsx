@@ -60,15 +60,18 @@ export default async function HelplinePage() {
 
   // Call VOLUME per case: initial + repeat rows are actual phone calls
   // (cases = people being worked; this is how many times the phone rang).
+  // Timestamps ride along for the demand-pattern reporting (day × hour heat).
   const callsByCase: Record<number, number> = {};
+  const callLog: { at: string; kind: string }[] = [];
   if (ids.length) {
     const { data: cv } = await sb.from('helpline_calls')
-      .select('case_id, kind')
+      .select('case_id, kind, received_at')
       .in('case_id', ids)
       .in('kind', ['initial', 'repeat'])
       .limit(5000);
-    for (const e of (cv ?? []) as { case_id: number }[]) {
+    for (const e of (cv ?? []) as { case_id: number; kind: string; received_at: string }[]) {
       callsByCase[e.case_id] = (callsByCase[e.case_id] ?? 0) + 1;
+      callLog.push({ at: e.received_at, kind: e.kind });
     }
   }
 
@@ -80,6 +83,7 @@ export default async function HelplinePage() {
       teams={(teamsRes.data ?? []) as Team[]}
       events={events}
       callsByCase={callsByCase}
+      callLog={callLog}
       sqlMissing={sqlMissing}
     />
   );
