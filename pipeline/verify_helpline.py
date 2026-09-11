@@ -57,22 +57,34 @@ def main():
         return
     print(f"verify_helpline: {len(todo)} confirmed cases to check", flush=True)
 
-    # ── Re-match unmatched confirmed cases (exact DOB + exact name only) ─────
+    # ── Re-match unmatched confirmed cases ───────────────────────────────────
+    # Pass 1: exact first+last+DOB. Pass 2 (user ask 2026-09-11): exact
+    # last+DOB alone — first names drift (Mike/Michael, spelling), surnames
+    # and birthdates don't. Both passes link ONLY when the key is unique in
+    # the whole Client.csv; twins (same last, same DOB) are two records and
+    # therefore never unique, so they stay manual by construction.
     unmatched = [c for c in todo if not c.get("matched_pid")
-                 and c.get("dob") and c.get("first_name") and c.get("last_name")]
+                 and c.get("dob") and c.get("last_name")]
     if unmatched:
         cl = pd.read_csv(DATA_DIR / "Client.csv", low_memory=False,
                          usecols=["PersonalID", "FirstName", "LastName", "DOB"])
         cl["DOB"] = pd.to_datetime(cl["DOB"], errors="coerce").dt.date.astype(str)
         cl["k"] = (cl["FirstName"].str.strip().str.lower().fillna("") + "|"
                    + cl["LastName"].str.strip().str.lower().fillna("") + "|" + cl["DOB"])
+        cl["k2"] = cl["LastName"].str.strip().str.lower().fillna("") + "|" + cl["DOB"]
         idx = cl.groupby("k")["PersonalID"].agg(list).to_dict()
+        idx2 = cl.groupby("k2")["PersonalID"].agg(list).to_dict()
         for c in unmatched:
-            k = f'{c["first_name"].strip().lower()}|{c["last_name"].strip().lower()}|{c["dob"]}'
-            pids = idx.get(k, [])
-            if len(pids) == 1:      # unique exact hit only — anything else stays manual
+            last = c["last_name"].strip().lower()
+            pids = (idx.get(f'{c["first_name"].strip().lower()}|{last}|{c["dob"]}', [])
+                    if c.get("first_name") else [])
+            how = "exact name+DOB"
+            if len(pids) != 1:
+                pids = idx2.get(f'{last}|{c["dob"]}', [])
+                how = "exact last+DOB (first differs or missing)"
+            if len(pids) == 1:      # unique hit only — anything else stays manual
                 c["matched_pid"] = pids[0]
-                print(f'  case {c["id"]}: auto-linked to {pids[0][:10]}… (exact name+DOB)')
+                print(f'  case {c["id"]}: auto-linked to {pids[0][:10]}… ({how})')
                 if not dry:
                     sb.table("helpline_cases").update({"matched_pid": pids[0]}).eq("id", c["id"]).execute()
 
