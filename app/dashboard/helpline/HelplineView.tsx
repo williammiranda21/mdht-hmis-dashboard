@@ -158,6 +158,9 @@ const HL_TAB_KEY = 'hl-tab';
 export interface HmisGlance {
   status: string | null; project: string | null; last_contact: string | null;
   chronic: boolean; veteran: boolean;
+  /** for housed clients: HOW — "in <PSH>" (active enrollment, housedOpen)
+   *  vs "exited <program> → <destination>" (housed per exit record) */
+  housedNote: string | null; housedOpen: boolean;
 }
 
 export default function HelplineView({ me, isAdmin, cases, teams, events = {}, callsByCase = {}, callLog = [], hmis = {}, sqlMissing }: {
@@ -464,9 +467,11 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                 {g.status ?? 'known client'}</b>
               {g.chronic && ' · chronic'}
               {g.veteran && ' · veteran'}
-              {g.project && <> · {g.project}</>}
+              {housed && g.housedNote ? <> · {g.housedNote}</> : g.project ? <> · {g.project}</> : null}
               {g.last_contact && <> · last contact {g.last_contact}</>}
-              {housed && <b> — consider prevention referral, not outreach</b>}
+              {housed && (g.housedOpen
+                ? <b> — contact their housing provider, not outreach</b>
+                : <b> — housed per exit record: verify, then prevention referral if losing it</b>)}
             </div>
           );
         })()}
@@ -701,50 +706,71 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                     <CaseCell c={c} />
                     <td style={{ whiteSpace: 'nowrap' }}><ChipDated c={c} /></td>
                     <td><Trail events={events[c.id]} c={c} /></td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      {/* HMIS matching from the BOARD too (user 2026-09-11:
-                          "once it's on the board I don't see how to match") —
-                          the queue-only button stranded assigned cases. */}
-                      {!c.matched_pid ? (
-                        <button className="tbtn" style={{ marginRight: 6 }} disabled={busy}
-                          title="Search HMIS for this caller (DOB / SSN-4 / name) — a person confirms the match"
-                          onClick={() => findMatches(c.id)}>
-                          {openId === c.id ? 'Refresh' : '🔎 HMIS match'}</button>
-                      ) : (
-                        <Link className="tbtn" style={{ marginRight: 6 }}
-                          href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}
-                          title="Open this client's HMIS record on the By-Name List — history, enrollments, notes">
-                          BNL →</Link>
-                      )}
-                      {(c.lat != null || c.address || c.landmark) && (
-                        <button className="tbtn" style={{ marginRight: 6 }}
-                          title="Show where to find them — location details + map, right here"
-                          onClick={() => setMapId(mapId === c.id ? null : c.id)}>
-                          {mapId === c.id ? 'Hide map' : '📍 Map'}</button>
-                      )}
-                      <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank"
-                        title="One-page dispatch sheet — print or save as PDF for the field team">🖨 Sheet</Link>
-                      <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
-                        title={`Went out, couldn't reach them — bumps the tried counter. ${MAX_FAILED_ATTEMPTS} failed tries with no successful contact auto-closes the case as could-not-locate.`}
-                        onClick={() => logAttempt(c)}>
-                        ✗ Couldn&rsquo;t contact{(c.contacts ?? 0) === 0 && c.attempts === MAX_FAILED_ATTEMPTS - 1 ? ' (final)' : ''}</button>
-                      <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
-                        title="Reached them — bumps the contacted counter; failed tries never erase this"
-                        onClick={() => logContact(c)}>✓ Contacted</button>
-                      <button className="btn primary" style={{ marginLeft: 6, padding: '5px 12px', fontSize: 12 }} disabled={busy}
-                        title="Outreach verified this person is homeless — starts the enrollment-verification clock"
-                        onClick={() => update(c.id, { status: 'confirmed', confirmed_at: new Date().toISOString().slice(0, 10) })}>
-                        Confirmed homeless</button>
-                      <button className="tbtn" style={{ marginLeft: 6 }} disabled={busy}
-                        title="FINAL — closes the case and removes it from this board. “Couldn't find them today” is Log attempt, not this."
-                        onClick={() => {
-                          const warn = c.attempts === 0
-                            ? 'No attempts have been logged on this case.\n\n'
-                            : `${c.attempts} attempt${c.attempts === 1 ? '' : 's'} logged.\n\n`;
-                          if (confirm(`${warn}Close this case as COULD NOT LOCATE? It leaves the team board (it can be reopened from All cases).`)) {
-                            closeNoLocate(c);
-                          }
-                        }}>Close · can&rsquo;t locate</button>
+                    {/* Two-line action cluster (user mock approval 2026-09-11,
+                        "buttons smaller"): quiet utilities on top, color-coded
+                        outcomes below (same red ✗ / blue ✓ / green 🏠 language
+                        as the field app), Close demoted to a text link. Wraps
+                        instead of forcing a horizontal scrollbar. */}
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          {!c.matched_pid ? (
+                            <button className="tbtn" disabled={busy}
+                              title="Search HMIS for this caller (DOB / SSN-4 / name) — a person confirms the match"
+                              onClick={() => findMatches(c.id)}>
+                              {openId === c.id ? 'Refresh' : '🔎 HMIS match'}</button>
+                          ) : (
+                            <Link className="tbtn"
+                              href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}
+                              title="Open this client's HMIS record on the By-Name List — history, enrollments, notes">
+                              BNL →</Link>
+                          )}
+                          {(c.lat != null || c.address || c.landmark) && (
+                            <button className="tbtn"
+                              title="Show where to find them — location details + map, right here"
+                              onClick={() => setMapId(mapId === c.id ? null : c.id)}>
+                              {mapId === c.id ? 'Hide map' : '📍 Map'}</button>
+                          )}
+                          <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank"
+                            title="One-page dispatch sheet — print or save as PDF for the field team">🖨 Sheet</Link>
+                        </div>
+                        <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          <button disabled={busy}
+                            style={{ background: 'var(--danger-light)', color: 'var(--danger)',
+                              border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: 12.5,
+                              fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}
+                            title={`Went out, couldn't reach them — bumps the tried counter. ${MAX_FAILED_ATTEMPTS} failed tries with no successful contact auto-closes the case as could-not-locate.`}
+                            onClick={() => logAttempt(c)}>
+                            ✗ Couldn&rsquo;t contact{(c.contacts ?? 0) === 0 && c.attempts === MAX_FAILED_ATTEMPTS - 1 ? ' (final)' : ''}</button>
+                          <button disabled={busy}
+                            style={{ background: 'var(--info-light, var(--accent-light))',
+                              color: 'var(--info, var(--accent))', border: 'none', borderRadius: 8,
+                              padding: '6px 12px', fontSize: 12.5, fontWeight: 800,
+                              cursor: 'pointer', fontFamily: 'inherit' }}
+                            title="Reached them — bumps the contacted counter; failed tries never erase this"
+                            onClick={() => logContact(c)}>✓ Contacted</button>
+                          <button disabled={busy}
+                            style={{ background: '#0e8a5f', color: '#fff', border: 'none',
+                              borderRadius: 8, padding: '6px 13px', fontSize: 12.5, fontWeight: 800,
+                              cursor: 'pointer', fontFamily: 'inherit' }}
+                            title="Outreach verified this person is homeless — starts the enrollment-verification clock"
+                            onClick={() => update(c.id, { status: 'confirmed', confirmed_at: new Date().toISOString().slice(0, 10) })}>
+                            🏠 Confirmed homeless</button>
+                        </div>
+                        <button disabled={busy}
+                          style={{ background: 'none', border: 'none', color: 'var(--faint)',
+                            fontSize: 11.5, cursor: 'pointer', padding: 0, fontFamily: 'inherit',
+                            textDecoration: 'underline dotted', textUnderlineOffset: 3 }}
+                          title="FINAL — closes the case and removes it from this board. “Couldn't find them today” is Log attempt, not this."
+                          onClick={() => {
+                            const warn = c.attempts === 0
+                              ? 'No attempts have been logged on this case.\n\n'
+                              : `${c.attempts} attempt${c.attempts === 1 ? '' : 's'} logged.\n\n`;
+                            if (confirm(`${warn}Close this case as COULD NOT LOCATE? It leaves the team board (it can be reopened from All cases).`)) {
+                              closeNoLocate(c);
+                            }
+                          }}>Close case · could not locate (final)</button>
+                      </div>
                     </td>
                   </tr>
                   {openId === c.id && !c.matched_pid ? (

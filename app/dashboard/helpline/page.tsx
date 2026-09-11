@@ -82,19 +82,37 @@ export default async function HelplinePage() {
   // the roster, the same minimal-disclosure posture as helpline_hmis_flags().
   // The canSeeHelpline gate above is the access boundary.
   const hmis: Record<string, { status: string | null; project: string | null;
-    last_contact: string | null; chronic: boolean; veteran: boolean }> = {};
+    last_contact: string | null; chronic: boolean; veteran: boolean;
+    housedNote: string | null; housedOpen: boolean }> = {};
   const mpids = [...new Set(cases.map((c) => c.matched_pid).filter(Boolean))] as string[];
   if (mpids.length) {
     try {
       const { data } = await supabaseAdmin()
         .from('bnl_clients')
-        .select('pid, status, project, last_contact, chronic, veteran')
+        .select('pid, status, project, last_contact, chronic, veteran, timeline, detail')
         .in('pid', mpids);
       for (const r of (data ?? []) as any[]) {
+        // HOW they're housed matters (user 2026-09-11): an ACTIVE housing
+        // enrollment means the project shown IS their housing provider; a
+        // 'housed' from an EXIT DESTINATION (e.g. VA GPD -> VASH subsidy)
+        // means the project is just where they exited FROM — the destination
+        // is the informative part, and it's a point-in-time claim to verify.
+        let housedNote: string | null = null;
+        let housedOpen = false;
+        if (String(r.status ?? '').toLowerCase().includes('housed')) {
+          const tl: any[] = Array.isArray(r.timeline) ? r.timeline : [];
+          const open = tl.find((t) => t?.ph && !t?.exit);
+          const exited = tl.filter((t) => t?.ph && t?.exit)
+            .sort((a, b) => String(b.exit).localeCompare(String(a.exit)))[0];
+          if (open) { housedOpen = true; housedNote = `in ${open.project}${open.entry ? ` since ${open.entry}` : ''}`; }
+          else if (exited) housedNote = `exited ${exited.project} → ${exited.dest ?? 'permanent housing'} ${exited.exit}`;
+          else if (r.detail) housedNote = String(r.detail);
+        }
         hmis[String(r.pid)] = {
           status: r.status ?? null, project: r.project ?? null,
           last_contact: r.last_contact ?? null,
           chronic: Boolean(r.chronic), veteran: Boolean(r.veteran),
+          housedNote, housedOpen,
         };
       }
     } catch { /* roster unavailable — rows simply skip the glance line */ }
