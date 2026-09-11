@@ -453,7 +453,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
       <div style={{ padding: '6px 12px 14px' }}>
         {list === 'loading' && <div className="meta">Searching 50k HMIS clients…</div>}
         {Array.isArray(list) && list.length === 0 && (
-          <div className="meta">No HMIS candidates — needs a name and DOB/SSN-4 to match well.</div>
+          <div className="meta">No HMIS candidates — needs a name and DOB/SSN-4 to match well.
+            The caller may simply be new to HMIS; confirmation-time auto-link catches them later.</div>
         )}
         {Array.isArray(list) && list.map((m) => (
           <div key={m.pid} style={{
@@ -473,6 +474,13 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
               onClick={() => confirmMatch(c, m.pid)}>Confirm match</button>
           </div>
         ))}
+        {list !== 'loading' && (
+          <button className="tbtn" style={{ marginTop: 2 }}
+            title="Close the candidate list without linking — the case stays unmatched and can be searched again anytime"
+            onClick={() => setOpenId(null)}>
+            ✕ {Array.isArray(list) && list.length ? 'None of these — close' : 'Close'}
+          </button>
+        )}
       </div>
     );
   }
