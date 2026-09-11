@@ -92,6 +92,22 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
   const current = cases.find((c) => c.id === openId) ?? null;
   const trailOf = (id: number) => [...(events[id] ?? []), ...(trailPatch[id] ?? [])];
 
+  // Optimistic trail entries are stand-ins until the SERVER's copy arrives —
+  // once a refresh delivers new events, drop them (else the entry renders
+  // twice: the optimistic paint plus the refetched real one, user catch
+  // 2026-09-11). Patches for cases with a write still QUEUED offline stay,
+  // since the server doesn't have those yet.
+  useEffect(() => {
+    setTrailPatch((p) => {
+      const q = readQ();
+      const keep: Record<number, Ev[]> = {};
+      for (const [cid, evs] of Object.entries(p)) {
+        if (q.some((item) => item.caseId === Number(cid))) keep[Number(cid)] = evs;
+      }
+      return keep;
+    });
+  }, [events]);
+
   /** The board's exact write set for one outcome. Throws on failure so the
    *  caller can queue it. */
   async function send(c: HlCase, kind: Outcome, noteText: string, when: string) {
@@ -144,13 +160,15 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
 
   /** Optimistic local apply so the UI moves even before (or without) signal. */
   function applyLocal(c: HlCase, kind: Outcome, noteText: string, when: string): HlCase {
-    const ic = kind === 'attempt' ? '✗' : kind === 'contact' ? '✓' : '🏠';
-    const label = kind === 'attempt' ? 'Attempted — not located'
-      : kind === 'contact' ? 'Made contact' : 'CONFIRMED homeless in the field';
+    // attempt/contact store the bare note — the trail renderer adds the
+    // "Attempted — not located" / "Made contact" label for those kinds, so
+    // the optimistic row matches the server row exactly (no double label).
     setTrailPatch((p) => ({
       ...p,
       [c.id]: [...(p[c.id] ?? []), { at: when, kind: kind === 'attempt' ? 'attempt' : kind === 'contact' ? 'contact' : 'followup',
-        notes: [label, noteText].filter(Boolean).join(' · ') }],
+        notes: kind === 'confirm'
+          ? ['CONFIRMED homeless in the field.', noteText].filter(Boolean).join(' ')
+          : (noteText || null) }],
     }));
     const day = when.slice(0, 10);
     if (kind === 'attempt') {
@@ -324,7 +342,10 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
                   <span className="ic" style={{ color: e.kind === 'contact' ? 'var(--fblue)' : e.kind === 'attempt' ? 'var(--fred)' : 'var(--fmut)' }}>
                     {e.kind === 'contact' ? '✓' : e.kind === 'attempt' ? '✗' : e.kind === 'initial' || e.kind === 'repeat' ? '☎' : '·'}</span>
                   <span style={{ minWidth: 0 }}>{e.kind === 'initial' ? 'Call received — helpline'
-                    : e.kind === 'repeat' ? 'Repeat call received' : (e.notes || (e.kind === 'contact' ? 'Made contact' : e.kind === 'attempt' ? 'Attempted — not located' : 'Note'))}</span>
+                    : e.kind === 'repeat' ? 'Repeat call received'
+                    : e.kind === 'attempt' ? `Attempted — not located${e.notes ? ` · ${e.notes}` : ''}`
+                    : e.kind === 'contact' ? `Made contact${e.notes ? ` · ${e.notes}` : ''}`
+                    : (e.notes || 'Note')}</span>
                   <span className="when">{fmtWhen(e.at)}</span>
                 </div>
               ))}
