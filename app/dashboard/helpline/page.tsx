@@ -1,4 +1,5 @@
 import { supabaseServer, getViewer } from '../../../lib/supabase-server';
+import { supabaseAdmin } from '../../../lib/supabase';
 import HelplineView, { type HlCase, type Team } from './HelplineView';
 
 export const dynamic = 'force-dynamic';
@@ -75,6 +76,30 @@ export default async function HelplinePage() {
     }
   }
 
+  // HMIS glance for MATCHED cases (user 2026-09-11: "a small glance in the
+  // triage and team board", not a BNL round-trip). Service role on purpose —
+  // helpline staff may lack the BNL grant — but only these five fields leave
+  // the roster, the same minimal-disclosure posture as helpline_hmis_flags().
+  // The canSeeHelpline gate above is the access boundary.
+  const hmis: Record<string, { status: string | null; project: string | null;
+    last_contact: string | null; chronic: boolean; veteran: boolean }> = {};
+  const mpids = [...new Set(cases.map((c) => c.matched_pid).filter(Boolean))] as string[];
+  if (mpids.length) {
+    try {
+      const { data } = await supabaseAdmin()
+        .from('bnl_clients')
+        .select('pid, status, project, last_contact, chronic, veteran')
+        .in('pid', mpids);
+      for (const r of (data ?? []) as any[]) {
+        hmis[String(r.pid)] = {
+          status: r.status ?? null, project: r.project ?? null,
+          last_contact: r.last_contact ?? null,
+          chronic: Boolean(r.chronic), veteran: Boolean(r.veteran),
+        };
+      }
+    } catch { /* roster unavailable — rows simply skip the glance line */ }
+  }
+
   return (
     <HelplineView
       me={viewer.id}
@@ -84,6 +109,7 @@ export default async function HelplinePage() {
       events={events}
       callsByCase={callsByCase}
       callLog={callLog}
+      hmis={hmis}
       sqlMissing={sqlMissing}
     />
   );

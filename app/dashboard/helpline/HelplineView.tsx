@@ -155,7 +155,12 @@ const OPEN_STATUSES: CaseStatus[] = ['assigned', 'attempted', 'contacted'];
 type HlTab = 'queue' | 'board' | 'cases' | 'map' | 'admin';
 const HL_TAB_KEY = 'hl-tab';
 
-export default function HelplineView({ me, isAdmin, cases, teams, events = {}, callsByCase = {}, callLog = [], sqlMissing }: {
+export interface HmisGlance {
+  status: string | null; project: string | null; last_contact: string | null;
+  chronic: boolean; veteran: boolean;
+}
+
+export default function HelplineView({ me, isAdmin, cases, teams, events = {}, callsByCase = {}, callLog = [], hmis = {}, sqlMissing }: {
   me: string; isAdmin: boolean; cases: HlCase[]; teams: Team[];
   /** outreach trail per open case: chronological attempt/contact events */
   events?: Record<number, { at: string; kind: string }[]>;
@@ -163,6 +168,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
   callsByCase?: Record<number, number>;
   /** every phone call's timestamp+kind — demand patterns (day × hour) */
   callLog?: { at: string; kind: string }[];
+  /** minimal BNL snapshot per MATCHED pid — the on-row HMIS glance */
+  hmis?: Record<string, HmisGlance>;
   sqlMissing: boolean;
 }) {
   const router = useRouter();
@@ -443,6 +450,26 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
           {c.referred_to && <> · ↗ {c.referred_to}</>}
           {c.matched_pid && <> · <span className="bnl-fp bnl-fp-sch">HMIS linked</span></>}
         </div>
+        {/* On-row HMIS glance for linked cases (user 2026-09-11: "a small
+            glance in the triage and team board", not a BNL trip). Housed
+            status goes amber — shelter request + housed = referral talk. */}
+        {c.matched_pid && hmis[c.matched_pid] && (() => {
+          const g = hmis[c.matched_pid!];
+          const housed = (g.status ?? '').toLowerCase().includes('housed');
+          return (
+            <div className="bnl-sub" style={{ lineHeight: 1.6,
+              ...(housed ? { color: 'var(--warn)' } : {}) }}
+              title="HMIS at a glance — from the By-Name List roster for the linked record">
+              {housed ? '⚠ ' : ''}HMIS: <b style={{ color: housed ? 'var(--warn)' : 'var(--strong)' }}>
+                {g.status ?? 'known client'}</b>
+              {g.chronic && ' · chronic'}
+              {g.veteran && ' · veteran'}
+              {g.project && <> · {g.project}</>}
+              {g.last_contact && <> · last contact {g.last_contact}</>}
+              {housed && <b> — consider prevention referral, not outreach</b>}
+            </div>
+          );
+        })()}
       </td>
     );
   }
