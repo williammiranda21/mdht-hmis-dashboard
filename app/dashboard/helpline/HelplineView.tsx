@@ -659,6 +659,15 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                     <td style={{ whiteSpace: 'nowrap' }}><ChipDated c={c} /></td>
                     <td><Trail events={events[c.id]} c={c} /></td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {/* HMIS matching from the BOARD too (user 2026-09-11:
+                          "once it's on the board I don't see how to match") —
+                          the queue-only button stranded assigned cases. */}
+                      {!c.matched_pid && (
+                        <button className="tbtn" style={{ marginRight: 6 }} disabled={busy}
+                          title="Search HMIS for this caller (DOB / SSN-4 / name) — a person confirms the match"
+                          onClick={() => findMatches(c.id)}>
+                          {openId === c.id ? 'Refresh' : '🔎 HMIS match'}</button>
+                      )}
                       {(c.lat != null || c.address || c.landmark) && (
                         <button className="tbtn" style={{ marginRight: 6 }}
                           title="Show where to find them — location details + map, right here"
@@ -690,6 +699,13 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                         }}>Close · can&rsquo;t locate</button>
                     </td>
                   </tr>
+                  {openId === c.id && !c.matched_pid ? (
+                    <tr style={{ cursor: 'default' }}>
+                      <td colSpan={4} style={{ background: 'var(--rowhover)' }}>
+                        <MatchPanel c={c} />
+                      </td>
+                    </tr>
+                  ) : null}
                   {mapId === c.id ? (
                     <tr style={{ cursor: 'default' }}>
                       <td colSpan={4} style={{ background: 'var(--rowhover)' }}>
