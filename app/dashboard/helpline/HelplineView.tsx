@@ -624,7 +624,9 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                   <CaseCell c={c} e={e} />
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {c.matched_pid
-                      ? <span className="pill" style={{ background: 'var(--accent-light)', color: 'var(--accent)', borderRadius: 20, padding: '3px 11px', fontSize: 11, fontWeight: 700 }}>linked</span>
+                      ? <Link className="tbtn" href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}
+                          title="Open this client's HMIS record on the By-Name List — history, enrollments, notes">
+                          linked · BNL →</Link>
                       : <button className="tbtn" disabled={busy} onClick={() => findMatches(c.id)}>
                           {openId === c.id ? 'Refresh' : 'Find matches'}</button>}
                   </td>
@@ -676,11 +678,16 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                       {/* HMIS matching from the BOARD too (user 2026-09-11:
                           "once it's on the board I don't see how to match") —
                           the queue-only button stranded assigned cases. */}
-                      {!c.matched_pid && (
+                      {!c.matched_pid ? (
                         <button className="tbtn" style={{ marginRight: 6 }} disabled={busy}
                           title="Search HMIS for this caller (DOB / SSN-4 / name) — a person confirms the match"
                           onClick={() => findMatches(c.id)}>
                           {openId === c.id ? 'Refresh' : '🔎 HMIS match'}</button>
+                      ) : (
+                        <Link className="tbtn" style={{ marginRight: 6 }}
+                          href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}
+                          title="Open this client's HMIS record on the By-Name List — history, enrollments, notes">
+                          BNL →</Link>
                       )}
                       {(c.lat != null || c.address || c.landmark) && (
                         <button className="tbtn" style={{ marginRight: 6 }}
