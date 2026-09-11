@@ -463,8 +463,12 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
             <div className="bnl-sub" style={{ lineHeight: 1.6,
               ...(housed ? { color: 'var(--warn)' } : {}) }}
               title="HMIS at a glance — from the By-Name List roster for the linked record">
+              {/* "possibly housed" on purpose (user 2026-09-11): an HMIS
+                  record — even an active enrollment — is a claim, not a
+                  verified current fact; the caller on the phone may know
+                  better. The glance flags, the operator verifies. */}
               {housed ? '⚠ ' : ''}HMIS: <b style={{ color: housed ? 'var(--warn)' : 'var(--strong)' }}>
-                {g.status ?? 'known client'}</b>
+                {housed ? 'possibly housed' : (g.status ?? 'known client')}</b>
               {g.chronic && ' · chronic'}
               {g.veteran && ' · veteran'}
               {housed && g.housedNote ? <> · {g.housedNote}</> : g.project ? <> · {g.project}</> : null}
