@@ -354,8 +354,14 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
     }
   }
 
-  const confirmMatch = (c: HlCase, pid: string) =>
-    update(c.id, { matched_pid: pid, matched_by: me, matched_at: new Date().toISOString() });
+  const confirmMatch = async (c: HlCase, pid: string) => {
+    const ok = await update(c.id,
+      { matched_pid: pid, matched_by: me, matched_at: new Date().toISOString() });
+    // Success feedback = the panel CLOSES and the row flips to "linked".
+    // Leaving it open read as "nothing happened" (user test 2026-09-11) and
+    // invited repeat taps that silently re-wrote the same link.
+    if (ok) setOpenId(null);
+  };
 
   // prior-call counts by phone (last 7 digits) — feeds the repeat-call knob
   const priorCounts = useMemo(() => {
