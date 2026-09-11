@@ -78,7 +78,9 @@ const ELEMENTS = [
     denomKey: 'DQ_ActiveTotal' },
 ] as const;
 
-interface DetailRow { pid: string; entry: string | null; eid?: string | null }
+// `why` (household checks only, ETL 2026-09-11): per-row reason — whether the
+// fix is on this record or on a housemate's ("2 of 2 marked Self…").
+interface DetailRow { pid: string; entry: string | null; eid?: string | null; why?: string | null }
 
 /** Eva household-integrity checks folded into the Q6b card: 2 = no head,
  *  3 = multiple heads, 4 = relationship missing. */
@@ -303,7 +305,7 @@ export default function DqFixList({
   // Aligned record rows (user 2026-09-03: the wrapped chip cloud read as a
   // jumble) — ID · entry date · days-on-list, sorted oldest entry first.
   const recordRows = (metric: string, detail: DetailRow[] | null, ids: string[]) => {
-    const rows = (detail ?? ids.map((id) => ({ pid: id, entry: null as string | null })))
+    const rows = (detail ?? ids.map((id): DetailRow => ({ pid: id, entry: null })))
       .slice()
       .sort((a, b) => (a.entry ?? '9999').localeCompare(b.entry ?? '9999'));
     return (
@@ -314,6 +316,10 @@ export default function DqFixList({
             <div className="dqfx-row" key={`${d.pid}-${i}`}>
               <CopyId pid={d.pid} />
               <span className="dqfx-row-date">{d.entry ?? ''}</span>
+              {d.why && (
+                <span style={{ fontSize: 11, color: 'var(--muted)', flex: '1 1 220px',
+                  minWidth: 0, lineHeight: 1.35 }}>{d.why}</span>
+              )}
               {age != null && <span className="dqfx-row-age">{age}d open</span>}
             </div>
           );

@@ -181,9 +181,16 @@ export function suggestTeam<T extends RoutableTeam>(
     const team = best(factorHit);
     return { team, why: FACTOR_WHY[matchTag(team)!] ?? 'routing tag match' };
   }
+  // Specific beats umbrella (user test 2026-09-11): a team covering ONE
+  // district outranks one claiming five — "MHAP CE Consolidation" lists every
+  // Miami district as backstop coverage and was shadowing the district
+  // sub-teams whenever open-case loads tied (e.g. an empty queue). Fewest
+  // zones = most specific wins; equal specificity falls back to lightest load.
+  const bestZone = (xs: T[]) => [...xs].sort((a, b) =>
+    (a.zones.length - b.zones.length) || (load(a) - load(b)))[0];
   const areaHit = active.filter((t) => c.area && t.zones.includes(c.area));
-  if (areaHit.length) return { team: best(areaHit), why: `covers ${c.area}` };
+  if (areaHit.length) return { team: bestZone(areaHit), why: `covers ${c.area}` };
   const countyHit = active.filter((t) => c.county_district && t.zones.includes(c.county_district));
-  if (countyHit.length) return { team: best(countyHit), why: `covers ${c.county_district}` };
+  if (countyHit.length) return { team: bestZone(countyHit), why: `covers ${c.county_district}` };
   return null;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
 import { fmtInt } from '../../../lib/format';
 
@@ -208,10 +208,18 @@ export default function AdminUsers({
     );
   }
 
-  function Row({ r }: { r: AdminProfile }) {
+  // A plain render FUNCTION, deliberately not a <Row> component: defined
+  // inside AdminUsers, a component here gets a NEW identity every render, so
+  // React unmounted and rebuilt every row on each state change — the page
+  // height collapsed for a frame and the browser clamped scroll to the top
+  // (the "list jumps to the top when I grant access" bug, second half; the
+  // first half was router.refresh(), fixed 2026-09-03). It also reset the
+  // open ProjectPicker's checkboxes. A function call renders inline in
+  // AdminUsers's own tree — no boundary, nothing remounts.
+  function row(r: AdminProfile) {
     const isMe = r.id === me;
     return (
-      <>
+      <Fragment key={r.id}>
         <tr>
           <td>
             <span className="nm">{r.displayName || '—'}</span>
@@ -319,7 +327,7 @@ export default function AdminUsers({
             </td>
           </tr>
         )}
-      </>
+      </Fragment>
     );
   }
 
@@ -374,7 +382,7 @@ export default function AdminUsers({
               <thead>
                 <tr><th>User</th><th>Agency</th><th>Status</th><th title="Top: last credential sign-in (Supabase Auth). Below: last real activity in the dashboard (/api/seen heartbeat) — persistent sessions make sign-in alone misleading.">Last sign-in · seen</th><th className="num">Scope</th><th className="num">Actions</th></tr>
               </thead>
-              <tbody>{pending.map((r) => <Row key={r.id} r={r} />)}</tbody>
+              <tbody>{pending.map(row)}</tbody>
             </table>
           </div>
         )}
@@ -399,7 +407,7 @@ export default function AdminUsers({
               <tr><th>User</th><th>Agency</th><th>Status</th><th title="Top: last credential sign-in (Supabase Auth). Below: last real activity in the dashboard (/api/seen heartbeat) — persistent sessions make sign-in alone misleading.">Last sign-in · seen</th><th className="num">Scope</th><th className="num">Actions</th></tr>
             </thead>
             <tbody>
-              {shown.map((r) => <Row key={r.id} r={r} />)}
+              {shown.map(row)}
               {!others.length && <tr><td colSpan={6} className="empty">No approved accounts yet.</td></tr>}
               {others.length > 0 && !shown.length && (
                 <tr><td colSpan={6} className="empty">No accounts match “{q.trim()}”.</td></tr>

@@ -61,7 +61,12 @@ export async function middleware(req: NextRequest) {
   // why /api/seen itself must be exempt: it's how new sessions get seeded.
   // Middleware deliberately never refreshes the stamp here — request traffic
   // isn't proof a human is present.
-  if (user && !isPublic && pathname !== '/api/seen') {
+  // /auth/signout is ALSO exempt: the client idle timer fires at the same
+  // moment this check expires, and intercepting the sign-out POST redirected
+  // to /login with next=/auth/signout — after re-login the user landed on a
+  // 405 error page and read it as "the site is down" (user report 2026-09-11).
+  // Letting sign-out through is safe: it ends the session, which is the goal.
+  if (user && !isPublic && pathname !== '/api/seen' && pathname !== '/auth/signout') {
     const stamp = Number(req.cookies.get(IDLE_COOKIE)?.value ?? NaN);
     if (!Number.isFinite(stamp) || Date.now() - stamp > IDLE_MS) {
       try { await supabase.auth.signOut(); } catch { /* cookie wipe below still ends it */ }

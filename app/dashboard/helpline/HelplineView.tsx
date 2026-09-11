@@ -1378,6 +1378,8 @@ function Reporting({ cases: allCases, teams, events, callsByCase = {}, callLog =
           <option value="30">Last 30 days</option>
           <option value="90">Last 90 days</option>
         </select>
+        <Link href="/field" className="tbtn"
+          title="Mobile app for outreach workers — share this link with field staff">📱 Field app</Link>
         <Link href="/dashboard/helpline/report" className="tbtn"
           title="Board-ready monthly report — print or save as PDF">🖨 Monthly report</Link>
         <button className="tbtn" onClick={downloadCsv}>⬇ CSV</button>

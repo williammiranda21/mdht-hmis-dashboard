@@ -153,10 +153,33 @@ def main():
         def flag(cid: str, mask):
             df = e[mask]
             if len(df):
-                findings[cid] = df[["PersonalID", "ProjectID", "EntryDate", "EnrollmentID"]]
+                # HouseholdID + relationship ride along so household checks can
+                # explain WHY each row is listed (user 2026-09-11: a member
+                # whose own record is fine lists when a HOUSEMATE is the
+                # problem, and providers couldn't tell).
+                findings[cid] = df[["PersonalID", "ProjectID", "EntryDate", "EnrollmentID",
+                                    "HouseholdID", "RelationshipToHoH"]]
 
         # ── Household integrity (composition within this month's universe) ──
         n_hoh = e.groupby("HouseholdID")["RelationshipToHoH"].apply(lambda s: int((s == 1).sum()))
+        hh_size = e.groupby("HouseholdID")["PersonalID"].nunique()
+
+        def hh_why(cid: str, r) -> str | None:
+            """Per-row reason for the household checks — tells the provider
+            whether the fix is on THIS record or on a housemate's."""
+            if cid == "4":
+                return "relationship to head is blank / not collected on this record"
+            heads = int(n_hoh.get(r.HouseholdID, 0))
+            size = int(hh_size.get(r.HouseholdID, 0))
+            if cid == "2":
+                return (f"no member of this {size}-person household is marked Self — "
+                        "set it on the true head")
+            if cid == "3":
+                own = pd.notna(r.RelationshipToHoH) and int(r.RelationshipToHoH) == 1
+                base = f"{heads} of {size} household members are marked Self"
+                return base + (" — this record is one of them; keep only the true head"
+                               if own else " — this record is fine; the fix is on the housemates marked Self")
+            return None
         flag("2", e["HouseholdID"].isin(set(n_hoh[n_hoh == 0].index)))
         flag("3", e["HouseholdID"].isin(set(n_hoh[n_hoh >= 2].index)))
         flag("4", e["RelationshipToHoH"].isna() | (e["RelationshipToHoH"] == 99))
@@ -193,7 +216,8 @@ def main():
                 pids = list(dict.fromkeys(g["PersonalID"].astype(str)))
                 detail = [{"pid": str(r.PersonalID),
                            "entry": r.EntryDate.date().isoformat() if pd.notna(r.EntryDate) else None,
-                           "eid": str(r.EnrollmentID) if pd.notna(r.EnrollmentID) else None}
+                           "eid": str(r.EnrollmentID) if pd.notna(r.EnrollmentID) else None,
+                           **({"why": hh_why(cid, r)} if cid in ("2", "3", "4") else {})}
                           for r in g.itertuples()]
                 payload.append({"period": key, "project_id": int(pid),
                                 "metric": f"eva:{cid}", "personal_ids": pids, "detail": detail})
