@@ -159,8 +159,10 @@ export interface CeMilestonesAgg {
 /**
  * Precomputed per-population KPI counts and inflow/outflow, from
  * `meta.bnl_agg` (built in bnl_core.py). These figures depend only on the
- * population selector — never on the status/flag/search filters — which is why
- * they can be precomputed and why the page no longer needs the whole roster.
+ * population selector, which is why they can be precomputed and why the page
+ * no longer needs the whole roster. When roster filters are active the KPI
+ * cards swap to live counts from /api/bnl/counts (same shape, same
+ * predicates via applyRosterFilters).
  */
 export interface BnlPopAgg {
   n: number;

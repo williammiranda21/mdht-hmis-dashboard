@@ -119,18 +119,13 @@ function safeLike(s: string): string {
  *              and to know when to stop paging; the export does not, and an
  *              exact count on every chunk would double the work for nothing.
  */
-export async function queryRoster(
-  sb: SupabaseClient,
-  p: RosterQuery,
-  cols: string = ROSTER_COLS,
-  withCount = true,
-  /** restrict to these pids (the ★ Focused filter — the caller resolves the
-   *  bnl_focus list first, since this builder is synchronous) */
-  pidsIn?: string[],
-) {
-  let qb = withCount
-    ? sb.from('bnl_clients').select(cols, { count: 'exact' })
-    : sb.from('bnl_clients').select(cols);
+/** Population + filter predicates only — no sort, no paging. Shared by the
+ *  roster query and the filtered KPI counts (/api/bnl/counts) so the cards can
+ *  never describe a different set of people than the table below them. */
+export function applyRosterFilters<Q>(qb0: Q, p: RosterQuery, pidsIn?: string[]): Q {
+  // The supabase builder returns itself from every filter call; the generic
+  // keeps the caller's select() typing while we chain untyped here.
+  let qb = qb0 as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
   if (p.pid) qb = qb.eq('pid', p.pid);
 
@@ -182,6 +177,24 @@ export async function queryRoster(
     const t = safeLike(p.q);
     if (t) qb = qb.or(`name.ilike.%${t}%,project.ilike.%${t}%`);
   }
+
+  return qb as Q;
+}
+
+export async function queryRoster(
+  sb: SupabaseClient,
+  p: RosterQuery,
+  cols: string = ROSTER_COLS,
+  withCount = true,
+  /** restrict to these pids (the ★ Focused filter — the caller resolves the
+   *  bnl_focus list first, since this builder is synchronous) */
+  pidsIn?: string[],
+) {
+  let qb = withCount
+    ? sb.from('bnl_clients').select(cols, { count: 'exact' })
+    : sb.from('bnl_clients').select(cols);
+
+  qb = applyRosterFilters(qb, p, pidsIn);
 
   // ── sort + page ───────────────────────────────────────────────────────────
   // nullsFirst:false mirrors the old client sort, which pushed nulls to the end

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type TdHTMLAttributes } from 'react';
 import {
   POP_DEFS, MILESTONES,
-  type BnlAgg, type BnlClient, type CeMilestonesAgg, type PopKey,
+  type BnlAgg, type BnlClient, type BnlPopAgg, type CeMilestonesAgg, type PopKey,
 } from './types';
 import JourneyBar from '../../../components/JourneyBar';
 import ProjectPicker from '../../../components/ProjectPicker';
@@ -345,8 +345,32 @@ export default function BnlView({
     setSortKey(k);
   }
 
+  // Filtered KPI counts (user ask 2026-09-15): when any roster filter narrows
+  // the universe, the header cards re-count server-side with the SAME
+  // predicates (/api/bnl/counts → applyRosterFilters). Status is deliberately
+  // not part of this — the cards partition the universe by status themselves.
+  // With no filters active the precomputed population aggregate serves as
+  // before (zero extra queries).
+  const countsFiltered = Boolean(fFlag || fAsmt || fStage || fRef || selProjects.length || qDebounced);
+  const [fCounts, setFCounts] = useState<BnlPopAgg['counts'] | null>(null);
+  const cntReq = useRef(0);
+  useEffect(() => {
+    const id = ++cntReq.current;
+    if (!countsFiltered) { setFCounts(null); return; }
+    const sp = new URLSearchParams({
+      pop, flag: fFlag, asmt: fAsmt, stage: fStage, ref: fRef,
+      projects: selProjects.join(','), projMode, q: qDebounced,
+    });
+    fetch(`/api/bnl/counts?${sp}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((j: BnlPopAgg['counts']) => { if (id === cntReq.current) setFCounts(j); })
+      // On failure fall back to the population aggregate rather than showing
+      // stale filtered numbers against a different filter state.
+      .catch(() => { if (id === cntReq.current) setFCounts(null); });
+  }, [countsFiltered, pop, fFlag, fAsmt, fStage, fRef, selProjects, projMode, qDebounced]);
+
   const kpis: Array<[string, number | string, string, string]> = useMemo(() => {
-    const c = pa.counts;
+    const c = fCounts ?? pa.counts;
     // On the Family tab every row IS a family household, so the generic
     // "N veterans · N in families" note degenerates into the count repeating
     // itself ("721 · 721 in families") — speak household language instead.
@@ -361,7 +385,7 @@ export default function BnlView({
       ['Chronically homeless', c.chronic, 'HUD definition (approx.)', '#7E22CE'],
       ['CE assessed', c.active ? `${((100 * c.assessed) / c.active).toFixed(1)}%` : '—', 'of actively homeless', 'var(--secondary)'],
     ];
-  }, [pa, pop]);
+  }, [pa, pop, fCounts]);
 
   // Bar scale comes from the population aggregate, not the loaded page — using
   // the page max would rescale every bar each time more rows arrived.
@@ -514,7 +538,12 @@ export default function BnlView({
         );
       })()}
 
-      <div className="bnl-kpis" style={{ marginTop: 16 }}>
+      {fCounts && (
+        <div className="bnl-sub" style={{ marginTop: 16 }}>
+          ⧩ Cards reflect the active filters — clear the filters below to see the whole population.
+        </div>
+      )}
+      <div className="bnl-kpis" style={{ marginTop: fCounts ? 6 : 16 }}>
         {kpis.map(([label, val, note, color]) => (
           <div key={label} className="bnl-kpi" style={{ ['--kc' as any]: color }}>
             <div className="bnl-kpi-lbl">{label}</div>
