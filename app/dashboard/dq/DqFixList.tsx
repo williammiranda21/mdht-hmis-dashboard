@@ -368,14 +368,23 @@ export default function DqFixList({
   // on the merged Q6b household card above instead.
   const evaRecords = eva.filter((f) => !HH_EVA_IDS.has(f.id))
     .reduce((s, f) => s + (f.detail?.length ?? f.ids.length), 0);
+  // Duplicates then Overlapping stays are PINNED to the top as a pair (user
+  // 2026-09-15: overlaps "right below the duplicate enrollment" — they're
+  // the same fix conversation); everything else keeps severity-then-size.
+  const EVA_PINNED = ['1', '77'];
   const evaSorted = useMemo(() =>
     eva
       .filter((f) => !HH_EVA_IDS.has(f.id))
       .map((f) => ({ f, check: EVA_BY_ID.get(f.id) }))
       .filter((x): x is { f: EvaFinding; check: EvaCheck } => !!x.check && x.f.ids.length > 0)
-      .sort((a, b) =>
-        (EVA_SEVERITY_META[a.check.severity].rank - EVA_SEVERITY_META[b.check.severity].rank)
-        || (b.f.ids.length - a.f.ids.length)),
+      .sort((a, b) => {
+        const pa = EVA_PINNED.indexOf(a.f.id), pb = EVA_PINNED.indexOf(b.f.id);
+        if (pa !== -1 || pb !== -1) {
+          return (pa === -1 ? EVA_PINNED.length : pa) - (pb === -1 ? EVA_PINNED.length : pb);
+        }
+        return (EVA_SEVERITY_META[a.check.severity].rank - EVA_SEVERITY_META[b.check.severity].rank)
+          || (b.f.ids.length - a.f.ids.length);
+      }),
     [eva]);
 
   // Server-side download (?format=csv) — browser-built blob: downloads fail
