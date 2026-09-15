@@ -115,17 +115,23 @@ def main():
 
     # ── STREET OUTREACH gate (user directive 2026-09-15: "for outreach, data
     # quality is if engagement date is entered — for ANY field"): SO
-    # enrollments without a VALID engagement date (4.13 — dated within the
-    # stay) are pre-engagement contacts and are excluded from EVERY check
-    # below, the same universe the DQ score and the APR grade. Engagement is
-    # stamped per member in WellSky, so the gate is per enrollment row.
+    # enrollments without engagement are pre-engagement contacts, excluded
+    # from EVERY check below. HUD collects 4.13 for HoH AND ADULTS ONLY
+    # (user correction), so the gate is HOUSEHOLD-level: a row counts as
+    # engaged when ITS OWN date is valid (within the stay) OR any member of
+    # its entry group has one — a child never drops out for lacking a field
+    # that isn't collected about children. (The APR-side score keeps its
+    # per-client gate untouched — that's what reconciles with WellSky.)
     _so = e0["ProjectType"] == 4
     _eng_ok = (e0["DateOfEngagement"].notna()
                & (e0["DateOfEngagement"] >= e0["EntryDate"])
                & (e0["ExitDate"].isna() | (e0["DateOfEngagement"] <= e0["ExitDate"])))
-    n_gated = int((_so & ~_eng_ok).sum())
-    e0 = e0[~_so | _eng_ok].copy()
-    print(f"SO engagement gate: {n_gated:,} un-engaged outreach enrollments excluded from all checks")
+    _hh_eng = _eng_ok.groupby(e0["HouseholdID"]).transform("any")
+    _hh_eng = _hh_eng.fillna(_eng_ok)          # no household id → own row decides
+    n_gated = int((_so & ~_hh_eng).sum())
+    e0 = e0[~_so | _hh_eng].copy()
+    print(f"SO engagement gate: {n_gated:,} un-engaged outreach enrollments excluded "
+          "from all checks (household-level — children inherit engagement)")
 
     e0["age_entry"] = (e0["EntryDate"] - e0["DOB"]).dt.days / 365.25
 
