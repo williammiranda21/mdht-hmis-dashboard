@@ -112,7 +112,9 @@ export const EVA_CHECKS: EvaCheck[] = [
   // ── Duplicates ─────────────────────────────────────────────────────────────
   {
     id: '77', label: 'Overlapping stays at the same project', slug: 'overlapping_stays',
-    severity: 'warning', category: 'Duplicates',
+    // Promoted warning -> error (user 2026-09-15): overlaps double-count
+    // served/utilization, so they're graded as real defects, not advisories.
+    severity: 'error', category: 'Duplicates',
     meaning: 'The client has two stays at this project that overlap in time with different entry dates — usually staff re-enrolled them instead of updating the open enrollment, and the first stay was never exited.',
     fix: 'Decide which enrollment is the real, current stay. Exit the superseded one as of the date the client actually left it (or delete it if it never happened).',
     breaks: 'Double-counts the client in served and utilization; corrupts length of stay and entry cohorts.',
