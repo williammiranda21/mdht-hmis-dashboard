@@ -98,11 +98,12 @@ def main():
     enr = pd.read_csv(DATA_DIR / "Enrollment.csv", low_memory=False,
                       usecols=["EnrollmentID", "PersonalID", "ProjectID", "EntryDate",
                                "HouseholdID", "RelationshipToHoH", "MoveInDate",
-                               "DateToStreetESSH", "DateCreated"])
+                               "DateToStreetESSH", "DateCreated", "DateOfEngagement"])
     ex = pd.read_csv(DATA_DIR / "Exit.csv", low_memory=False,
                      usecols=["EnrollmentID", "ExitDate"])
 
-    for c in ("EntryDate", "MoveInDate", "DateToStreetESSH", "DateCreated"):
+    for c in ("EntryDate", "MoveInDate", "DateToStreetESSH", "DateCreated",
+              "DateOfEngagement"):
         enr[c] = pd.to_datetime(enr[c], errors="coerce")
     ex["ExitDate"] = pd.to_datetime(ex["ExitDate"], errors="coerce")
     cli["DOB"] = pd.to_datetime(cli["DOB"], errors="coerce")
@@ -111,6 +112,21 @@ def main():
              .merge(cli, on="PersonalID", how="left")
              .merge(proj, on="ProjectID", how="left"))
     e0 = e0[e0["EntryDate"].notna() & e0["ProjectID"].notna()].copy()
+
+    # ── STREET OUTREACH gate (user directive 2026-09-15: "for outreach, data
+    # quality is if engagement date is entered — for ANY field"): SO
+    # enrollments without a VALID engagement date (4.13 — dated within the
+    # stay) are pre-engagement contacts and are excluded from EVERY check
+    # below, the same universe the DQ score and the APR grade. Engagement is
+    # stamped per member in WellSky, so the gate is per enrollment row.
+    _so = e0["ProjectType"] == 4
+    _eng_ok = (e0["DateOfEngagement"].notna()
+               & (e0["DateOfEngagement"] >= e0["EntryDate"])
+               & (e0["ExitDate"].isna() | (e0["DateOfEngagement"] <= e0["ExitDate"])))
+    n_gated = int((_so & ~_eng_ok).sum())
+    e0 = e0[~_so | _eng_ok].copy()
+    print(f"SO engagement gate: {n_gated:,} un-engaged outreach enrollments excluded from all checks")
+
     e0["age_entry"] = (e0["EntryDate"] - e0["DOB"]).dt.days / 365.25
 
     # ── Check 77 (Project Overlaps) — precomputed once over ALL stays: same
