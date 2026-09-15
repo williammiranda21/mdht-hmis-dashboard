@@ -81,8 +81,12 @@ def main():
         have.update(p["pid"] for p in page)
         off += 10000
     stale = sorted(have - {r["pid"] for r in rows})
-    for i in range(0, len(stale), 500):
-        sb.table("client_index").delete().in_("pid", stale[i:i + 500]).execute()
+    # 100 pids per DELETE, not 500: .in_() puts the list in the URL query
+    # string, and the county proxy rejects ~16KB URLs with an HTML block page
+    # ("invalid_request" — observed 2026-09-15 on the first big full-replace
+    # prune). ~3.5KB stays comfortably under every proxy/URL limit.
+    for i in range(0, len(stale), 100):
+        sb.table("client_index").delete().in_("pid", stale[i:i + 100]).execute()
     print(f"  pruned {len(stale):,} stale rows · table now {len(rows):,}", flush=True)
     print("Done.", flush=True)
 
