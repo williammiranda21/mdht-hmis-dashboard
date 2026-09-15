@@ -180,6 +180,9 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
   });
   const [typeFilter, setTypeFilter] = useState('All');
   const [query, setQuery] = useState('');
+  // Overdue card → table filter (user ask 2026-09-15: "how do I see the
+  // overdue project?" — the ⚑ was findable only by scrolling all rows).
+  const [overdueOnly, setOverdueOnly] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('DQ_Score');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
   // Fix-list drills exist for EVERY DQ granularity since 2026-09-03 — a
@@ -206,9 +209,10 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
     const q = query.trim().toLowerCase();
     return rows.filter((r) =>
       (typeFilter === 'All' || r.type_name === typeFilter) &&
+      (!overdueOnly || (overdue[r.project_id]?.length ?? 0) > 0) &&
       (!q || r.name.toLowerCase().includes(q)),
     );
-  }, [rows, typeFilter, query]);
+  }, [rows, typeFilter, query, overdueOnly, overdue]);
 
   const sorted = useMemo(() => {
     const val = (r: Row): number | string | null =>
@@ -350,14 +354,27 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
           <div className="dq-kpi-val" style={{ color: 'var(--accent)' }}>{sysKpi ? fmtInt(sysKpi.fixedN) : '—'}</div>
           <div className="dq-kpi-sub">{sysKpi?.medianFix != null ? <>median fix time {sysKpi.medianFix}d</> : 'fix times pending ledger history'}</div>
         </div>
-        <div className="dq-kpi" title="Fix-list elements past a Homeless Trust due date with records still on the list">
+        <div className="dq-kpi"
+          title={(sysKpi?.overdueItems ?? 0) > 0
+            ? 'Fix-list elements past a Homeless Trust due date with records still on the list — click to filter the table to the ⚑ projects'
+            : 'Fix-list elements past a Homeless Trust due date with records still on the list'}
+          role={(sysKpi?.overdueItems ?? 0) > 0 ? 'button' : undefined}
+          tabIndex={(sysKpi?.overdueItems ?? 0) > 0 ? 0 : undefined}
+          onClick={() => (sysKpi?.overdueItems ?? 0) > 0 && setOverdueOnly((v) => !v)}
+          onKeyDown={(e) => e.key === 'Enter' && (sysKpi?.overdueItems ?? 0) > 0 && setOverdueOnly((v) => !v)}
+          style={{
+            cursor: (sysKpi?.overdueItems ?? 0) > 0 ? 'pointer' : undefined,
+            outline: overdueOnly ? '2px solid var(--danger)' : undefined, outlineOffset: -2,
+          }}>
           <div className="dq-kpi-label">Overdue</div>
           <div className="dq-kpi-val" style={{ color: (sysKpi?.overdueItems ?? 0) > 0 ? 'var(--danger)' : 'var(--accent)' }}>
             {sysKpi ? fmtInt(sysKpi.overdueItems) : '—'}
           </div>
           <div className="dq-kpi-sub">
             {(sysKpi?.overdueItems ?? 0) > 0
-              ? <>past due · {fmtInt(sysKpi!.overdueProjects)} project{sysKpi!.overdueProjects === 1 ? '' : 's'}</>
+              ? (overdueOnly
+                ? <>showing ⚑ projects only — click to clear</>
+                : <>past due · {fmtInt(sysKpi!.overdueProjects)} project{sysKpi!.overdueProjects === 1 ? '' : 's'} — click to show</>)
               : 'nothing past a due date'}
           </div>
         </div>
