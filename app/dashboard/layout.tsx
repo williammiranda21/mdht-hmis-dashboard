@@ -7,6 +7,7 @@ import TabNav from '../../components/TabNav';
 import UserMenu from '../../components/UserMenu';
 import IdleLogout from '../../components/IdleLogout';
 import AnnouncementBar, { type Announcement } from '../../components/AnnouncementBar';
+import HeaderTitle from '../../components/HeaderTitle';
 import PolicyAttestation from '../../components/PolicyAttestation';
 import { getViewer, supabaseServer } from '../../lib/supabase-server';
 
@@ -134,7 +135,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="mainc">
         <header className="hdr">
           <div>
-            <h1>HMIS Performance Dashboard</h1>
+            <HeaderTitle />
             <div className="sub">
               Miami-Dade County · Continuum of Care
               {exportEnd && (
