@@ -149,7 +149,8 @@ export async function GET(req: Request) {
       const rows = f.detail ?? f.ids.map(noDetail);
       for (const d of rows) lines.push(`${slug},${d.pid},${d.eid ?? ''},${d.entry ?? ''},${age(`eva:${f.id}`, d.pid)}`);
     }
-    return new NextResponse(lines.join('\r\n'), {
+    // BOM so Excel decodes UTF-8 instead of the ANSI codepage.
+    return new NextResponse('﻿' + lines.join('\r\n'), {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="dq_fixlist_${projectId}_${period}.csv"`,

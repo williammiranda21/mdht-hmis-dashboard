@@ -76,7 +76,9 @@ export async function GET(req: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const enc = new TextEncoder();
-      controller.enqueue(enc.encode(HEADER.join(',') + '\n'));
+      // UTF-8 BOM — without it Excel decodes the file as the Windows ANSI
+      // codepage and every · / — becomes mojibake (Â· / â€").
+      controller.enqueue(enc.encode('﻿' + HEADER.join(',') + '\n'));
       let offset = 0;
       try {
         for (;;) {

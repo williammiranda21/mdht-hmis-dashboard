@@ -1453,7 +1453,8 @@ function Reporting({ cases: allCases, teams, events, callsByCase = {}, callLog =
     const body = rows.map((r) => [r.label, r.total, r.open, r.confirmed, r.enrolled,
       r.noLocate, r.declined, r.medAssign == null ? '' : r.medAssign.toFixed(1),
       r.avgFirstTry == null ? '' : r.avgFirstTry.toFixed(1), r.firstTryN].map(esc).join(','));
-    const blob = new Blob([[head.join(','), ...body].join('\n')], { type: 'text/csv;charset=utf-8' });
+    // BOM so Excel decodes UTF-8 instead of the ANSI codepage.
+    const blob = new Blob(['﻿' + [head.join(','), ...body].join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `helpline_teams_${new Date().toISOString().slice(0, 10)}.csv`;

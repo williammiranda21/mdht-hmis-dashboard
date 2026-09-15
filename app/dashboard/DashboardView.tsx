@@ -235,7 +235,8 @@ export default function DashboardView({
       ];
       lines.push(base.join(','));
     });
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    // BOM so Excel decodes UTF-8 instead of the ANSI codepage.
+    const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
