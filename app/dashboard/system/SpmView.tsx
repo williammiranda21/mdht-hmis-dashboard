@@ -231,6 +231,18 @@ export default function SpmView({ periods, granularity, period, prevPeriod, hous
     ['Outreach', [
       { icon: 'flag', tag: 'Q9b', title: 'SO engagements', vlabel: 'Unduplicated clients', val: num('M_SOEngagements'), avg: avgOf('M_SOEngagements'), prev: prev?.M_SOEngagements, deltaMode: 'pct', gl: 'engagements', gr: '<b>street outreach</b>' },
     ]],
+    // Stella-P-style family composition (user 2026-09-15, director asks).
+    // Unit = unique FAMILY (household with an adult + a minor), HoH-deduped
+    // across programs, active during the selected period. All|All only —
+    // the ETL doesn't slice these by household filter.
+    ['Families & households', [
+      { icon: 'users', tag: 'Family', title: 'Families served', vlabel: 'Unique family units · HoH-deduped', val: num('F_Units'), avg: avgOf('F_Units'), prev: prev?.F_Units, deltaMode: 'pct', gl: 'family units', gr: `<b>${(num('F_People') || 0).toLocaleString()}</b> people in them` },
+      { icon: 'users', tag: 'Family', title: 'Single-parent families', vlabel: 'Exactly one adult + minors', val: num('F_SingleParent'), avg: avgOf('F_SingleParent'), prev: prev?.F_SingleParent, deltaMode: 'pct', gl: 'single-parent', gr: `<b>${(num('F_SingleMom') || 0).toLocaleString()}</b> single mothers` },
+      { icon: 'spark', tag: 'Family', title: 'Families w/ disabled child', vlabel: '1+ member under 18 with a disabling condition', val: num('F_DisabledChild'), avg: avgOf('F_DisabledChild'), prev: prev?.F_DisabledChild, deltaMode: 'pct', lowerBetter: true, gl: 'disabled child', gr: '<b>special needs</b>' },
+      { icon: 'clock', tag: 'HUD', title: 'Chronically homeless families', vlabel: 'HoH meets the HUD chronic definition', val: num('F_ChronicHoH'), avg: avgOf('F_ChronicHoH'), prev: prev?.F_ChronicHoH, deltaMode: 'pct', lowerBetter: true, gl: 'chronic (HoH)', gr: '<b>HUD family rule</b>' },
+      { icon: 'tent', tag: 'Family', title: 'Families in temporary settings', vlabel: 'Active in ES / Safe Haven / TH', val: num('F_TempSetting'), avg: avgOf('F_TempSetting'), prev: prev?.F_TempSetting, deltaMode: 'pct', lowerBetter: true, gl: 'in temp setting', gr: '<b>ES · SH · TH</b>' },
+      { icon: 'ret', tag: 'M2', title: 'Returning families', vlabel: 'Re-entered within 2 yrs of a PH exit (HoH)', val: num('F_Returned'), avg: avgOf('F_Returned'), prev: prev?.F_Returned, deltaMode: 'pct', lowerBetter: true, gl: 'returned after PH', gr: '<b>2-yr window</b>' },
+    ]],
     ['Placements & retention (M7)', [
       { icon: 'home', tag: 'M7', title: 'Total PH exits', vlabel: 'SO/ES/TH/SH/PSH/RRH → PH', val: num('M_AllPHExits'), avg: avgOf('M_AllPHExits'), prev: prev?.M_AllPHExits, deltaMode: 'pct', gl: 'to permanent housing', gr: `<b>${(num('M_AllPHExits') || 0).toLocaleString()}</b> clients` },
       { icon: 'home', tag: '7b.1', title: '7b.1 PH exits', vlabel: 'ES/TH/SH/RRH leavers → PH', val: num('M7b1_PHExits'), avg: avgOf('M7b1_PHExits'), prev: prev?.M7b1_PHExits, deltaMode: 'pct', gl: `of ${num('M7b1_Denom') || 0} leavers`, gr: `<b>${num('M7b1_PHExits') || 0}</b> exits` },
