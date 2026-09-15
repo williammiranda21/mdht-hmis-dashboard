@@ -420,10 +420,11 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
                 <th className={th('name')} onClick={() => toggleSort('name')}>Project {car('name')}</th>
                 <th className={th('type_name')} onClick={() => toggleSort('type_name')}>Type {car('type_name')}</th>
                 <th className={th('DQ_Score', true)} onClick={() => toggleSort('DQ_Score')}>Overall {car('DQ_Score')}</th>
-                {vis('pii') && <th className={th('DQ_PII_Score', true)} onClick={() => toggleSort('DQ_PII_Score')}>Q6a PII {car('DQ_PII_Score')}</th>}
+                {vis('pii') && <th className={th('DQ_PII_Score', true)} onClick={() => toggleSort('DQ_PII_Score')}
+                  title="APR Q6a score = 100 − unique clients with any Name / SSN / DOB / Race issue ÷ clients served — the APR's own Overall Score row. Counts recorded don't-know/refused like the APR does; the fix-list omits those (a documented refusal has nothing to fix).">Q6a PII {car('DQ_PII_Score')}</th>}
                 {vis('univ') && <th className={th('DQ_Univ_Score', true)} onClick={() => toggleSort('DQ_Univ_Score')}>Q6b Universal {car('DQ_Univ_Score')}</th>}
                 {vis('inc') && <th className={th('DQ_Inc_Score', true)} onClick={() => toggleSort('DQ_Inc_Score')}
-                  title="Full APR Q6c: income at entry AND exit — missing, don't-know/refused, or a yes/no answer that contradicts the source rows">Q6c Income {car('DQ_Inc_Score')}</th>}
+                  title="APR Q6c score = 100 − pooled issue rate: total issues ÷ total records checked across Destination + Income at Start / Annual Assessment / Exit. Pooled by universe so a 5-person annual row can't outweigh a 500-person entry row — the Annual Income column keeps the row-level rate.">Q6c Income {car('DQ_Inc_Score')}</th>}
                 {vis('chronic') && <th className={th('DQ_Chronic_Score', true)} onClick={() => toggleSort('DQ_Chronic_Score')}>Q6d Chronic {car('DQ_Chronic_Score')}</th>}
                 {vis('movein') && <th className={th('DQ_MoveIn_pct', true)} onClick={() => toggleSort('DQ_MoveIn_pct')}
                   title="LOCAL metric (no APR Q6 row) — PH stayers enrolled before the period still missing a valid move-in, plus out-of-range move-in dates">Move-In Missing % {car('DQ_MoveIn_pct')}</th>}

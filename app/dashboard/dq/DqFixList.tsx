@@ -363,6 +363,22 @@ export default function DqFixList({
   const rowCount = (cat?: Category) => cat?.detail?.length ?? cat?.ids.length ?? 0;
   const totalToFix = shown.reduce((s, { cat }) => s + rowCount(cat), 0);
 
+  // Recorded don't-know/refused (user directive 2026-09-15): counted in the
+  // Q6a rates so the dashboard reconciles with the APR, but deliberately NOT
+  // fix-list records — a documented refusal has nothing to correct. Named
+  // here so the rate-vs-list gap explains itself.
+  const refusedParts = ([['DQ_NameRefused', 'Name'], ['DQ_SSNRefused', 'SSN'],
+    ['DQ_DOBRefused', 'DOB'], ['DQ_RaceRefused', 'Race'], ['DQ_SexRefused', 'Sex']] as const)
+    .map(([k, lbl]) => ({ lbl, n: data[k] ?? 0 }))
+    .filter(({ n }) => n > 0);
+  const refusedNote = refusedParts.length > 0 && (
+    <div className="bnl-dq" style={{ marginTop: 10 }}>
+      Not listed: {refusedParts.map(({ lbl, n }) => `${lbl} ${fmtInt(n)}`).join(' · ')} recorded
+      as “client doesn’t know / prefers not to answer”. They count in the PII rates so the
+      dashboard matches the APR, but a documented refusal has nothing to fix.
+    </div>
+  );
+
   // Eva findings joined to the guided registry, worst severity first then
   // size. Household checks (HH_EVA_IDS) are excluded — their records render
   // on the merged Q6b household card above instead.
@@ -413,15 +429,19 @@ export default function DqFixList({
 
         {cats && !err && (
           shown.length === 0 && evaSorted.length === 0 ? (
-            <div className="hc-none" style={{ padding: '24px 0' }}>
-              🎉 No fixable data-quality issues on record for this project this period.
-            </div>
+            <>
+              <div className="hc-none" style={{ padding: '24px 0' }}>
+                🎉 No fixable data-quality issues on record for this project this period.
+              </div>
+              {refusedNote}
+            </>
           ) : (
             <>
               <div className="dr-head" style={{ marginTop: 12 }}>
                 <span><b>{fmtInt(totalToFix + evaRecords)}</b> record{totalToFix + evaRecords === 1 ? '' : 's'} to fix across {shown.length + evaSorted.length} categor{shown.length + evaSorted.length === 1 ? 'y' : 'ies'}</span>
                 <button className="btn" onClick={exportCsv}>⬇ Export CSV</button>
               </div>
+              {refusedNote}
 
               {shown.map(({ e, cat }) => (
                 <div className="dqfx-cat" key={e.key}>
