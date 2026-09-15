@@ -2,21 +2,26 @@
 """Per-user data-entry quality → user_dq (error rates by user).
 
 Attributes the EXISTING fix-list records (drill_clients dq:* and eva:*) to the
-HMIS user who CREATED the responsible source record — no APR/Eva logic is
-re-derived; this script only joins findings to creators:
+HMIS user who created the ENROLLMENT carrying the error — no APR/Eva logic is
+re-derived; this script only joins findings to enrollment creators.
 
-  dq:dest      → Exit.csv creator (no exit row → Enrollment creator)
-  dq:movein    → Enrollment creator
-  dq:annual    → Enrollment creator (a missing assessment has no record of its
-                 own — the enrollment's owner is the accountable proxy)
-  dq:income    → IncomeBenefits entry-stage (1) creator, else Enrollment creator
-  dq:incexit   → IncomeBenefits exit-stage (3) creator, else Exit, else Enrollment
-  dq:name/ssn/dob/race/sex → Client.csv creator
-  dq:openstay  → Enrollment creator (the record left open)
-  eva:*        → Enrollment creator (household/date/duplicate structure issues)
+ATTRIBUTION DOCTRINE (user directive 2026-09-15): EVERY error — income, exit
+destination, PII, all of them — routes through an enrollment in the project
+whose fix list it sits on, and lands on that enrollment's creator. The stay
+that is leaving the error active is the accountable unit, not whoever authored
+the individual sub-record. This replaced two earlier rules that leaked across
+projects and agencies:
+  • PII errors went to the Client.csv creator — whoever did the client's
+    FIRST-EVER intake, often a different agency years earlier (observed: a
+    Caring Place user shown owning an error in a City of Miami outreach
+    program they never touched).
+  • income/dest errors went to the IncomeBenefits/Exit record creator, which
+    could differ from the staff responsible for the stay.
+When no enrollment in the project can be resolved, the finding counts as
+unattributed rather than leaking to another project's staff.
 
-ATTRIBUTION IS "RECORD CREATOR": the export carries the creating UserID only —
-a later editor is invisible. The UI must say so.
+ATTRIBUTION IS "RECORD CREATOR" (of the enrollment): the export carries the
+creating UserID only — a later editor is invisible. The UI must say so.
 
 Denominator (metric='created'): records created per user/project/month across
 Enrollment + Exit + IncomeBenefits, so rates are errors ÷ volume, not raw
@@ -96,8 +101,6 @@ def main():
     inc = pd.read_csv(DATA / "IncomeBenefits.csv", low_memory=False,
                       usecols=["EnrollmentID", "DataCollectionStage",
                                "UserID", "DateCreated"])
-    cl = pd.read_csv(DATA / "Client.csv", low_memory=False,
-                     usecols=["PersonalID", "UserID"])
     us = pd.read_csv(DATA / "User.csv", low_memory=False,
                      usecols=["UserID", "UserFirstName", "UserLastName", "UserEmail"])
 
@@ -126,37 +129,20 @@ def main():
             cur = by_pp.get(pidp)
             if cur is None or r.EntryDate > cur[0]:
                 by_pp[pidp] = (r.EntryDate, eid)
-    ex_user = dict(zip(ex["EnrollmentID"].astype(str), ex["UserID"].astype(str)))
-    inc_user: dict[tuple, str] = {}
-    for r in inc.itertuples(index=False):
-        k = (str(r.EnrollmentID), int(r.DataCollectionStage) if pd.notna(r.DataCollectionStage) else -1)
-        inc_user.setdefault(k, str(r.UserID))
-    cl_user = dict(zip(cl["PersonalID"].astype(str), cl["UserID"].astype(str)))
-
-    PII = {"dq:name", "dq:ssn", "dq:dob", "dq:race", "dq:sex"}
-
     def attribute(metric: str, pid: str, project: int, entry: str | None,
                   eid_hint: str | None = None) -> str | None:
-        if metric in PII:
-            return cl_user.get(pid)
-        # detail rows written since 2026-08-13 carry the exact EnrollmentID —
-        # use it outright; older rows fall back to the (pid, project, entry)
-        # lookup and then to the client's latest stay.
+        # Every metric: find the enrollment in THIS project that carries the
+        # error, credit its creator (doctrine above). Detail rows written since
+        # 2026-08-13 carry the exact EnrollmentID — use it outright; older rows
+        # fall back to the (pid, project, entry) lookup and then to the
+        # client's latest stay in this project. No enrollment → unattributed.
         eid = eid_hint if eid_hint and eid_hint in en_user else None
         if eid is None:
             eid = by_exact.get((pid, project, entry)) if entry else None
         if eid is None:
             hit = by_pp.get((pid, project))
             eid = hit[1] if hit else None
-        if eid is None:
-            return cl_user.get(pid)
-        if metric == "dq:dest":
-            return ex_user.get(eid) or en_user.get(eid)
-        if metric == "dq:income":
-            return inc_user.get((eid, 1)) or en_user.get(eid)
-        if metric == "dq:incexit":
-            return inc_user.get((eid, 3)) or ex_user.get(eid) or en_user.get(eid)
-        return en_user.get(eid)  # movein / annual / openstay / eva:*
+        return en_user.get(eid) if eid is not None else None
 
     # ── errors ──────────────────────────────────────────────────────────────
     # Two shapes, because the fix-lists are LEVEL snapshots (an unfixed record

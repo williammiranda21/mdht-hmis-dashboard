@@ -98,7 +98,8 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
                 <div className="k">Records created</div>
                 <div className="v num">{fmtInt(totals.created)}</div>
                 <div className="bnl-sub">enrollments · exits · income</div></div>
-              <div className="bnl-mg"><div className="k">Errors attributed</div>
+              <div className="bnl-mg" title="Open errors on enrollments this user created — including enrollments created before this 12-month window that still have unfixed issues. That's why this can exceed the records-created count.">
+                <div className="k">Errors attributed</div>
                 <div className="v num">{fmtInt(totals.errors)}</div>
                 <div className="bnl-sub">unique records{totals.rate == null ? '' : ` · ${totals.rate.toFixed(1)}% of created`}</div></div>
               <div className="bnl-mg"><div className="k">Projects</div>
@@ -178,14 +179,21 @@ function ScoreCard({ userId, onClose }: { userId: string; onClose: () => void })
                 <div key={p.project_id} style={{ display: 'flex', gap: 8, fontSize: 12.5, alignItems: 'baseline' }}>
                   <span style={{ minWidth: 40, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtInt(p.errors)}</span>
                   <span style={{ color: 'var(--muted)' }}>{p.name}</span>
-                  <span className="bnl-sub">of {fmtInt(p.created)} created</span>
+                  <span className="bnl-sub">
+                    {p.created > 0
+                      ? `${fmtInt(p.created)} record${p.created === 1 ? '' : 's'} created in these 12 months`
+                      : p.errors > 0
+                        ? 'errors on older enrollments — nothing created here in these 12 months'
+                        : 'no errors'}
+                  </span>
                 </div>
               ))}
             </div>
 
             <div className="bnl-dq" style={{ marginTop: 12 }}>
-              Attribution is by RECORD CREATOR — the HMIS export doesn’t say who edited a
-              record later. Use this as a coaching and training signal, not a verdict.
+              Errors are attributed to whoever CREATED the enrollment carrying them — the HMIS
+              export doesn’t say who edited a record later, and old enrollments keep their
+              open errors until fixed. Use this as a coaching and training signal, not a verdict.
             </div>
           </>
         )}
@@ -232,9 +240,9 @@ export default function UserDqView() {
           <div>
             <h3>Data entry — error rates by user</h3>
             <div className="meta">
-              Fix-list records attributed to the HMIS user who CREATED the responsible record,
-              over the trailing 12 complete months. Errors count UNIQUE records — a record
-              that stays broken for months counts once, and it can predate the window.
+              Fix-list records attributed to the HMIS user who CREATED the enrollment carrying
+              the error, over the trailing 12 complete months. Errors count UNIQUE records — a
+              record that stays broken for months counts once, and it can predate the window.
               Rates are errors ÷ records created. Click a user for their score card.
               <a href="/dashboard/dq" style={{ marginLeft: 8 }}>← Data Quality</a>
             </div>
