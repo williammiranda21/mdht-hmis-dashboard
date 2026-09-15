@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Favicon = the sidebar brand mark: violet rounded square, white HT.
+       Served by Next at /icon.svg automatically (App Router convention). -->
+  <rect width="64" height="64" rx="16" fill="#7E67FE"/>
+  <text x="32" y="34" text-anchor="middle" dominant-baseline="central"
+        font-family="Inter, 'Segoe UI', Arial, sans-serif" font-weight="800"
+        font-size="28" fill="#fff" letter-spacing="0.5">HT</text>
+</svg>
