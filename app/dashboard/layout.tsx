@@ -1,5 +1,7 @@
 import { Suspense } from 'react';
 import Link from 'next/link';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 import ThemeToggle from '../../components/ThemeToggle';
 import TabNav from '../../components/TabNav';
 import UserMenu from '../../components/UserMenu';
@@ -26,10 +28,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let cohortAccess = false;
   // Active admin broadcast (announcements table; comments.sql not run → null).
   let announcement: Announcement | null = null;
+  // COHORT-ONLY role (user directive 2026-09-15): an approved non-admin whose
+  // ONLY grant is cohort_access — no projects, no BNL/YC/Helpline — sees the
+  // Cohorts page (plus My account and Announcements) and nothing else. The
+  // role is DERIVED, not a flag: granting a project or any other access later
+  // un-scopes them automatically.
+  let cohortOnly = false;
   if (viewer?.isApproved) {
     const sb = supabaseServer();
     const today = new Date().toISOString().slice(0, 10);
-    const [metaRes, accessRes, annRes] = await Promise.all([
+    const [metaRes, accessRes, annRes, projRes] = await Promise.all([
       sb.from('meta').select('value').eq('key', 'export_end').maybeSingle(),
       viewer.isAdmin
         ? Promise.resolve({ data: null })
@@ -39,10 +47,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
         .or(`expires_on.is.null,expires_on.gte.${today}`)
         .order('created_at', { ascending: false })
         .limit(1).maybeSingle(),
+      viewer.isAdmin
+        ? Promise.resolve({ data: null })
+        : sb.from('user_projects').select('project_id').limit(1),
     ]);
     exportEnd = (metaRes.data?.value as string | null) ?? null;
     cohortAccess = ((accessRes.data as unknown[] | null)?.length ?? 0) > 0;
     announcement = (annRes && 'data' in annRes ? annRes.data : null) as Announcement | null;
+    const hasProjects = ((projRes.data as unknown[] | null)?.length ?? 0) > 0;
+    cohortOnly = !viewer.isAdmin && cohortAccess && !hasProjects
+      && !viewer.canSeeBnl && !viewer.canSeeYc && !viewer.canSeeHelpline;
+    if (cohortOnly) {
+      const path = headers().get('x-pathname') ?? '';
+      const allowed = ['/dashboard/admin/cohorts', '/dashboard/account', '/dashboard/announcements']
+        .some((p) => path === p || path.startsWith(`${p}/`));
+      if (!allowed) redirect('/dashboard/admin/cohorts');
+    }
   }
 
   // Signed in but not approved yet (or switched off): show the status screen
@@ -106,6 +126,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <div className="nav-label">Menu</div>
         <Suspense fallback={<nav className="tabnav" />}>
           <TabNav isAdmin={viewer?.isAdmin ?? false} cohortAccess={cohortAccess}
+            cohortOnly={cohortOnly}
             ycAccess={viewer?.canSeeYc ?? false} hlAccess={viewer?.canSeeHelpline ?? false} />
         </Suspense>
         <div className="foot">HMIS Performance Dashboard<br />Data refreshed from HMIS</div>

@@ -109,8 +109,8 @@ const isHlTab = (t: Tab): boolean => 'hlOnly' in t && t.hlOnly === true;
 // is still being shaped (user ask 2026-08-20).
 const isDevTab = (t: Tab): boolean => 'dev' in t && t.dev === true;
 
-export default function TabNav({ isAdmin = false, cohortAccess = false, ycAccess = false, hlAccess = false }:
-    { isAdmin?: boolean; cohortAccess?: boolean; ycAccess?: boolean; hlAccess?: boolean }) {
+export default function TabNav({ isAdmin = false, cohortAccess = false, cohortOnly = false, ycAccess = false, hlAccess = false }:
+    { isAdmin?: boolean; cohortAccess?: boolean; cohortOnly?: boolean; ycAccess?: boolean; hlAccess?: boolean }) {
   const pathname = usePathname();
   const search = useSearchParams();
   const qs = search.toString();
@@ -136,10 +136,14 @@ export default function TabNav({ isAdmin = false, cohortAccess = false, ycAccess
   // A non-admin who was granted specific cohorts (cohort_access) gets the
   // Cohorts tab in the main list — the page itself is RLS-scoped to their
   // grants. Admins keep it in the Admin section as before.
-  const regular = TABS.filter((t) => (!isAdminTab(t)
-    || (!isAdmin && cohortAccess && t.href === '/dashboard/admin/cohorts'))
-    && (!isYcTab(t) || isAdmin || ycAccess)
-    && (!isHlTab(t) || isAdmin || hlAccess));
+  // COHORT-ONLY accounts (their sole grant is a cohort) see just that tab —
+  // the layout redirects every other dashboard route to match.
+  const regular = cohortOnly
+    ? TABS.filter((t) => t.href === '/dashboard/admin/cohorts')
+    : TABS.filter((t) => (!isAdminTab(t)
+      || (!isAdmin && cohortAccess && t.href === '/dashboard/admin/cohorts'))
+      && (!isYcTab(t) || isAdmin || ycAccess)
+      && (!isHlTab(t) || isAdmin || hlAccess));
   const admin = TABS.filter(isAdminTab);
 
   return (

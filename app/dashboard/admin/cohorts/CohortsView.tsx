@@ -782,8 +782,9 @@ export default function CohortsView({ isAdmin = false, viewerId = null }:
             </div>
             {detail.restricted && (
               <div style={{ padding: '0 18px 10px' }} className="bnl-sub">
-                You have access to this cohort, but member details require By-Name List access —
-                ask an administrator to enable it for your account.
+                You have access to this cohort, but client names require a <b>two-factor</b> sign-in:
+                set up an authenticator app under <b>My account</b>, then sign out and back in.
+                (Still hidden after that? Ask an administrator to check your access.)
               </div>
             )}
             {fStage && (

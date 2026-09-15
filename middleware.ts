@@ -16,7 +16,12 @@ import { IDLE_MS, IDLE_COOKIE } from './lib/idle';
 const PUBLIC_PATHS = ['/login', '/signup', '/auth/callback', '/forgot', '/yc', '/api/yc/submit'];
 
 export async function middleware(req: NextRequest) {
-  let res = NextResponse.next({ request: { headers: req.headers } });
+  const { pathname, search } = req.nextUrl;
+  // The dashboard layout enforces the cohort-only role server-side and needs
+  // the request path to do it — layouts can't see the URL on their own.
+  const fwd = new Headers(req.headers);
+  fwd.set('x-pathname', pathname);
+  let res = NextResponse.next({ request: { headers: fwd } });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -40,7 +45,6 @@ export async function middleware(req: NextRequest) {
   const { data } = await supabase.auth.getUser();
   const user = data.user;
 
-  const { pathname, search } = req.nextUrl;
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   if (!user && !isPublic) {
