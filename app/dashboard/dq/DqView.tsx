@@ -34,6 +34,9 @@ type Props = {
   /** project_id → metrics past their Homeless Trust due date with records
    *  still on the list (computed server-side in page.tsx). */
   overdue?: Record<number, string[]>;
+  /** effective dq_score target per project (override → type default),
+   *  from Admin → Targets; missing project = 95 fallback */
+  dqTargets?: Record<number, number>;
   /** System KPI strip aggregates (2026-09-03) — computed server-side, always
    *  system-wide (never scoped by the table's type/search filters). */
   sysKpi?: {
@@ -117,20 +120,30 @@ const TOGGLE_COLS: { k: string; label: string }[] = [
 // browsers that had already persisted a v1 column selection.
 const COLS_LS_KEY = 'dq_visible_cols_v2';
 
-const scoreClass = (v: number | null) => (v == null ? '' : v >= 80 ? 'dq-green' : v >= 60 ? 'dq-amber' : 'dq-red');
-const scoreColor = (v: number) => (v >= 80 ? 'var(--accent)' : v >= 60 ? 'var(--warn)' : 'var(--danger)');
+// Color bands are TARGET-relative (user 2026-09-15: "match it to our
+// targets"): green = meets the project's dq_score target from Admin →
+// Targets (project override → type default), amber = within 5 points of it,
+// red = further below. Fallback target when none is configured: 95 — the
+// HUD/CoC <=5%-error convention. The old 80/60 bands painted deficient
+// scores green.
+const DQ_TARGET_FALLBACK = 95;
+const scoreClass = (v: number | null, t = DQ_TARGET_FALLBACK) =>
+  (v == null ? '' : v >= t ? 'dq-green' : v >= t - 5 ? 'dq-amber' : 'dq-red');
+const scoreColor = (v: number, t = DQ_TARGET_FALLBACK) =>
+  (v >= t ? 'var(--accent)' : v >= t - 5 ? 'var(--warn)' : 'var(--danger)');
 
-function ScorePill({ v }: { v: number | null }) {
+function ScorePill({ v, t }: { v: number | null; t?: number }) {
   if (v == null) return <span style={{ color: 'var(--muted)' }}>N/A</span>;
-  return <span className={`dq-score-pill ${scoreClass(v)}`}>{v}%</span>;
+  return <span className={`dq-score-pill ${scoreClass(v, t)}`}
+    title={`target ${t ?? DQ_TARGET_FALLBACK}%`}>{v}%</span>;
 }
 
-function Gauge({ score }: { score: number | null }) {
+function Gauge({ score, t }: { score: number | null; t?: number }) {
   if (score == null) return <>—</>;
   return (
-    <span className="dq-gauge-wrap">
-      <span className="dq-gauge-bar"><span className="dq-gauge-fill" style={{ width: `${score}%`, background: scoreColor(score) }} /></span>
-      <span className={`dq-score-pill ${scoreClass(score)}`}>{score}%</span>
+    <span className="dq-gauge-wrap" title={`target ${t ?? DQ_TARGET_FALLBACK}%`}>
+      <span className="dq-gauge-bar"><span className="dq-gauge-fill" style={{ width: `${score}%`, background: scoreColor(score, t) }} /></span>
+      <span className={`dq-score-pill ${scoreClass(score, t)}`}>{score}%</span>
     </span>
   );
 }
@@ -145,7 +158,7 @@ function PctCell({ pct, thr, sub }: { pct: number | null; thr: number; sub?: str
 
 type SortKey = 'name' | 'type_name' | string;
 
-export default function DqView({ periods, granularity, period, rows, evaCounts, evaPeriod, focusProject = null, overdue = {}, sysKpi }: Props) {
+export default function DqView({ periods, granularity, period, rows, evaCounts, evaPeriod, focusProject = null, overdue = {}, dqTargets = {}, sysKpi }: Props) {
   // Check-column tooltips carry the fallback month on non-monthly views.
   const evaWhen = granularity === 'monthly' ? '' : ` · shown for ${evaPeriod ?? 'the latest complete month'} (checks are monthly)`;
   const router = useRouter();
@@ -432,16 +445,16 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
                       )}
                     </td>
                     <td><span className="ty">{r.type_name}</span></td>
-                    <td className="num"><Gauge score={d.DQ_Score} /></td>
-                    {vis('pii') && <td className="num"><ScorePill v={d.DQ_PII_Score} /></td>}
-                    {vis('univ') && <td className="num"><ScorePill v={d.DQ_Univ_Score} /></td>}
-                    {vis('inc') && <td className="num"><ScorePill v={d.DQ_Inc_Score} /></td>}
-                    {vis('chronic') && <td className="num">{hasChronic ? <ScorePill v={d.DQ_Chronic_Score} /> : <span style={{ color: 'var(--muted)' }}>N/A</span>}</td>}
+                    <td className="num"><Gauge score={d.DQ_Score} t={dqTargets[r.project_id]} /></td>
+                    {vis('pii') && <td className="num"><ScorePill v={d.DQ_PII_Score} t={dqTargets[r.project_id]} /></td>}
+                    {vis('univ') && <td className="num"><ScorePill v={d.DQ_Univ_Score} t={dqTargets[r.project_id]} /></td>}
+                    {vis('inc') && <td className="num"><ScorePill v={d.DQ_Inc_Score} t={dqTargets[r.project_id]} /></td>}
+                    {vis('chronic') && <td className="num">{hasChronic ? <ScorePill v={d.DQ_Chronic_Score} t={dqTargets[r.project_id]} /> : <span style={{ color: 'var(--muted)' }}>N/A</span>}</td>}
                     {vis('movein') && (isPH
                       ? <PctCell pct={d.DQ_MoveIn_pct} thr={10} sub={d.DQ_PHEnrolls ? `${d.DQ_MoveInBad || 0} of ${d.DQ_PHEnrolls} enrolled` : null} />
                       : <td className="num" style={{ color: 'var(--muted)' }}>N/A</td>)}
                     {vis('annual') && <PctCell pct={d.DQ_Annual_pct} thr={20} sub={d.DQ_AnnualDue ? `${d.DQ_AnnualBad || 0} of ${d.DQ_AnnualDue} due` : null} />}
-                    {vis('integrity') && <td className="num"><ScorePill v={d.DQ_Integrity_Score} /></td>}
+                    {vis('integrity') && <td className="num"><ScorePill v={d.DQ_Integrity_Score} t={dqTargets[r.project_id]} /></td>}
                     {vis('fixtime') && (
                       <td className="num">
                         {d.DQ_FixMedian == null

@@ -130,6 +130,27 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     overdueProjects: Object.keys(overdue).length,
   };
 
+  // Effective dq_score target per project (user 2026-09-15 "match it to our
+  // targets"): project override → type default (Admin → Targets) → the view's
+  // 95 fallback. Missing tables (targets.sql not run) just yield the fallback.
+  const dqTargets: Record<number, number> = {};
+  try {
+    const [typeT, projT] = await Promise.all([
+      sb.from('type_targets').select('project_type, target').eq('metric', 'dq_score'),
+      sb.from('project_targets').select('project_id, target').eq('metric', 'dq_score'),
+    ]);
+    const byType = new Map(((typeT.data ?? []) as Array<{ project_type: number; target: number }>)
+      .map((t) => [Number(t.project_type), Number(t.target)]));
+    const byProj = new Map(((projT.data ?? []) as Array<{ project_id: number; target: number }>)
+      .map((t) => [Number(t.project_id), Number(t.target)]));
+    for (const r of rows) {
+      const pid = Number(r.project_id);
+      const pt = projects[pid]?.project_type;
+      const eff = byProj.get(pid) ?? (pt != null ? byType.get(pt) : undefined);
+      if (eff != null) dqTargets[pid] = eff;
+    }
+  } catch { /* targets tables absent — fallback bands apply */ }
+
   const merged = rows.map((r) => ({
     project_id: r.project_id,
     name: projects[r.project_id]?.name ?? `Project ${r.project_id}`,
@@ -151,5 +172,5 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
 
   return <DqView periods={periods} granularity={granularity} period={period} rows={merged}
     evaCounts={evaCounts} evaPeriod={evaPeriod} focusProject={focusProject} overdue={overdue}
-    sysKpi={sysKpi} />;
+    dqTargets={dqTargets} sysKpi={sysKpi} />;
 }
