@@ -72,6 +72,10 @@ function when(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso
     : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
+/** "4h" under a day, then "1d 4h" (user 2026-09-15: 28h was unreadable). */
+function fmtHours(h: number): string {
+  return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d ${h % 24}h`;
+}
 function hoursSince(iso: string): number {
   return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 3_600_000));
 }
@@ -574,7 +578,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
 
       <div className="bnl-kpis" style={{ marginBottom: 18 }}>
         {kpi('Awaiting triage', triage.length,
-          triage.length ? `oldest ${Math.max(...triage.map((c) => hoursSince(c.created_at)))}h ago` : 'queue is clear',
+          triage.length ? `oldest ${fmtHours(Math.max(...triage.map((c) => hoursSince(c.created_at))))} ago` : 'queue is clear',
           'var(--danger)', 'queue')}
         {kpi('With outreach', working.length, 'assigned · attempted · contacted', 'var(--accent)', 'board')}
         {kpi('Confirmed homeless', confirmed.length,
@@ -656,7 +660,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                 return (
                 <FragmentRow key={c.id} left={<>{when(c.created_at)}
                   <div className="bnl-sub" style={late ? { color: 'var(--danger)', fontWeight: 700 } : undefined}>
-                    {hrs}h ago{late ? ' ⚠' : ''}</div></>}>
+                    {fmtHours(hrs)} ago{late ? ' ⚠' : ''}</div></>}>
                   <CaseCell c={c} e={e} />
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {c.matched_pid
