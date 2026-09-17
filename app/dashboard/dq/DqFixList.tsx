@@ -167,7 +167,7 @@ function DueControl({ metric, due, remaining, canSet, onSet }: {
         border: `1px solid ${col}`, borderRadius: 999, padding: '1px 8px',
         cursor: canSet ? 'pointer' : 'default', whiteSpace: 'nowrap',
       }}>
-      {due ? `${overdue ? '⚑ overdue — was ' : 'due '}${due}` : '+ due date'}
+      {due ? `${overdue ? '⚑ overdue — was ' : 'due '}${due}` : `+ due date · guide ${suggestDue(metric, remaining).days}d`}
     </span>
   );
 }
