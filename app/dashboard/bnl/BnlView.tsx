@@ -77,7 +77,6 @@ export default function BnlView({
   const [q, setQ] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fFlag, setFFlag] = useState('');
-  const [fAsmt, setFAsmt] = useState('');
   const [fRef, setFRef] = useState('');
   // Milestone worklist — set by clicking a waiting number on the journey bar.
   const [fStage, setFStage] = useState('');
@@ -265,10 +264,10 @@ export default function BnlView({
   const pa = agg.pops[pop];
 
   const params = useCallback((offset: number) => new URLSearchParams({
-    pop, status: fStatus, flag: fFlag, asmt: fAsmt, stage: fStage, ref: fRef,
+    pop, status: fStatus, flag: fFlag, stage: fStage, ref: fRef,
     projects: selProjects.join(','), projMode, q: qDebounced,
     sort: sortKey, dir: sortDir, offset: String(offset), limit: String(PAGE),
-  }), [pop, fStatus, fFlag, fAsmt, fStage, fRef, selProjects, projMode, qDebounced, sortKey, sortDir]);
+  }), [pop, fStatus, fFlag, fStage, fRef, selProjects, projMode, qDebounced, sortKey, sortDir]);
 
   // Which request is current. A slow response for an old filter must not
   // overwrite a newer one — without this, typing fast can leave stale rows.
@@ -352,14 +351,14 @@ export default function BnlView({
   // not part of this — the cards partition the universe by status themselves.
   // With no filters active the precomputed population aggregate serves as
   // before (zero extra queries).
-  const countsFiltered = Boolean(fFlag || fAsmt || fStage || fRef || selProjects.length || qDebounced);
+  const countsFiltered = Boolean(fFlag || fStage || fRef || selProjects.length || qDebounced);
   const [fCounts, setFCounts] = useState<BnlPopAgg['counts'] | null>(null);
   const cntReq = useRef(0);
   useEffect(() => {
     const id = ++cntReq.current;
     if (!countsFiltered) { setFCounts(null); return; }
     const sp = new URLSearchParams({
-      pop, flag: fFlag, asmt: fAsmt, stage: fStage, ref: fRef,
+      pop, flag: fFlag, stage: fStage, ref: fRef,
       projects: selProjects.join(','), projMode, q: qDebounced,
     });
     fetch(`/api/bnl/counts?${sp}`)
@@ -368,7 +367,7 @@ export default function BnlView({
       // On failure fall back to the population aggregate rather than showing
       // stale filtered numbers against a different filter state.
       .catch(() => { if (id === cntReq.current) setFCounts(null); });
-  }, [countsFiltered, pop, fFlag, fAsmt, fStage, fRef, selProjects, projMode, qDebounced]);
+  }, [countsFiltered, pop, fFlag, fStage, fRef, selProjects, projMode, qDebounced]);
 
   const kpis: Array<[string, number | string, string, string]> = useMemo(() => {
     const c = fCounts ?? pa.counts;
@@ -585,6 +584,10 @@ export default function BnlView({
                 <option value="in_school">In school</option>
                 <option value="dq">Has DQ issue</option>
                 <option value="focus">★ Focused</option>
+                <option value="mark_4">■ Blue mark — newly referred</option>
+                <option value="mark_3">■ Green mark — progressing</option>
+                <option value="mark_1">■ Red mark</option>
+                <option value="mark_2">■ Yellow mark</option>
               </select>
             </div>
             <div className="fgroup">
@@ -602,14 +605,6 @@ export default function BnlView({
                 mode={projMode} onModeChange={setProjMode}
                 onChange={setSelProjects}
                 title="Filter the roster to one or more projects" />
-            </div>
-            <div className="fgroup">
-              <span className="flabel">CE assessed</span>
-              <select className="fselect" value={fAsmt} onChange={(e) => setFAsmt(e.target.value)}>
-                <option value="">Any</option>
-                <option value="y">Assessed</option>
-                <option value="n">Not assessed</option>
-              </select>
             </div>
             {fStage && (
               <div className="fgroup">
@@ -651,7 +646,7 @@ export default function BnlView({
                         <span className="pp-noprint" role="button"
                           title={r.focused ? 'On the focus list — click to remove' : 'Focus this client for case conferencing'}
                           onClick={(e) => { e.stopPropagation(); toggleFocus(r); }}
-                          style={{ cursor: 'pointer', fontSize: 19, lineHeight: 1,
+                          style={{ cursor: 'pointer', fontSize: 23, lineHeight: 1,
                             color: r.focused ? 'var(--warn)' : 'var(--faint)' }}>
                           {r.focused ? '★' : '☆'}
                         </span>
@@ -694,7 +689,17 @@ export default function BnlView({
                       // $0 is a real answer (no income); only a missing record shows —
                       ? <>${r.income.toLocaleString()}{r.income_date && <div className="bnl-sub" title="date of the latest income record">{r.income_date}</div>}</>
                       : <span className="bnl-sub">—</span>}</td>
-                    <td {...mkTd(r, 'ref_status')}>{r.ref_type ? (
+                    {/* Referral cell: every LIVE referral stacked (a client can
+                        hold RRH move-in-cost + PSH subsidy at once). Falls back
+                        to the single headline when refs hasn't loaded yet. */}
+                    <td {...mkTd(r, 'ref_status')}>{(r.refs?.length ?? 0) > 0 ? (
+                      r.refs!.map((f, i) => (
+                        <div key={i} style={i > 0 ? { marginTop: 3, paddingTop: 3, borderTop: '1px solid rgba(148,163,184,0.15)' } : undefined}>
+                          <div>{f.type} · <b>{f.status}</b></div>
+                          <div className="bnl-sub">{f.date}{f.prov ? ` · ${f.prov}` : ''}</div>
+                        </div>
+                      ))
+                    ) : r.ref_type ? (
                       <><div>{r.ref_type} · <b>{r.ref_status}</b></div><div className="bnl-sub">{r.ref_date}{r.ref_prov ? ` · ${r.ref_prov}` : ''}</div></>
                     ) : <span className="bnl-sub">—</span>}</td>
                     <td title={canWriteClient(writePops, r) ? 'Click to add a quick note' : 'Click to view recent notes'}

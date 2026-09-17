@@ -20,7 +20,7 @@ export const ROSTER_COLS =
   'pid, name, age, status, detail, enrolled, project, ptype, hh_n, ' +
   'days_homeless, sys_days3, episodes3, risk_pts, risk_max, risk_band, ' +
   'spdat_score, spdat_tool, spdat_date, ms_stage, ms_wait, ' +
-  'ref_type, ref_status, ref_date, ref_prov, assessed, dq_n, ' +
+  'ref_type, ref_status, ref_date, ref_prov, refs, ref_types, assessed, dq_n, ' +
   'income, income_date, hh_members, ' +
   'chronic, is_new, returned, veteran, family, parenting, unaccompanied, in_school';
 
@@ -155,10 +155,13 @@ export function applyRosterFilters<Q>(qb0: Q, p: RosterQuery, pidsIn?: string[])
   else if (p.asmt === 'n') qb = qb.is('assessed', null);
   if (p.stage) qb = qb.eq('ms_stage', p.stage);
 
-  // Live-referral filter. 'rrh' uses ilike so 'Joint TH-RRH' referrals match.
-  if (p.ref === 'psh') qb = qb.eq('ref_type', 'PSH');
-  else if (p.ref === 'rrh') qb = qb.ilike('ref_type', '%RRH%');
-  else if (p.ref === 'none') qb = qb.is('ref_type', null);
+  // Live-referral filter — matches ANY live referral via the ref_types
+  // summary ('PSH|RRH'), not just the single headline (user 2026-09-18: a
+  // client holding both an RRH and a PSH referral must appear under BOTH).
+  // ilike keeps 'Joint TH-RRH' matching 'rrh'. 'none' = no live referral.
+  if (p.ref === 'psh') qb = qb.ilike('ref_types', '%PSH%');
+  else if (p.ref === 'rrh') qb = qb.ilike('ref_types', '%RRH%');
+  else if (p.ref === 'none') qb = qb.is('ref_types', null);
 
   if (p.projects) {
     const ids = p.projects.split(',').map((s) => Number(s)).filter((n) => Number.isFinite(n));

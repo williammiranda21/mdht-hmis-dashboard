@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../../lib/supabase-server';
 import { parseRosterQuery, applyRosterFilters } from '../../../../lib/bnl-query';
-import { focusPids } from '../../../../lib/bnl-enrich';
+import { flagPidsFor } from '../../../../lib/bnl-enrich';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,11 +26,8 @@ export async function GET(req: Request) {
   p.status = '';
   const sb = supabaseServer();
 
-  let pidsIn: string[] | undefined;
-  if (p.flag === 'focus') {
-    pidsIn = await focusPids(sb);
-    if (!pidsIn.length) return NextResponse.json(ZERO);
-  }
+  const pidsIn = await flagPidsFor(sb, p.flag);
+  if (pidsIn && !pidsIn.length) return NextResponse.json(ZERO);
 
   const cnt = async (refine: (q: ReturnType<typeof base>) => ReturnType<typeof base>) => {
     const { count, error } = await refine(base());

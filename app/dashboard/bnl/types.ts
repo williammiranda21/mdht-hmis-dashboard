@@ -71,6 +71,12 @@ export interface BnlClient {
    *  Optional — absent on rows that skipped enrichment (e.g. CSV export). */
   notes2?: { body: string; author: string | null; at: string }[] | null;
   focused?: boolean;
+  /** ALL live referrals (newest first, one per type+provider, max 3) — a
+   *  client can hold e.g. an RRH move-in-cost referral AND a PSH subsidy
+   *  referral at once. Headline ref_* fields stay for sorting/compat. */
+  refs?: { type: string | null; status: string | null; date: string | null; prov: string | null }[] | null;
+  /** pipe-joined live referral types ('PSH|RRH') — server-side filter key */
+  ref_types?: string | null;
   ref_type: string | null;
   ref_status: string | null;
   ref_date: string | null;

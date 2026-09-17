@@ -48,3 +48,21 @@ export async function focusPids(sb: SupabaseClient): Promise<string[]> {
   const { data } = await sb.from('bnl_focus').select('pid').limit(1000);
   return ((data ?? []) as { pid: string }[]).map((f) => f.pid);
 }
+
+/** pids carrying at least one cell mark of this color (1 red · 2 yellow ·
+ *  3 green = progressing · 4 blue = newly referred). Conferencing-scale;
+ *  degrades to empty if bnl_cell_marks doesn't exist yet. */
+export async function markPids(sb: SupabaseClient, color: number): Promise<string[]> {
+  const { data } = await sb.from('bnl_cell_marks').select('pid').eq('color', color).limit(5000);
+  return [...new Set(((data ?? []) as { pid: string }[]).map((m) => m.pid))];
+}
+
+/** Resolve a roster `flag` that filters by a SIDE TABLE rather than a
+ *  bnl_clients column: 'focus' (★ list) and 'mark_N' (cell-mark colors).
+ *  Returns the pid allow-list, or undefined for ordinary column flags. */
+export async function flagPidsFor(sb: SupabaseClient, flag: string): Promise<string[] | undefined> {
+  if (flag === 'focus') return focusPids(sb);
+  const m = /^mark_([1-4])$/.exec(flag);
+  if (m) return markPids(sb, Number(m[1]));
+  return undefined;
+}

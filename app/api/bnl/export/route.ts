@@ -1,7 +1,7 @@
 import { getViewer, supabaseServer } from '../../../../lib/supabase-server';
 import { audit } from '../../../../lib/audit';
 import { parseRosterQuery, queryRoster, ROSTER_COLS } from '../../../../lib/bnl-query';
-import { enrichRoster } from '../../../../lib/bnl-enrich';
+import { enrichRoster, flagPidsFor } from '../../../../lib/bnl-enrich';
 import { MILESTONES } from '../../../dashboard/bnl/types';
 import type { BnlClient } from '../../../dashboard/bnl/types';
 
@@ -31,6 +31,9 @@ const HEADER = [
   'risk_pts', 'risk_band',
   'income_mo', 'income_date',
   'ref_type', 'ref_status', 'ref_date', 'ref_provider',
+  // every LIVE referral (a client can hold RRH + PSH at once), readable form:
+  // "PSH pending 2026-05-02 Carrfour | RRH accepted 2026-06-01 Chapman"
+  'live_referrals',
   'last_note', 'last_note_at', 'last_note_author',
 ];
 
@@ -51,6 +54,8 @@ function toRow(r: BnlClient): unknown[] {
     r.risk_pts, r.risk_pts == null ? '' : (r.risk_pts >= 8 ? 'High' : 'Low'),
     r.income, r.income_date,
     r.ref_type, r.ref_status, r.ref_date, r.ref_prov,
+    (r.refs ?? []).map((f) =>
+      [f.type, f.status, f.date, f.prov].filter(Boolean).join(' ')).join(' | '),
     note?.body, note?.at, note?.author,
   ];
 }
@@ -73,6 +78,10 @@ export async function GET(req: Request) {
   // Name-bearing data leaving the system — always on the access log (gap #2).
   await audit('bnl_export', viewer, { query: new URL(req.url).search.slice(0, 500) });
 
+  // Side-table flags (★ Focused, cell-mark colors) constrain by pid list —
+  // previously the export silently ignored them and dumped the whole filter.
+  const pidsIn = await flagPidsFor(sb, base.flag);
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const enc = new TextEncoder();
@@ -82,8 +91,9 @@ export async function GET(req: Request) {
       let offset = 0;
       try {
         for (;;) {
+          if (pidsIn && !pidsIn.length) break;
           const { data, error } = await queryRoster(
-            sb, { ...base, offset, limit: CHUNK }, ROSTER_COLS, false,
+            sb, { ...base, offset, limit: CHUNK }, ROSTER_COLS, false, pidsIn,
           );
           if (error) throw new Error(error.message);
           const rows = (data ?? []) as unknown as BnlClient[];
