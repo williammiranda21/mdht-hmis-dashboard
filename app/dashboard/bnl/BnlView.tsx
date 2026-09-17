@@ -31,14 +31,15 @@ const COLS: Array<[SortKey | 'flags' | 'notes', string]> = [
 ];
 
 /** Cell marks — right-click color highlights (case conferencing, user
- *  2026-08-25). Colors are deliberately UNLABELED (values 1–4 in the DB);
- *  team meanings can be layered on later without a migration. Shared state
- *  via bnl_cell_marks (read = can_see_bnl, write = note-writing scopes). */
-const MARK_COLORS: Record<number, { name: string; c: string; bg: string }> = {
+ *  2026-08-25). DB stores values 1–4; the design left meanings to be layered
+ *  on later without a migration, and on 2026-09-18 the team assigned two:
+ *  GREEN = progressing · BLUE = newly referred. Red/Yellow stay unlabeled.
+ *  Shared state via bnl_cell_marks (read = can_see_bnl, write = note scopes). */
+const MARK_COLORS: Record<number, { name: string; c: string; bg: string; label?: string }> = {
   1: { name: 'Red',    c: '#ef4444', bg: 'rgba(239,68,68,0.14)' },
   2: { name: 'Yellow', c: '#eab308', bg: 'rgba(234,179,8,0.14)' },
-  3: { name: 'Green',  c: '#22c55e', bg: 'rgba(34,197,94,0.14)' },
-  4: { name: 'Blue',   c: '#38bdf8', bg: 'rgba(56,189,248,0.14)' },
+  3: { name: 'Green',  c: '#22c55e', bg: 'rgba(34,197,94,0.14)', label: 'Progressing' },
+  4: { name: 'Blue',   c: '#38bdf8', bg: 'rgba(56,189,248,0.14)', label: 'Newly referred' },
 };
 type CellMark = { color: number; author: string | null; at: string };
 
@@ -188,7 +189,7 @@ export default function BnlView({
     }
     if (mc) {
       props.style = { ...base, background: mc.bg, boxShadow: `inset 3px 0 0 ${mc.c}` };
-      props.title = `${mc.name} — ${m!.author ?? '—'} · ${new Date(m!.at).toLocaleDateString()}`;
+      props.title = `${mc.label ? `${mc.name} (${mc.label})` : mc.name} — ${m!.author ?? '—'} · ${new Date(m!.at).toLocaleDateString()}`;
     } else if (base) {
       props.style = base;
     }
@@ -622,6 +623,12 @@ export default function BnlView({
           </div>
         </div>
 
+        <div className="bnl-sub" style={{ padding: '0 18px 8px' }}>
+          right-click a cell to mark it:{' '}
+          <span style={{ color: '#38bdf8', fontWeight: 700 }}>■</span> blue = newly referred
+          {' · '}
+          <span style={{ color: '#22c55e', fontWeight: 700 }}>■</span> green = progressing
+        </div>
         {/* scroll-pin: only the LIST scrolls (viewport-bounded, sticky header)
             — the filters and journey card above stay put, same as the DQ tab. */}
         <div className="scroll scroll-pin" style={loading ? { opacity: 0.55, transition: 'opacity .15s' } : undefined}>
@@ -644,7 +651,7 @@ export default function BnlView({
                         <span className="pp-noprint" role="button"
                           title={r.focused ? 'On the focus list — click to remove' : 'Focus this client for case conferencing'}
                           onClick={(e) => { e.stopPropagation(); toggleFocus(r); }}
-                          style={{ cursor: 'pointer', fontSize: 14, lineHeight: 1,
+                          style={{ cursor: 'pointer', fontSize: 19, lineHeight: 1,
                             color: r.focused ? 'var(--warn)' : 'var(--faint)' }}>
                           {r.focused ? '★' : '☆'}
                         </span>
@@ -831,7 +838,7 @@ export default function BnlView({
                 style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%',
                   border: 0, background: 'none', padding: '6px 9px', textAlign: 'left' }}>
                 <span style={{ width: 10, height: 10, borderRadius: 3, background: mc.c, flexShrink: 0 }} />
-                {mc.name}
+                {mc.label ? `${mc.name} — ${mc.label}` : mc.name}
                 {cur === Number(k) && <span className="bnl-sub" style={{ marginLeft: 'auto' }}>✓</span>}
               </button>
             ))}
