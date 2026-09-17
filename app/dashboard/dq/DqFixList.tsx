@@ -97,10 +97,11 @@ interface Category {
 
 /** Suggested fix window per the internal DQ Fix Timelines guide (2026-09-17).
  *  Class A = LSA / Sys PM-impacting elements; the submission-season freeze
- *  (Oct–Nov) drops every Class A element to 7 days; backlogs over 50 records
- *  get the 45-day clearance ceiling (the 25%/week slope is monitored by the
- *  weekly refresh, not the date). The admin can always pick another date —
- *  this only pre-fills the calendar. */
+ *  (Oct–Nov) drops every Class A element to 7 days; 1–10 records = a week
+ *  (small lists are quick fixes — user 2026-09-17); backlogs over 50 records
+ *  get the 30-day clearance ceiling (the 25%/week slope is monitored by the
+ *  weekly refresh, not the date); NOTHING exceeds 30 days. The admin can
+ *  always pick another date — this only pre-fills the calendar. */
 const GUIDE_CLASS_A = new Set(['dest', 'movein', 'psd', 'relhoh', 'coc',
   'disabling', 'chronic', 'openstay', 'dob', 'veteran']);
 const GUIDE_CRITICAL = new Set(['psd', 'dest']);          // record integrity → 7d
@@ -111,10 +112,11 @@ function suggestDue(metric: string, remaining: number): { date: string; days: nu
   const freeze = now.getMonth() === 9 || now.getMonth() === 10; // Oct–Nov
   let days: number; let why: string;
   if (freeze && GUIDE_CLASS_A.has(el)) { days = 7; why = 'submission season — Class A'; }
-  else if (remaining > 50) { days = 45; why = '>50 records — 25%/wk burn-down, 45d clearance'; }
-  else if (GUIDE_CRITICAL.has(el)) { days = 7; why = 'Class A — record integrity'; }
-  else if (GUIDE_STRUCTURAL.has(el)) { days = 30; why = 'structural — needs client contact'; }
-  else if (GUIDE_CLASS_A.has(el)) { days = 14; why = 'Class A — federal (LSA / Sys PM)'; }
+  else if (remaining > 50) { days = 30; why = '>50 records — 25%/wk burn-down, 30d clearance'; }
+  else if (GUIDE_STRUCTURAL.has(el)) { days = 21; why = 'structural — needs client contact'; }
+  else if (GUIDE_CRITICAL.has(el)) { days = 5; why = 'Class A — record integrity'; }
+  else if (remaining <= 10) { days = 5; why = 'small list — days, not weeks'; }
+  else if (GUIDE_CLASS_A.has(el)) { days = 10; why = 'Class A — federal (LSA / Sys PM)'; }
   else { days = 14; why = 'Class B — APR quality'; }
   const d = new Date(now); d.setDate(d.getDate() + days);
   return { date: d.toISOString().slice(0, 10), days, why };
