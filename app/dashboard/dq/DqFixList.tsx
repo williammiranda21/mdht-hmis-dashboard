@@ -95,6 +95,31 @@ interface Category {
   trend: { period: string; pct: number | null }[];
 }
 
+/** Suggested fix window per the internal DQ Fix Timelines guide (2026-09-17).
+ *  Class A = LSA / Sys PM-impacting elements; the submission-season freeze
+ *  (Oct–Nov) drops every Class A element to 7 days; backlogs over 50 records
+ *  get the 45-day clearance ceiling (the 25%/week slope is monitored by the
+ *  weekly refresh, not the date). The admin can always pick another date —
+ *  this only pre-fills the calendar. */
+const GUIDE_CLASS_A = new Set(['dest', 'movein', 'psd', 'relhoh', 'coc',
+  'disabling', 'chronic', 'openstay', 'dob', 'veteran']);
+const GUIDE_CRITICAL = new Set(['psd', 'dest']);          // record integrity → 7d
+const GUIDE_STRUCTURAL = new Set(['annual', 'openstay']); // needs client contact → 30d
+function suggestDue(metric: string, remaining: number): { date: string; days: number; why: string } {
+  const el = metric.replace(/^dq:/, '');
+  const now = new Date();
+  const freeze = now.getMonth() === 9 || now.getMonth() === 10; // Oct–Nov
+  let days: number; let why: string;
+  if (freeze && GUIDE_CLASS_A.has(el)) { days = 7; why = 'submission season — Class A'; }
+  else if (remaining > 50) { days = 45; why = '>50 records — 25%/wk burn-down, 45d clearance'; }
+  else if (GUIDE_CRITICAL.has(el)) { days = 7; why = 'Class A — record integrity'; }
+  else if (GUIDE_STRUCTURAL.has(el)) { days = 30; why = 'structural — needs client contact'; }
+  else if (GUIDE_CLASS_A.has(el)) { days = 14; why = 'Class A — federal (LSA / Sys PM)'; }
+  else { days = 14; why = 'Class B — APR quality'; }
+  const d = new Date(now); d.setDate(d.getDate() + days);
+  return { date: d.toISOString().slice(0, 10), days, why };
+}
+
 /** Due-date chip + admin editor for one category (project + element).
  *  Campaign-level (Homeless Trust sets it; agencies see it). Overdue = past
  *  due with records still on the list. */
@@ -113,8 +138,9 @@ function DueControl({ metric, due, remaining, canSet, onSet }: {
     try { await onSet(metric, d); setEditing(false); } finally { setBusy(false); }
   };
   if (editing) {
+    const sug = suggestDue(metric, remaining);
     return (
-      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 8 }}>
+      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 8, flexWrap: 'wrap' }}>
         <input type="date" className="finput" style={{ padding: '2px 6px', fontSize: 12 }}
           value={val} onChange={(e) => setVal(e.target.value)} disabled={busy} />
         <button className="btn" style={{ padding: '2px 8px', fontSize: 11 }} disabled={busy || !val}
@@ -123,6 +149,10 @@ function DueControl({ metric, due, remaining, canSet, onSet }: {
           onClick={() => commit(null)}>Clear</button>}
         <button className="btn" style={{ padding: '2px 8px', fontSize: 11 }} disabled={busy}
           onClick={() => setEditing(false)}>✕</button>
+        <span className="bnl-sub" style={{ whiteSpace: 'nowrap' }}
+          title="Suggested by the internal DQ Fix Timelines guide — the calendar always wins">
+          guide: {sug.days}d · {sug.why}
+        </span>
       </span>
     );
   }
@@ -131,7 +161,7 @@ function DueControl({ metric, due, remaining, canSet, onSet }: {
     <span
       role={canSet ? 'button' : undefined}
       title={canSet ? 'Homeless Trust due date — click to change' : 'Homeless Trust due date'}
-      onClick={canSet ? () => { setVal(due ?? ''); setEditing(true); } : undefined}
+      onClick={canSet ? () => { setVal(due ?? suggestDue(metric, remaining).date); setEditing(true); } : undefined}
       style={{
         marginLeft: 8, fontSize: 11, fontWeight: 700, color: col,
         border: `1px solid ${col}`, borderRadius: 999, padding: '1px 8px',
