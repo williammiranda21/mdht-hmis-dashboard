@@ -396,7 +396,10 @@ def build_risk_drills(an: dict | None) -> list[dict]:
         "personal_ids": [o["PersonalID"] for o in items],
         "detail": [{"pid": o["PersonalID"], "exit": o.get("ExitDate"),
                     "los": o.get("LOS"), "eps": o.get("PriorEps"),
-                    "score": o.get("RiskScore"), "bucket": o.get("RiskBucket")}
+                    "score": o.get("RiskScore"), "bucket": o.get("RiskBucket"),
+                    "dest": o.get("Dest"), "sub": o.get("Sub"),
+                    "s6": o.get("Risk6mo"), "s12": o.get("Risk12mo"),
+                    "feat": o.get("Feat")}
                    for o in items],
     } for projid, items in by_proj.items()]
 
@@ -438,7 +441,8 @@ def _distinct_periods(*row_lists, idx: int = 0) -> list[str]:
 
 
 def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None,
-               analytics: dict | None = None) -> list[dict]:
+               analytics: dict | None = None,
+               pathway_sys: dict | None = None) -> list[dict]:
     now = datetime.now(timezone.utc).isoformat()
     # Per-dataset period lists. Datasets that only cover COMPLETE periods (DQ, SPM)
     # end earlier than project_metrics (which includes the partial current month),
@@ -519,10 +523,29 @@ def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None,
         _SERIES_KEYS = ("values", "label", "color", "slope_pm", "direction",
                         "fit", "proj_labels", "proj", "proj_lower", "proj_upper")
 
+        # Trend charts start at the county export window (FULL_START =
+        # 2023-10-01, export_merge.py) — the legacy master runs back to 1995
+        # and that tail crushed the readable part of every chart (user
+        # 2026-09-18). Slope/fit are unaffected: the fit window is the last
+        # 18 months regardless of what's displayed.
+        _periods = _t.get("periods") or []
+        _cut = 0
+        for _i, _lbl in enumerate(_periods):
+            try:
+                if datetime.strptime(_lbl, "%b %Y") >= datetime(2023, 10, 1):
+                    _cut = _i
+                    break
+            except ValueError:
+                continue
+
         def _series(sr):
             if not isinstance(sr, dict):
                 return None
-            return {k: sr[k] for k in _SERIES_KEYS if k in sr}
+            out = {k: sr[k] for k in _SERIES_KEYS if k in sr}
+            for _k in ("values", "fit"):
+                if isinstance(out.get(_k), list):
+                    out[_k] = out[_k][_cut:]
+            return out
 
         _SURV_KEYS = ("label", "color", "n", "n_exited", "n_ph_exit",
                       "median_los", "median_ph_los", "curve_any", "curve_ph")
@@ -535,9 +558,10 @@ def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None,
         rows.append({"key": "analytics_insights", "value": {
             "generated": analytics.get("generated"),
             "risk": {k: _r.get(k) for k in
-                     ("model", "histogram", "by_type", "buckets", "computed")},
+                     ("model", "histogram", "by_type", "buckets", "scenarios",
+                      "computed")},
             "trend": {
-                "periods": _t.get("periods") or [],
+                "periods": _periods[_cut:],
                 "system": {k: _series(sr) for k, sr in (_t.get("system") or {}).items()},
                 "by_type": {ty: {
                     "label": (sr or {}).get("label"),
@@ -553,6 +577,22 @@ def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None,
                 "outliers_agg": {"total": len(_outs), "by_type": _out_by_type},
             },
         }})
+    # Pathway Intelligence (user 2026-09-18: the static pathways page's four
+    # system tabs move into the Analytics tab). AGGREGATE-ONLY in meta:
+    # predictor_ml keeps the model + profile buckets but NEVER the scored
+    # client list — active clients are drill_clients `an:predict`
+    # (agency-scoped, build_predictor_drills). Same guard: omitted when
+    # pathways_system.json is absent, so `--only meta` can't blank it.
+    if pathway_sys and pathway_sys.get("sankey"):
+        _pm = pathway_sys.get("predictor_ml") or {}
+        _pi = {k: pathway_sys.get(k) for k in
+               ("generated", "sankey", "sankey_filters", "period_defs",
+                "hh_defs", "bottleneck", "predictor", "markov")}
+        _pi["predictor_ml"] = {k: _pm.get(k) for k in
+                               ("weights", "feature_names", "n_features",
+                                "accuracy", "n_trained", "model_label",
+                                "profile_buckets", "n_active")}
+        rows.append({"key": "pathway_intel", "value": _pi})
     return rows
 
 
@@ -745,6 +785,63 @@ def load_pathways() -> dict | None:
         return json.load(f)
 
 
+def load_pathways_system() -> dict | None:
+    """System-level Pathway Intelligence payload (generate_pathways.py §1-4,
+    written since 2026-09-18): Sankey + bottleneck + predictor + Markov."""
+    p = NETLIFY / "pathways_system.json"
+    if not p.exists():
+        print(
+            "  pathways_system.json not found — run generate_pathways.py "
+            "first; skipping pathway_intel + an:predict",
+            flush=True,
+        )
+        return None
+    print(f"  reading {p.name} ({p.stat().st_size / 1e6:.1f} MB) …", flush=True)
+    with p.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_predictor_drills(ps: dict | None) -> list[dict]:
+    """Housing-predictor scored ACTIVE clients → drill_clients `an:predict`.
+
+    Source: pathways_system.json predictor_ml.active_clients (every active
+    client scored by the housing logistic model — user directive 2026-09-18
+    ports the static Housing Predictor into the Analytics tab). Same RLS ride
+    as an:outlier/an:risk: agencies see their own projects, admins see all;
+    hashed IDs only. `feat` (model feature vector) and `hist` (≤5 prior
+    completed stays) are kept per client so the dossier can score
+    interventions and show history without any server-side re-derivation —
+    contributions are weights×feat, computed in the browser. `contrib` and
+    the project-name string are deliberately dropped (recomputable / joined).
+    """
+    if not ps:
+        return []
+    clients = ((ps.get("predictor_ml") or {}).get("active_clients")) or []
+    try:
+        period = datetime.strptime(ps.get("generated") or "", "%B %Y").strftime("%Y-%m")
+    except ValueError:
+        return []
+    by_proj: dict[int, list[dict]] = {}
+    for c in clients:
+        projid = c.get("proj_id")
+        if projid is None:
+            continue
+        by_proj.setdefault(int(projid), []).append(c)
+    return [{
+        "period": period,
+        "project_id": projid,
+        "metric": "an:predict",
+        "personal_ids": [c["id"] for c in items],
+        "detail": [{"pid": c["id"], "state": c.get("state"),
+                    "entry": c.get("entry"), "los": c.get("los"),
+                    "eps": c.get("prior_eps"), "ph": c.get("prior_ph"),
+                    "age": c.get("age"), "minor": c.get("minor"),
+                    "src": c.get("src"), "score": c.get("score"),
+                    "feat": c.get("feat"), "hist": c.get("hist")}
+                   for c in items],
+    } for projid, items in by_proj.items()]
+
+
 def build_project_pathways(pp: dict | None) -> list[dict]:
     """One row per project — the whole pathway payload lives in `data` jsonb.
 
@@ -848,6 +945,16 @@ def build_all(dry: bool):
             pathways_loaded = True
         return pathways
 
+    pathway_sys: dict | None = None
+    pathway_sys_loaded = False
+
+    def get_pathway_sys():
+        nonlocal pathway_sys, pathway_sys_loaded
+        if not pathway_sys_loaded:
+            pathway_sys = load_pathways_system()
+            pathway_sys_loaded = True
+        return pathway_sys
+
     return {
         "projects": (
             lambda: build_projects(data),
@@ -880,11 +987,13 @@ def build_all(dry: bool):
         "drill_clients": (
             lambda: build_drill_clients(get_drill())
             + build_outlier_drills(get_analytics())
-            + build_risk_drills(get_analytics()),
+            + build_risk_drills(get_analytics())
+            + build_predictor_drills(get_pathway_sys()),
             "period,project_id,metric",
         ),
         "meta": (
-            lambda: build_meta(data, qf, dq, get_bnl(), get_analytics()),
+            lambda: build_meta(data, qf, dq, get_bnl(), get_analytics(),
+                               get_pathway_sys()),
             "key",
         ),
         "bnl_clients": (

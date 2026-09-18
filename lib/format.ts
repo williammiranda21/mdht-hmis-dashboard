@@ -53,6 +53,18 @@ export function lookbackLabel(period: string): string {
   return `${f(start)} – ${f(end)}`;
 }
 
+/** HUD FY2024 DestinationSubsidyType (3.12.A) → label — only set when the
+ *  destination is 435 "Rental with ongoing subsidy". Verified against the
+ *  HMIS CSV Format Specifications FY2024 picklist (2026-09-18). */
+export const SUBSIDY_LABELS: Record<number, string> = {
+  419: 'VASH subsidy', 420: 'Other ongoing subsidy',
+  428: 'GPD TIP subsidy', 431: 'RRH / time-limited subsidy',
+  433: 'HCV voucher', 434: 'Public housing unit',
+  436: 'Emergency Housing Voucher', 437: 'FUP voucher',
+  438: 'FYI voucher', 439: 'Permanent Supportive Housing',
+  440: 'Other PH for formerly homeless',
+};
+
 /** HUD destination code → human label (subset used in the dashboard). */
 export const DEST_LABELS: Record<number, string> = {
   101: 'Emergency Shelter', 118: 'Safe Haven',

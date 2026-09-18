@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { fmtInt } from '../../../lib/format';
-import type { AnalyticsInsights, SystemForecast, TrendSeries } from '../../../lib/queries';
+import { DEST_LABELS, SUBSIDY_LABELS, fmtInt } from '../../../lib/format';
+import type { AnalyticsInsights, PathwayIntel, SystemForecast, TrendSeries } from '../../../lib/queries';
+import { CopyId, fmt, pct1 } from './shared';
+import { PathwaysSection, BottleneckSection, PredictorSection, SimulatorSection } from './PathwaySections';
 
 /**
  * Analytics — the full port of the old static analytics page (user 2026-09-18:
@@ -16,11 +18,20 @@ import type { AnalyticsInsights, SystemForecast, TrendSeries } from '../../../li
  * All charts are house-style inline SVG on CSS tokens — no chart library.
  */
 
-type Tab = 'trends' | 'risk' | 'survival' | 'capacity' | 'inflow';
+type Tab = 'trends' | 'risk' | 'survival' | 'capacity' | 'inflow'
+  | 'pathways' | 'bottleneck' | 'predictor' | 'simulator';
+const TABS: [Tab, string][] = [
+  ['trends', '📈 Trend Projection'],
+  ['risk', '⚠️ Return Risk'],
+  ['survival', '⏱️ Survival'],
+  ['capacity', '🏠 Capacity'],
+  ['inflow', '🔮 Inflow'],
+  ['pathways', '🔀 Pathways'],
+  ['bottleneck', '🚧 Bottlenecks'],
+  ['predictor', '🎯 Predictor'],
+  ['simulator', '⚙️ Simulator'],
+];
 const TAB_KEY = 'an-tab';
-
-const fmt = (n: number | null | undefined) => (n == null ? '—' : Math.round(n).toLocaleString());
-const pct1 = (n: number | null | undefined) => (n == null ? '—' : `${Number(n).toFixed(1)}%`);
 
 /* ══════════════ chart primitives ══════════════ */
 
@@ -178,46 +189,6 @@ function KMChart({ types, curveKey }: {
   );
 }
 
-/** Click-to-copy hashed client ID (user 2026-09-18) — used by the outlier and
- *  risk tables. Clipboard API first, hidden-textarea fallback (county browsers
- *  behind Web Isolation have refused the async API before). */
-function CopyId({ id }: { id: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    const fallback = () => {
-      try {
-        const ta = document.createElement('textarea');
-        ta.value = id;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        return true;
-      } catch { return false; }
-    };
-    const done = () => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    };
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(id).then(done, () => { if (fallback()) done(); });
-    } else if (fallback()) done();
-  };
-  return (
-    <button type="button" onClick={copy} title="Click to copy ID"
-      className="num"
-      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-        font: 'inherit', fontSize: 11, textAlign: 'left', wordBreak: 'break-all',
-        color: copied ? 'var(--accent)' : 'inherit',
-        textDecoration: copied ? 'none' : 'underline dotted',
-        textUnderlineOffset: 3 }}>
-      {copied ? '✓ copied' : id}
-    </button>
-  );
-}
-
 /** Horizontal bar row (label · scaled bar · value) — shared across sections. */
 function BarRow({ label, value, max, display, color, sub }: {
   label: string; value: number; max: number; display: string; color: string; sub?: string;
@@ -328,12 +299,25 @@ function CapSpark({ row }: { row: CapRow }) {
 
 /* ══════════════ the view ══════════════ */
 
-export default function AnalyticsView({ a, forecast }: { a: AnalyticsInsights; forecast: SystemForecast }) {
+export default function AnalyticsView({ a, forecast, pi }: {
+  a: AnalyticsInsights; forecast: SystemForecast; pi: PathwayIntel | null;
+}) {
   const [tab, setTabState] = useState<Tab>('trends');
+  // ?section=…&pid=… deep link (BNL drawer's "open in Analytics") wins over
+  // the remembered tab; the pid prefilters the section's client list and
+  // auto-opens that client's dossier.
+  const [linkPid, setLinkPid] = useState<string | null>(null);
   useEffect(() => {
     try {
+      const sp = new URLSearchParams(window.location.search);
+      const sec = sp.get('section') as Tab | null;
+      if (sec && TABS.some(([k]) => k === sec)) {
+        setTabState(sec);
+        setLinkPid(sp.get('pid'));
+        return;
+      }
       const saved = localStorage.getItem(TAB_KEY) as Tab | null;
-      if (saved && ['trends', 'risk', 'survival', 'capacity', 'inflow'].includes(saved)) setTabState(saved);
+      if (saved && TABS.some(([k]) => k === saved)) setTabState(saved);
     } catch { /* private mode */ }
   }, []);
   const setTab = (t: Tab) => {
@@ -360,14 +344,8 @@ export default function AnalyticsView({ a, forecast }: { a: AnalyticsInsights; f
       </div>
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '14px 0' }}>
-        <div className="seg" role="tablist" aria-label="Analytics sections">
-          {([
-            ['trends', '📈 Trend Projection'],
-            ['risk', '⚠️ Return Risk'],
-            ['survival', '⏱️ Survival'],
-            ['capacity', '🏠 Capacity'],
-            ['inflow', '🔮 Inflow'],
-          ] as [Tab, string][]).map(([k, lbl]) => (
+        <div className="seg" role="tablist" aria-label="Analytics sections" style={{ flexWrap: 'wrap' }}>
+          {TABS.map(([k, lbl]) => (
             <button key={k} type="button" role="tab" aria-selected={tab === k}
               className={tab === k ? 'on' : undefined} onClick={() => setTab(k)}>{lbl}</button>
           ))}
@@ -375,11 +353,26 @@ export default function AnalyticsView({ a, forecast }: { a: AnalyticsInsights; f
       </div>
 
       {tab === 'trends' && <TrendsSection a={a} />}
-      {tab === 'risk' && <RiskSection a={a} />}
+      {tab === 'risk' && <RiskSection a={a} initialPid={linkPid} />}
       {tab === 'survival' && <SurvivalSection a={a} />}
       {tab === 'capacity' && <CapacitySection capacity={capacity} />}
       {tab === 'inflow' && <InflowSection inflow={inflow} />}
+      {tab === 'pathways' && (pi ? <PathwaysSection pi={pi} /> : <PiEmpty />)}
+      {tab === 'bottleneck' && (pi ? <BottleneckSection pi={pi} /> : <PiEmpty />)}
+      {tab === 'predictor' && (pi ? <PredictorSection pi={pi} initialPid={linkPid} /> : <PiEmpty />)}
+      {tab === 'simulator' && (pi ? <SimulatorSection pi={pi} /> : <PiEmpty />)}
     </>
+  );
+}
+
+function PiEmpty() {
+  return (
+    <div className="panel" style={{ padding: 24 }}>
+      <p className="bnl-sub">
+        The Pathway Intelligence payload hasn&rsquo;t been loaded yet — run
+        generate_pathways.py then the pipeline&rsquo;s meta load and this section fills in.
+      </p>
+    </div>
   );
 }
 
@@ -485,6 +478,9 @@ interface RiskClientRow {
   pid: string; project_id: number; project: string; ptype: string;
   exit: string | null; los: number | null; eps: number | null;
   score: number; bucket: string;
+  dest?: number | null; sub?: number | null;
+  // Horizon probabilities in percent; `score` is the 24-month (overall).
+  s6?: number | null; s12?: number | null;
 }
 const TIER_COLOR: Record<string, string> = {
   'Low (<20%)': 'var(--accent)',
@@ -493,7 +489,169 @@ const TIER_COLOR: Record<string, string> = {
   'High (>60%)': 'var(--danger)',
 };
 
-function RiskSection({ a }: { a: AnalyticsInsights }) {
+type RiskScoring = NonNullable<NonNullable<AnalyticsInsights['risk']['model']>['scoring']>;
+interface RiskDossierClient extends RiskClientRow { feat?: number[] | null }
+
+const riskColor = (p: number) => (p >= 40 ? 'var(--danger)' : p >= 20 ? 'var(--warn)' : 'var(--accent)');
+
+/** Score a feature vector with the 24mo model or a horizon head. */
+function scoreVec(sc: RiskScoring, x: number[],
+  h?: { weights: number[]; bias: number; feat_mean: number[]; feat_std: number[] }) {
+  const W = h?.weights ?? sc.weights; const B = h?.bias ?? sc.bias;
+  const MU = h?.feat_mean ?? sc.feat_mean; const SD = h?.feat_std ?? sc.feat_std;
+  let z = B;
+  for (let i = 0; i < W.length; i++) z += W[i] * ((x[i] - MU[i]) / (SD[i] || 1));
+  return (1 / (1 + Math.exp(-Math.max(-20, Math.min(20, z))))) * 100;
+}
+
+/** Return-risk dossier (user 2026-09-18): why THIS leaver's score is what it
+ *  is, their risk-by-when timeline, and their profile re-scored through
+ *  alternative exit packages — all weights×features arithmetic on the same
+ *  parameters the ETL used, never re-derived logic. */
+function RiskDossier({ client, m, onClose }: {
+  client: RiskDossierClient;
+  m: NonNullable<AnalyticsInsights['risk']['model']>;
+  onClose: () => void;
+}) {
+  const sc = m.scoring ?? null;
+  const x = client.feat ?? null;
+  const tierC = TIER_COLOR[client.bucket] ?? 'var(--muted)';
+
+  // Contributions are MEAN-RELATIVE (w × z-scored value), so a factor the
+  // client DOESN'T have can still contribute — e.g. "Has Minor Children"
+  // appears as risk-raising when the client has none, because minors are
+  // protective and this client lacks that protection. The `note` states the
+  // client's own value (yes/no, above/below avg) so the row reads honestly.
+  const BIN_COLS = new Set(['HasMinorChild', 'HasIncomeAtExit', 'inc_low', 'inc_mid', 'inc_high',
+    'has_disab', 'HasPhys', 'HasChronic', 'HasMH', 'HasSUD', 'rapid_return',
+    'is_45_61', 'is_62p', 'dest_fam_perm', 'dest_psh', 'dest_long_subsidy', 'dest_rrh']);
+  const contribs = sc && x
+    ? sc.weights.map((w, i) => {
+      const col = sc.feat_cols[i];
+      const isBin = BIN_COLS.has(col) || col.startsWith('pt_');
+      return {
+        label: m.features?.[i] ?? col,
+        note: isBin ? (x[i] >= 0.5 ? 'yes' : 'no')
+          : (x[i] > sc.feat_mean[i] ? 'above avg' : 'below avg'),
+        val: w * ((x[i] - sc.feat_mean[i]) / (sc.feat_std[i] || 1)),
+      };
+    }).sort((a, b) => Math.abs(b.val) - Math.abs(a.val))
+    : null;
+  const raising = (contribs ?? []).filter((c) => c.val > 0.01).slice(0, 4);
+  const protecting = (contribs ?? []).filter((c) => c.val < -0.01).slice(0, 4);
+
+  // Exit-package what-ifs: zero the destination + income flags, apply each
+  // package, re-score. First row = the actual package as scored.
+  const PKG_KEYS = ['dest_fam_perm', 'dest_psh', 'dest_long_subsidy', 'dest_rrh',
+    'inc_low', 'inc_mid', 'inc_high', 'HasIncomeAtExit'];
+  const SCN: [string, Record<string, number>][] = [
+    ['Staying with family/friends · $1–500/mo', { dest_fam_perm: 1, inc_low: 1 }],
+    ['Staying with family/friends · no income', { dest_fam_perm: 1 }],
+    ['Unsubsidized rental · $1–500/mo', { inc_low: 1 }],
+    ['Unsubsidized rental · earned $1,500+', { inc_high: 1, HasIncomeAtExit: 1 }],
+    ['Voucher / ongoing subsidy · $1–500/mo', { dest_long_subsidy: 1, inc_low: 1 }],
+    ['Voucher / ongoing subsidy · no income', { dest_long_subsidy: 1 }],
+    ['Voucher / ongoing subsidy · earned $1,500+', { dest_long_subsidy: 1, inc_high: 1, HasIncomeAtExit: 1 }],
+  ];
+  const whatIf = sc && x
+    ? SCN.map(([label, over]) => {
+      const ix = Object.fromEntries(sc.feat_cols.map((c, i) => [c, i]));
+      const y = [...x];
+      for (const k of PKG_KEYS) if (ix[k] != null) y[ix[k]] = 0;
+      for (const [k, v] of Object.entries(over)) if (ix[k] != null) y[ix[k]] = v;
+      return { label, pct: scoreVec(sc, y) };
+    })
+    : null;
+  const wiMax = Math.max(...(whatIf ?? []).map((r) => r.pct), client.score, 1e-9);
+
+  const tile = (k: string, v: number | null | undefined) => (
+    <div className="hc-t">
+      <div className="k">{k}</div>
+      <div className="v" style={{ color: v != null ? riskColor(v) : undefined }}>{v != null ? `${Number(v).toFixed(1)}%` : '—'}</div>
+    </div>
+  );
+
+  return (
+    <div className="panel" style={{ padding: '14px 18px', borderLeft: `4px solid ${tierC}`, marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 15, fontWeight: 800 }}><CopyId id={client.pid} /></span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: tierC, border: `1px solid ${tierC}`, borderRadius: 10, padding: '1px 8px' }}>{client.bucket}</span>
+          </div>
+          <div className="bnl-sub">
+            {client.project} · {client.ptype} · exited {client.exit ?? '—'} after {fmt(client.los)}d
+            {client.dest != null && <> → <b style={{ color: 'var(--text)' }}>{DEST_LABELS[client.dest] ?? `Code ${client.dest}`}</b></>}
+            {client.sub != null && <> ({SUBSIDY_LABELS[client.sub] ?? `Subsidy ${client.sub}`})</>}
+          </div>
+        </div>
+        <div className="hc-tiles" style={{ margin: 0 }}>
+          {tile('Returns ≤6 mo', client.s6)}
+          {tile('≤12 mo', client.s12)}
+          {tile('Overall (24 mo)', client.score)}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16, marginTop: 14 }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6 }}>
+            Why this score — their factors
+          </div>
+          {contribs == null && <p className="bnl-sub">Factor detail loads with the next data refresh.</p>}
+          {raising.length > 0 && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--danger)', margin: '4px 0' }}>Raising ↑</div>}
+          {raising.map((c) => (
+            <div key={c.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 6px', background: 'var(--danger-light)', borderRadius: 4, margin: '3px 0', gap: 8 }}>
+              <span>{c.label} <span className="bnl-sub" style={{ fontSize: 10.5 }}>· {c.note}</span></span>
+              <b className="num" style={{ color: 'var(--danger)' }}>+{c.val.toFixed(2)}</b>
+            </div>
+          ))}
+          {protecting.length > 0 && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', margin: '6px 0 4px' }}>Protecting ↓</div>}
+          {protecting.map((c) => (
+            <div key={c.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 6px', background: 'var(--accent-light)', borderRadius: 4, margin: '3px 0', gap: 8 }}>
+              <span>{c.label} <span className="bnl-sub" style={{ fontSize: 10.5 }}>· {c.note}</span></span>
+              <b className="num" style={{ color: 'var(--accent)' }}>{c.val.toFixed(2)}</b>
+            </div>
+          ))}
+          <p className="bnl-sub" style={{ marginTop: 6, fontSize: 10.5 }}>
+            Relative to the average leaver — a &ldquo;no&rdquo; on a protective factor shows as raising (missing protection), and vice versa.
+          </p>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 6 }}>
+            Same person, different exit package
+          </div>
+          {whatIf == null ? <p className="bnl-sub">What-if scoring loads with the next data refresh.</p> : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
+                <span style={{ flex: '0 0 250px', fontSize: 12, fontWeight: 700 }}>As scored (actual package)</span>
+                <span style={{ flex: 1, height: 8, background: 'var(--hair)', borderRadius: 4, overflow: 'hidden' }}>
+                  <span style={{ display: 'block', height: '100%', width: `${Math.max((client.score / wiMax) * 100, 2)}%`, background: riskColor(client.score), borderRadius: 4 }} />
+                </span>
+                <b className="num" style={{ flex: '0 0 50px', textAlign: 'right', fontSize: 12, color: riskColor(client.score) }}>{Number(client.score).toFixed(1)}%</b>
+              </div>
+              {whatIf.map((r) => (
+                <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
+                  <span className="bnl-sub" style={{ flex: '0 0 250px', fontSize: 12 }}>{r.label}</span>
+                  <span style={{ flex: 1, height: 8, background: 'var(--hair)', borderRadius: 4, overflow: 'hidden' }}>
+                    <span style={{ display: 'block', height: '100%', width: `${Math.max((r.pct / wiMax) * 100, 2)}%`, background: riskColor(r.pct), borderRadius: 4 }} />
+                  </span>
+                  <b className="num" style={{ flex: '0 0 50px', textAlign: 'right', fontSize: 12, color: riskColor(r.pct) }}>{r.pct.toFixed(1)}%</b>
+                </div>
+              ))}
+              <p className="bnl-sub" style={{ marginTop: 8, fontSize: 11 }}>
+                Model estimates for this profile — associations, not guaranteed treatment effects.
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+
+      <button type="button" className="btn" onClick={onClose} style={{ marginTop: 10, fontSize: 12 }}>✕ Close</button>
+    </div>
+  );
+}
+
+function RiskSection({ a, initialPid = null }: { a: AnalyticsInsights; initialPid?: string | null }) {
   const m = a.risk.model;
   // Client return-risk list (user directive 2026-09-18) — agency-scoped by
   // the an:risk drill RLS, hashed IDs only. Hooks live above the early
@@ -502,6 +660,20 @@ function RiskSection({ a }: { a: AnalyticsInsights }) {
   const [clErr, setClErr] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [tier, setTier] = useState('');
+  const [dossier, setDossier] = useState<RiskDossierClient | null>(null);
+  const [dossierBusy, setDossierBusy] = useState<string | null>(null);
+  const openDossier = (pid: string) => {
+    setDossierBusy(pid);
+    fetch(`/api/analytics/risk?pid=${encodeURIComponent(pid)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((j) => { setDossier(j.client ?? null); setDossierBusy(null); })
+      .catch(() => setDossierBusy(null));
+  };
+  // Deep link from the BNL drawer: prefilter to the client and open their dossier.
+  useEffect(() => {
+    if (initialPid) { setQ(initialPid); openDossier(initialPid); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPid]);
   useEffect(() => {
     let dead = false;
     fetch('/api/analytics/risk')
@@ -530,8 +702,16 @@ function RiskSection({ a }: { a: AnalyticsInsights }) {
   const BUCKET_COLORS = ['var(--accent)', 'var(--warn)', '#f97316', 'var(--danger)'];
   const bTotal = BUCKET_ORDER.reduce((s, k) => s + (buckets[k] ?? 0), 0);
   const elevated = (buckets['High (>60%)'] ?? 0) + (buckets['Elevated (40–60%)'] ?? 0);
-  const factors = (m.features ?? []).map((f, i) => ({ f, w: m.importances?.[i] ?? 0 }))
-    .sort((x, y) => Math.abs(y.w) - Math.abs(x.w)).slice(0, 12);
+  // Direction comes ONLY from importances_signed (signed z-scored
+  // coefficients). The older `importances` are |w| — coloring by their
+  // "sign" painted every factor as risk-raising, protective ones included.
+  // ALL factors, strongest first — no cap (user 2026-09-18: the expanded
+  // list is the point; small-weight factors like the income buckets must
+  // still be visible).
+  const signed = m.importances_signed ?? null;
+  const factors = (m.features ?? []).map((f, i) => ({
+    f, w: (signed ?? m.importances)?.[i] ?? 0,
+  })).sort((x, y) => Math.abs(y.w) - Math.abs(x.w));
   const wMax = Math.max(...factors.map((x) => Math.abs(x.w)), 1e-9);
   const hist = a.risk.histogram;
   const histMax = Math.max(...(hist?.counts ?? [1]));
@@ -569,26 +749,100 @@ function RiskSection({ a }: { a: AnalyticsInsights }) {
       </div>
 
       <p className="bnl-method" style={{ margin: '12px 0' }}>
-        <b>How to read this:</b> each client who recently exited to permanent housing is scored 0–100%
-        for probability of returning to homelessness within 2 years, from program type, length of stay,
-        prior episodes, income at exit, household composition, and age. Use the elevated/high tiers to
-        prioritize follow-up outreach — the client list below is scoped to your agency&rsquo;s projects
-        and shows hashed record IDs, never names.
+        <b>How to read this:</b> each client who recently exited to permanent housing is scored for
+        probability of returning to homelessness — the headline score covers 24 months (the HUD M2
+        window), and the <b>≤6 mo</b> column is the &ldquo;prioritize outreach now&rdquo; signal
+        (most returns happen early{m.horizons_meta?.['6mo'] ? `; the 6-month model is also the sharpest, AUC ${Number(m.horizons_meta['6mo'].auc).toFixed(2)}` : ''}).
+        Factors include program type, length of stay, prior episodes and enrollments, household,
+        income, disabilities, and where the exit landed. The client list is scoped to your
+        agency&rsquo;s projects and shows hashed record IDs, never names.
       </p>
 
-      <div className="grouplabel">What drives returns to homelessness</div>
-      <div className="panel" style={{ padding: '14px 18px' }}>
-        <div className="bnl-sub" style={{ marginBottom: 8 }}>
-          Model factor weights, strongest first — <span style={{ color: 'var(--danger)', fontWeight: 700 }}>red</span> raises
-          return risk, <span style={{ color: 'var(--accent)', fontWeight: 700 }}>green</span> is protective.
-          Learned from {fmt(m.train_n)} historical PH exits.
-        </div>
-        {factors.map(({ f, w }) => (
-          <BarRow key={f} label={f} value={w} max={wMax}
-            display={`${w >= 0 ? '+' : ''}${w.toFixed(2)}`}
-            color={w >= 0 ? 'var(--danger)' : 'var(--accent)'} />
-        ))}
+      <div className="grouplabel">What drives returns to homelessness
+        <span className="bnl-sub" style={{ fontWeight: 400, marginLeft: 8 }}>
+          model factor weights, strongest first — learned from {fmt(m.train_n)} historical PH exits
+        </span>
       </div>
+      {signed ? (
+        // Split view (user 2026-09-18): risk-raising and protective factors
+        // side by side, bars on ONE shared scale so magnitudes compare
+        // across the two columns.
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 14 }}>
+          <div className="panel" style={{ padding: '14px 18px' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>
+              ↑ Raises return risk
+            </div>
+            {factors.filter(({ w }) => w >= 0).map(({ f, w }) => (
+              <BarRow key={f} label={f} value={w} max={wMax}
+                display={`+${w.toFixed(2)}`} color="var(--danger)" />
+            ))}
+          </div>
+          <div className="panel" style={{ padding: '14px 18px' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)', marginBottom: 6 }}>
+              ↓ Protective
+            </div>
+            {factors.filter(({ w }) => w < 0).map(({ f, w }) => (
+              <BarRow key={f} label={f} value={w} max={wMax}
+                display={w.toFixed(2)} color="var(--accent)" />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="panel" style={{ padding: '14px 18px' }}>
+          <div className="bnl-sub" style={{ marginBottom: 8 }}>
+            Model factor magnitudes, strongest first (direction loads with the next data refresh).
+          </div>
+          {factors.map(({ f, w }) => (
+            <BarRow key={f} label={f} value={w} max={wMax}
+              display={w.toFixed(2)} color="var(--primary)" />
+          ))}
+        </div>
+      )}
+
+      {a.risk.scenarios && (
+        <>
+          <div className="grouplabel" style={{ marginTop: 18 }}>Who carries the housing cost
+            <span className="bnl-sub" style={{ fontWeight: 400, marginLeft: 8 }}>
+              the same &ldquo;average leaver&rdquo; ({pct1(a.risk.scenarios.baseline)} baseline), scored through different exit packages by the live model
+            </span>
+          </div>
+          <div className="panel" style={{ padding: '14px 18px' }}>
+            {(() => {
+              const rows = a.risk.scenarios!.rows;
+              const maxP = Math.max(...rows.map((r) => r.pct), 1e-9);
+              let lastGroup = '';
+              return rows.map((r) => {
+                const showGroup = r.group !== lastGroup;
+                lastGroup = r.group;
+                const c = r.pct >= 20 ? 'var(--danger)' : r.pct >= 12 ? 'var(--warn)' : 'var(--accent)';
+                return (
+                  <div key={`${r.group}-${r.label}`}>
+                    {showGroup && (
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
+                        letterSpacing: '.05em', margin: '10px 0 3px' }}>{r.group}</div>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '3px 0' }}>
+                      <span style={{ flex: '0 0 170px', fontSize: 12.5 }}>{r.label}</span>
+                      <span style={{ flex: 1, height: 10, background: 'var(--hair)', borderRadius: 5, overflow: 'hidden' }}>
+                        <span style={{ display: 'block', height: '100%', borderRadius: 5,
+                          width: `${Math.max((r.pct / maxP) * 100, 2)}%`, background: c }} />
+                      </span>
+                      <b className="num" style={{ flex: '0 0 56px', textAlign: 'right', fontSize: 12.5, color: c }}>{pct1(r.pct)}</b>
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+            <p className="bnl-method" style={{ margin: '12px 0 0' }}>
+              <b>The landing matters more than the income.</b> Subsidized exits hold at every income
+              level; income only predicts returns when the client carries the housing cost, and a
+              little income + an informal arrangement is the worst combination. These are model
+              estimates for an average profile — the observed gap is even wider (leavers with
+              $1–500/mo staying with family/friends returned <b>40.6%</b> of the time).
+            </p>
+          </div>
+        </>
+      )}
 
       <div className="grouplabel">Predicted return risk — recent leavers</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 14 }}>
@@ -629,6 +883,7 @@ function RiskSection({ a }: { a: AnalyticsInsights }) {
       </div>
 
       <div className="grouplabel" style={{ marginTop: 18 }}>Client risk list</div>
+      {dossier && <RiskDossier client={dossier} m={m} onClose={() => setDossier(null)} />}
       <div className="panel" style={{ padding: '14px 18px' }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
           <div className="bnl-sub" style={{ flex: 1, minWidth: 260 }}>
@@ -664,10 +919,13 @@ function RiskSection({ a }: { a: AnalyticsInsights }) {
                   <thead>
                     <tr>
                       <th>Client ID</th><th>Program</th><th>Type</th><th>Exit date</th>
+                      <th>Destination</th>
                       <th style={{ textAlign: 'right' }}>LOS</th>
                       <th style={{ textAlign: 'right' }}>Prior eps.</th>
-                      <th style={{ textAlign: 'right' }}>Risk score</th>
+                      <th style={{ textAlign: 'right' }} title="Probability of returning within 6 months — the 'prioritize outreach now' signal">≤6 mo</th>
+                      <th style={{ textAlign: 'right' }} title="Probability of returning within 24 months — the headline score">Overall (24 mo)</th>
                       <th style={{ textAlign: 'center' }}>Tier</th>
+                      <th />
                     </tr>
                   </thead>
                   <tbody>
@@ -679,8 +937,20 @@ function RiskSection({ a }: { a: AnalyticsInsights }) {
                           <td style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.project}>{r.project}</td>
                           <td>{r.ptype}</td>
                           <td className="num">{r.exit ?? '—'}</td>
+                          <td style={{ maxWidth: 190 }}>
+                            {r.dest != null ? (DEST_LABELS[r.dest] ?? `Code ${r.dest}`) : '—'}
+                            {r.sub != null && (
+                              <div className="bnl-sub" style={{ fontSize: 10.5 }}>
+                                {SUBSIDY_LABELS[r.sub] ?? `Subsidy ${r.sub}`}
+                              </div>
+                            )}
+                          </td>
                           <td className="num" style={{ textAlign: 'right' }}>{r.los != null ? `${fmt(r.los)}d` : '—'}</td>
                           <td className="num" style={{ textAlign: 'right' }}>{r.eps ?? '—'}</td>
+                          <td className="num" style={{ textAlign: 'right',
+                            color: r.s6 != null && r.s6 >= 40 ? 'var(--danger)' : r.s6 != null && r.s6 >= 20 ? 'var(--warn)' : 'var(--muted)' }}>
+                            {r.s6 != null ? `${Number(r.s6).toFixed(1)}%` : '—'}
+                          </td>
                           <td style={{ textAlign: 'right' }}>
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                               <span style={{ width: 48, height: 6, background: 'var(--hair)', borderRadius: 3, overflow: 'hidden' }}>
@@ -691,6 +961,12 @@ function RiskSection({ a }: { a: AnalyticsInsights }) {
                           </td>
                           <td style={{ textAlign: 'center' }}>
                             <span style={{ fontSize: 10.5, fontWeight: 700, color: c, whiteSpace: 'nowrap' }}>{r.bucket}</span>
+                          </td>
+                          <td>
+                            <button type="button" className="btn" style={{ fontSize: 11, padding: '2px 9px' }}
+                              onClick={() => openDossier(r.pid)} disabled={dossierBusy === r.pid}>
+                              {dossierBusy === r.pid ? '…' : 'View'}
+                            </button>
                           </td>
                         </tr>
                       );

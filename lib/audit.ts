@@ -29,7 +29,8 @@ export type AuditAction =
   | 'bnl_view' | 'bnl_drawer' | 'bnl_export'
   | 'fixlist_view' | 'fixlist_export'
   | 'outliers_view' | 'outliers_export'
-  | 'risklist_view' | 'risklist_export';
+  | 'risklist_view' | 'risklist_export'
+  | 'predict_view' | 'predict_export';
 
 export async function audit(
   action: AuditAction,

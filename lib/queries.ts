@@ -102,11 +102,29 @@ export interface AnalyticsInsights {
   risk: {
     model: {
       auc: number; accuracy: number; train_n: number; train_pos_rate: number;
-      score_n: number; features: string[]; importances: number[]; model_source?: string;
+      score_n: number; features: string[]; importances: number[];
+      // Signed normalized coefficients (z-scored feature space): positive
+      // raises return risk, negative protective. Absent on payloads built
+      // before 2026-09-18 — `importances` alone are |w|, direction-less.
+      importances_signed?: number[];
+      model_source?: string;
+      // Per-horizon head quality (6mo/12mo/24mo) — absent pre-2026-09-18.
+      horizons_meta?: Record<string, { auc: number; n_trained: number; pos_rate: number }> | null;
+      // Model scoring parameters — the return-risk dossier computes personal
+      // factor contributions and exit-package what-ifs from these + a
+      // client's feature vector. Aggregate model params, no PII.
+      scoring?: {
+        feat_cols: string[]; weights: number[]; bias: number;
+        feat_mean: number[]; feat_std: number[];
+        horizons: Record<string, { weights: number[]; bias: number; feat_mean: number[]; feat_std: number[] }>;
+      } | null;
     } | null;
     histogram: { labels: string[]; counts: number[] } | null;
     by_type: { type: number; label: string; color: string; avg_risk: number; n: number }[] | null;
     buckets: Record<string, number> | null;
+    // Exit-package scenarios: the same "average leaver" scored through
+    // different landings, recomputed from the live model each refresh.
+    scenarios?: { baseline: number; rows: { group: string; label: string; pct: number }[] } | null;
     computed: boolean;
   };
   trend: {
@@ -133,6 +151,71 @@ export async function getAnalyticsInsights(): Promise<AnalyticsInsights | null> 
     .from('meta').select('value').eq('key', 'analytics_insights').maybeSingle();
   if (error) throw error;
   return (data?.value as AnalyticsInsights | undefined) ?? null;
+}
+
+/** Pathway Intelligence (meta.pathway_intel — user 2026-09-18 port of the
+ *  static pathways page's four system tabs). AGGREGATE-ONLY: the scored
+ *  active-client list lives in drill_clients `an:predict` (agency-scoped),
+ *  served by /api/analytics/predictor — predictor_ml here carries the model
+ *  and profile buckets only. Null until the meta key loads. */
+export interface SankeyNode { id: string; label: string; color: string; n: number; ph_pct: number | null }
+export interface SankeyLink { source: string; target: string; value: number }
+export interface PathRow { path: string; n: number; median_days: number | null; avg_days: number | null }
+export interface SankeyData {
+  nodes: SankeyNode[];
+  links: SankeyLink[];
+  top_paths: { all: PathRow[]; housed: PathRow[]; churned: PathRow[] };
+  source_rates: Record<string, { total: number; ph: number; ph_pct: number }>;
+}
+export interface BottleneckState {
+  label: string; color: string; n: number; n_ph: number; n_active: number; n_churned: number;
+  ph_rate: number; ph_rate_exits: number; ph_12mo: number; ph_delta: number | null;
+  ph_trend: (number | null)[]; active_rate: number; churn_rate: number;
+  median_los: number; cycling_pct: number;
+  cycling_dist: { once: number; few: number; many: number };
+  next_steps: { to: string; n: number; pct: number }[];
+  incoming_steps: { from: string; n: number; pct: number }[];
+  exit_tiers: {
+    homeless: { n: number; pct: number }; inst: { n: number; pct: number };
+    temp: { n: number; pct: number }; unknown: { n: number; pct: number };
+    n_total: number;
+  } | null;
+  opportunity: { opp_5pp: number; opp_10pp: number; annual_exits: number };
+}
+export interface PathwayIntel {
+  generated: string | null;
+  sankey: SankeyData;
+  sankey_filters: Record<string, SankeyData>;
+  period_defs: { key: string; label: string }[];
+  hh_defs: { key: string; label: string }[];
+  bottleneck: Record<string, BottleneckState>;
+  predictor: Record<string, {
+    label: string; color: string;
+    buckets: { label: string; n: number; too_few?: boolean; ph_rate?: number; n_ph?: number; n_churn?: number }[];
+  }>;
+  predictor_ml: {
+    weights: number[]; feature_names: string[]; n_features: number;
+    accuracy: number; n_trained: number; model_label: string;
+    profile_buckets: Record<string, { n: number; ph_rate: number; median_los_housed: number }>;
+    n_active: number;
+  } | null;
+  markov: {
+    states: string[]; colors: string[]; labels: string[];
+    P: number[][];
+    P_display: { state: string; label: string; color: string; probs: number[] }[];
+    active_dist: number[]; active_counts: number[];
+    baseline_sim: { housed: number; churned: number }[];
+    sliders: {
+      from_state: string; to_state: string; label: string; color: string;
+      row: number; col: number; baseline: number;
+    }[];
+  } | null;
+}
+export async function getPathwayIntel(): Promise<PathwayIntel | null> {
+  const { data, error } = await supabaseServer()
+    .from('meta').select('value').eq('key', 'pathway_intel').maybeSingle();
+  if (error) throw error;
+  return (data?.value as PathwayIntel | undefined) ?? null;
 }
 
 /** Periods that actually have Data Quality data, newest first (from meta.dq_periods). */

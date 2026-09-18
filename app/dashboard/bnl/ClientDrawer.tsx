@@ -47,21 +47,30 @@ export default function ClientDrawer({ row, asOf, isAdmin = false, onClose, focu
   const [timeline, setTimeline] = useState<BnlTimelineEvent[] | null>(null);
   const [hist3, setHist3] = useState<BnlHist3 | null>(null);
   const [detail, setDetail] = useState<BnlDetail | null>(null);
+  // Predictive scores (Analytics models, 2026-09-18): housing probability
+  // while active, return risk after a recent PH exit. Null when the client
+  // is in neither scored set.
+  const [risk, setRisk] = useState<{
+    housing?: { score: number; state: string | null };
+    ret?: { score: number; s6: number | null; bucket: string; exit: string | null };
+  } | null>(null);
   // Add-to-cohort (admin-only) — cohort list loads lazily on first open.
   const [cohortOpts, setCohortOpts] = useState<{ id: number; name: string }[] | null>(null);
   const [cohortMsg, setCohortMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    setTimeline(null); setHist3(null); setDetail(null);
+    setTimeline(null); setHist3(null); setDetail(null); setRisk(null);
     fetch(`/api/bnl/client?pid=${encodeURIComponent(row.pid)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-      .then((j: { timeline: BnlTimelineEvent[]; hist3: BnlHist3 | null; detail: BnlDetail | null }) => {
+      .then((j: { timeline: BnlTimelineEvent[]; hist3: BnlHist3 | null; detail: BnlDetail | null;
+                  risk?: typeof risk }) => {
         if (!alive) return;
-        setTimeline(j.timeline); setHist3(j.hist3); setDetail(j.detail);
+        setTimeline(j.timeline); setHist3(j.hist3); setDetail(j.detail); setRisk(j.risk ?? null);
       })
       .catch(() => { if (alive) setTimeline([]); });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [row.pid]);
 
   useEffect(() => {
@@ -100,6 +109,39 @@ export default function ClientDrawer({ row, asOf, isAdmin = false, onClose, focu
           onClick={(e) => { navigator.clipboard?.writeText(row.pid); const el = e.currentTarget; el.textContent = 'ID copied ✓'; setTimeout(() => { el.textContent = row.pid; }, 1200); }}>
           {row.pid}
         </div>
+        {/* Housing probability is suppressed once the roster already says
+            HOUSED — "will they reach housing?" is answered (the pipeline
+            also drops moved-in clients from the caseload; this guard covers
+            loads from before that rule and referral-based housed statuses). */}
+        {risk && ((risk.housing && row.status !== 'housed') || risk.ret) && (
+          <div style={{ marginTop: 8, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'baseline',
+            fontSize: 12.5, padding: '7px 12px', background: 'var(--hair)', borderRadius: 8 }}>
+            {risk.housing && row.status !== 'housed' && (
+              <span title="Housing predictor (Analytics tab) — probability this active enrollment ends in permanent housing">
+                🎯 Housing probability{' '}
+                <b className="num" style={{ color: risk.housing.score >= 0.6 ? 'var(--accent)' : risk.housing.score >= 0.35 ? 'var(--warn)' : 'var(--danger)' }}>
+                  {Math.round(risk.housing.score * 100)}%
+                </b>
+                {risk.housing.state && <span className="bnl-sub"> · {risk.housing.state}</span>}
+              </span>
+            )}
+            {risk.ret && (
+              <span title="Return-risk model (Analytics tab) — probability of returning to homelessness after the PH exit">
+                ⚠ Return risk{' '}
+                <b className="num" style={{ color: risk.ret.score >= 40 ? 'var(--danger)' : risk.ret.score >= 20 ? 'var(--warn)' : 'var(--accent)' }}>
+                  {Number(risk.ret.score).toFixed(0)}%
+                </b>
+                {risk.ret.s6 != null && <> overall · <b className="num">{Number(risk.ret.s6).toFixed(0)}%</b> ≤6 mo</>}
+                {risk.ret.exit && <span className="bnl-sub"> · exited {risk.ret.exit}</span>}
+              </span>
+            )}
+            <a className="bnl-sub pp-noprint" style={{ fontSize: 11, textDecoration: 'underline dotted', textUnderlineOffset: 3 }}
+              href={`/dashboard/analytics?section=${risk.ret ? 'risk' : 'predictor'}&pid=${encodeURIComponent(row.pid)}`}
+              title="Opens the Analytics tab with this client's full dossier — factors, horizons, exit-package what-ifs">
+              open full detail →
+            </a>
+          </div>
+        )}
         <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span className={`bnl-chip bnl-${row.status}`}>{row.status}</span>{' '}
           <Flags r={row} />

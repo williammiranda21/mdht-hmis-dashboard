@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../../lib/supabase-server';
 import { audit } from '../../../../lib/audit';
+import { DEST_LABELS, SUBSIDY_LABELS } from '../../../../lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,13 @@ export const dynamic = 'force-dynamic';
 interface DetailRow {
   pid: string; exit: string | null; los: number | null; eps: number | null;
   score: number; bucket: string;
+  // Destination + subsidy codes (added 2026-09-18) — absent on older loads.
+  dest?: number | null; sub?: number | null;
+  // Horizon probabilities in percent (≤6mo / ≤12mo) — the headline `score`
+  // is the 24-month (overall) figure. Absent on older loads.
+  s6?: number | null; s12?: number | null;
+  // Raw model feature vector (dossier fetch only — stripped from the list).
+  feat?: number[] | null;
 }
 
 export async function GET(req: Request) {
@@ -27,7 +35,8 @@ export async function GET(req: Request) {
 
   const sp = new URL(req.url).searchParams;
   const wantCsv = sp.get('format') === 'csv';
-  await audit(wantCsv ? 'risklist_export' : 'risklist_view', viewer, {});
+  const pid = sp.get('pid');
+  await audit(wantCsv ? 'risklist_export' : 'risklist_view', viewer, pid ? { pid } : {});
 
   const sb = supabaseServer();
   // One row per project with scored exits (~100 system-wide) — under the
@@ -44,6 +53,29 @@ export async function GET(req: Request) {
     : { data: [] as never[] };
   const projById = new Map((projRows ?? []).map(
     (p: { project_id: number; name: string | null; type_name: string | null }) => [p.project_id, p]));
+  const asOf = drills[0]?.period ?? null;
+
+  // Single-client dossier fetch — includes the feature vector so the browser
+  // can compute personal factor contributions and exit-package what-ifs from
+  // meta's risk.model.scoring parameters.
+  if (pid) {
+    for (const r of drills) {
+      const hit = (r.detail ?? []).find((d) => d.pid === pid);
+      if (hit) {
+        const p = projById.get(r.project_id);
+        return NextResponse.json({
+          asOf,
+          client: {
+            ...hit,
+            project_id: r.project_id,
+            project: p?.name ?? `Project ${r.project_id}`,
+            ptype: p?.type_name ?? '',
+          },
+        });
+      }
+    }
+    return NextResponse.json({ asOf, client: null }, { status: 404 });
+  }
 
   const rows = drills.flatMap((r) => {
     const p = projById.get(r.project_id);
@@ -57,17 +89,24 @@ export async function GET(req: Request) {
       eps: d.eps,
       score: d.score,
       bucket: d.bucket,
+      dest: d.dest ?? null,
+      sub: d.sub ?? null,
+      s6: d.s6 ?? null,
+      s12: d.s12 ?? null,
     }));
   }).sort((a, b) => b.score - a.score);
 
-  const asOf = drills[0]?.period ?? null;
-
   // CSV as a real server download (county Web Isolation kills blob URLs).
   if (wantCsv) {
-    const lines = ['client_id,program,program_type,exit_date,los_days,prior_episodes,risk_score_pct,risk_tier'];
+    const lines = ['client_id,program,program_type,exit_date,destination,subsidy_type,los_days,prior_episodes,risk_6mo_pct,risk_12mo_pct,risk_24mo_pct,risk_tier'];
     for (const r of rows) {
+      const destLbl = r.dest != null ? (DEST_LABELS[r.dest] ?? String(r.dest)) : '';
+      const subLbl = r.sub != null ? (SUBSIDY_LABELS[r.sub] ?? String(r.sub)) : '';
       lines.push([r.pid, '"' + r.project.replace(/"/g, '""') + '"', '"' + r.ptype + '"',
-        r.exit ?? '', r.los != null ? Math.round(r.los) : '', r.eps ?? '',
+        r.exit ?? '', '"' + destLbl + '"', '"' + subLbl + '"',
+        r.los != null ? Math.round(r.los) : '', r.eps ?? '',
+        r.s6 != null ? Number(r.s6).toFixed(1) : '',
+        r.s12 != null ? Number(r.s12).toFixed(1) : '',
         Number(r.score).toFixed(1), '"' + r.bucket + '"'].join(','));
     }
     return new NextResponse('﻿' + lines.join('\r\n'), {
