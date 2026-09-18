@@ -70,6 +70,71 @@ export async function getSystemForecast(): Promise<SystemForecast> {
   };
 }
 
+/** Analytics tab payload (meta.analytics_insights — user 2026-09-18 port of
+ *  the static analytics page, v2 = full 5-section parity). AGGREGATE-ONLY:
+ *  the loader strips per-client risk scores (parked Housing Predictor), and
+ *  long-stay outlier clients live in drill_clients (`an:outlier`, agency-
+ *  scoped) — meta carries only their aggregate. Null until the meta key loads. */
+export interface TrendSeries {
+  values: (number | null)[];
+  label?: string;
+  color?: string;
+  slope_pm?: number;
+  direction?: 'up' | 'down';
+  // Linear fit over the last 18 months + 6-month projection with 95% CI —
+  // the projection chart's dashed line and shaded band.
+  fit?: (number | null)[];
+  proj_labels?: string[];
+  proj?: number[];
+  proj_lower?: number[];
+  proj_upper?: number[];
+}
+export interface SurvivalTypeCurves {
+  label: string; color: string;
+  n: number; n_exited: number; n_ph_exit: number;
+  median_los: number | null; median_ph_los: number | null;
+  // KM step curves, x = days since enrollment (0–730), y = P(still enrolled).
+  curve_any: { x: number; y: number }[];
+  curve_ph: { x: number; y: number }[];
+}
+export interface AnalyticsInsights {
+  generated: string | null;
+  risk: {
+    model: {
+      auc: number; accuracy: number; train_n: number; train_pos_rate: number;
+      score_n: number; features: string[]; importances: number[]; model_source?: string;
+    } | null;
+    histogram: { labels: string[]; counts: number[] } | null;
+    by_type: { type: number; label: string; color: string; avg_risk: number; n: number }[] | null;
+    buckets: Record<string, number> | null;
+    computed: boolean;
+  };
+  trend: {
+    periods: string[];
+    system: Record<string, TrendSeries | null>;
+    by_type: Record<string, {
+      label: string; color: string;
+      ph_rate: TrendSeries | null; avg_los: TrendSeries | null;
+    }>;
+  };
+  // Absent on payloads loaded before the v2 pipeline change.
+  survival?: {
+    types: Record<string, SurvivalTypeCurves>;
+    table: {
+      type: number; label: string; color: string; n: number;
+      median: number | null; median_ph: number | null;
+      exit_rate: number; ph_rate: number;
+    }[];
+    outliers_agg: { total: number; by_type: Record<string, number> };
+  };
+}
+export async function getAnalyticsInsights(): Promise<AnalyticsInsights | null> {
+  const { data, error } = await supabaseServer()
+    .from('meta').select('value').eq('key', 'analytics_insights').maybeSingle();
+  if (error) throw error;
+  return (data?.value as AnalyticsInsights | undefined) ?? null;
+}
+
 /** Periods that actually have Data Quality data, newest first (from meta.dq_periods). */
 export async function getDqPeriods(granularity: Granularity): Promise<string[]> {
   const { data, error } = await supabaseServer()

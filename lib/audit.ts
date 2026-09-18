@@ -27,7 +27,9 @@ const admin = url && serviceKey
 
 export type AuditAction =
   | 'bnl_view' | 'bnl_drawer' | 'bnl_export'
-  | 'fixlist_view' | 'fixlist_export';
+  | 'fixlist_view' | 'fixlist_export'
+  | 'outliers_view' | 'outliers_export'
+  | 'risklist_view' | 'risklist_export';
 
 export async function audit(
   action: AuditAction,

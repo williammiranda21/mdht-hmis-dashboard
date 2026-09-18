@@ -11,7 +11,8 @@ const TABS = [
   { href: '/dashboard', label: 'Project Performance', icon: 'grid' },
   { href: '/dashboard/returns', label: 'Returns', icon: 'return' },
   { href: '/dashboard/system', label: 'System Performance', icon: 'globe' },
-  { href: '/dashboard/forecast', label: 'Forecast', icon: 'trend' },
+  // Forecast retired 2026-09-18 — Analytics carries capacity + inflow now
+  // (fuller versions); /dashboard/forecast redirects there.
   { href: '/dashboard/dq', label: 'Data Quality', icon: 'search' },
   { href: '/dashboard/utilization', label: 'Unit Utilization', icon: 'bed' },
   { href: '/dashboard/bnl', label: 'By-Name List', icon: 'lock' },
@@ -22,6 +23,7 @@ const TABS = [
   { href: '/dashboard/helpline', label: 'Helpline', icon: 'phone', hlOnly: true, dev: true },
   { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy', adminOnly: true },
   { href: '/dashboard/deep-dive', label: 'Deep Dive', icon: 'search' },
+  { href: '/dashboard/analytics', label: 'Analytics', icon: 'chart' },
   { href: '/dashboard/glossary', label: 'Glossary', icon: 'book' },
   { href: '/dashboard/admin', label: 'Users', icon: 'users', adminOnly: true },
   { href: '/dashboard/admin/cohorts', label: 'Cohorts', icon: 'cohort', adminOnly: true },
@@ -91,6 +93,13 @@ const ICONS: Record<string, JSX.Element> = {
     <>
       <circle cx="8" cy="8" r="3" /><circle cx="16" cy="8" r="3" />
       <path d="M2 20v-1a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v1M14 14h3a5 5 0 0 1 5 5v1" />
+    </>
+  ),
+  chart: (
+    <>
+      <path d="M3 3v18h18" />
+      <rect x="7" y="12" width="3" height="6" rx="0.5" /><rect x="12" y="8" width="3" height="10" rx="0.5" />
+      <rect x="17" y="5" width="3" height="13" rx="0.5" />
     </>
   ),
   book: (

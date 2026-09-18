@@ -10,7 +10,6 @@ import { usePathname } from 'next/navigation';
 const TITLES: [string, string][] = [
   ['/dashboard/returns', 'Returns'],
   ['/dashboard/system', 'System Performance'],
-  ['/dashboard/forecast', 'Forecast'],
   ['/dashboard/dq/users', 'Data Quality · Error rates by user'],
   ['/dashboard/dq', 'Data Quality'],
   ['/dashboard/utilization', 'Unit Utilization'],
@@ -20,6 +19,7 @@ const TITLES: [string, string][] = [
   ['/dashboard/helpline', 'Helpline'],
   ['/dashboard/rankings', 'Rankings'],
   ['/dashboard/deep-dive', 'Deep Dive'],
+  ['/dashboard/analytics', 'Analytics'],
   ['/dashboard/glossary', 'Glossary'],
   ['/dashboard/admin/cohorts', 'Cohorts'],
   ['/dashboard/admin/targets', 'Targets'],

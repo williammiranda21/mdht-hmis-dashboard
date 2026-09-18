@@ -329,6 +329,78 @@ def build_drill_clients(drill: dict) -> list[dict]:
     return _dedupe(out, ("period", "project_id", "metric"))
 
 
+def build_outlier_drills(an: dict | None) -> list[dict]:
+    """Long-stay outliers → drill_clients `an:outlier` rows, one per project.
+
+    Source: analytics.json survival.outliers (generate_analytics.py §3 —
+    currently-enrolled clients past 1.5× their type's median LoS; ES/TH only,
+    housing types excluded there). Person-level, so it rides drill_clients'
+    "scoped read drill" RLS: agencies see their own projects, admins see all.
+    Period = the analytics report-end month, so each refresh replaces the
+    snapshot and the loaded_at prune sweeps the prior month's rows.
+    Requires ProjectID on the rows (added to the generator 2026-09-18) —
+    older analytics.json files just produce no rows.
+    """
+    if not an:
+        return []
+    outs = ((an.get("survival") or {}).get("outliers")) or []
+    try:
+        period = datetime.strptime(an.get("generated") or "", "%B %Y").strftime("%Y-%m")
+    except ValueError:
+        return []
+    by_proj: dict[int, list[dict]] = {}
+    for o in outs:
+        projid = o.get("ProjectID")
+        if projid is None:
+            continue
+        by_proj.setdefault(int(projid), []).append(o)
+    return [{
+        "period": period,
+        "project_id": projid,
+        "metric": "an:outlier",
+        "personal_ids": [o["PersonalID"] for o in items],
+        "detail": [{"pid": o["PersonalID"], "entry": o.get("EntryDate"),
+                    "days": o.get("DaysEnrolled"), "med": o.get("TypeMedian"),
+                    "over": o.get("DaysOverMedian")} for o in items],
+    } for projid, items in by_proj.items()]
+
+
+def build_risk_drills(an: dict | None) -> list[dict]:
+    """Return-risk scored exits → drill_clients `an:risk` rows, one per project.
+
+    Source: analytics.json risk.clients_all (the FULL scored list — the static
+    page's `clients` key stays top-500). User directive 2026-09-18: surface the
+    per-client RETURN-risk list, agency-scoped — this lifts the parked-predictor
+    hold for return risk specifically (the housing-success predictor stays
+    parked). Same RLS ride as an:outlier: agencies see their own projects,
+    admins see all; hashed IDs only. Older analytics.json files (no
+    clients_all / no ProjectID) just produce no rows.
+    """
+    if not an:
+        return []
+    scored = (an.get("risk") or {}).get("clients_all") or []
+    try:
+        period = datetime.strptime(an.get("generated") or "", "%B %Y").strftime("%Y-%m")
+    except ValueError:
+        return []
+    by_proj: dict[int, list[dict]] = {}
+    for o in scored:
+        projid = o.get("ProjectID")
+        if projid is None:
+            continue
+        by_proj.setdefault(int(projid), []).append(o)
+    return [{
+        "period": period,
+        "project_id": projid,
+        "metric": "an:risk",
+        "personal_ids": [o["PersonalID"] for o in items],
+        "detail": [{"pid": o["PersonalID"], "exit": o.get("ExitDate"),
+                    "los": o.get("LOS"), "eps": o.get("PriorEps"),
+                    "score": o.get("RiskScore"), "bucket": o.get("RiskBucket")}
+                   for o in items],
+    } for projid, items in by_proj.items()]
+
+
 def build_system_returns(data: dict, qf: dict) -> dict:
     """System-level returns (M2) aggregated by period + subpopulation at household 'All'.
 
@@ -365,7 +437,8 @@ def _distinct_periods(*row_lists, idx: int = 0) -> list[str]:
     return sorted(seen)
 
 
-def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None) -> list[dict]:
+def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None,
+               analytics: dict | None = None) -> list[dict]:
     now = datetime.now(timezone.utc).isoformat()
     # Per-dataset period lists. Datasets that only cover COMPLETE periods (DQ, SPM)
     # end earlier than project_metrics (which includes the partial current month),
@@ -427,6 +500,59 @@ def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None) -> list[
     if bnl and bnl.get("milestones_agg"):
         rows.append({"key": "ce_milestones",
                      "value": {"as_of": bnl.get("as_of"), **bnl["milestones_agg"]}})
+    # Analytics tab payload (user 2026-09-18: port the static analytics page,
+    # v2 = full 5-section parity). AGGREGATE-ONLY by doctrine: risk.clients
+    # (per-client scores) is the parked Housing Predictor and is deliberately
+    # STRIPPED here — never load per-client risk without the standing sign-off.
+    # Long-stay outlier CLIENTS likewise never enter meta (any approved login
+    # can read meta) — they load agency-scoped into drill_clients as
+    # `an:outlier` rows (build_outlier_drills); meta keeps only the aggregate.
+    # Trend series keep their full history + linear fit + 6-month projection
+    # with CI band — the projection charts need them (v1 stripped fit/proj and
+    # that was the gap vs the old page). Same guard as bnl_agg: omitted when
+    # analytics.json is absent.
+    if analytics and analytics.get("risk"):
+        _r = analytics["risk"]
+        _t = analytics.get("trend") or {}
+        _sv = analytics.get("survival") or {}
+
+        _SERIES_KEYS = ("values", "label", "color", "slope_pm", "direction",
+                        "fit", "proj_labels", "proj", "proj_lower", "proj_upper")
+
+        def _series(sr):
+            if not isinstance(sr, dict):
+                return None
+            return {k: sr[k] for k in _SERIES_KEYS if k in sr}
+
+        _SURV_KEYS = ("label", "color", "n", "n_exited", "n_ph_exit",
+                      "median_los", "median_ph_los", "curve_any", "curve_ph")
+        _outs = _sv.get("outliers") or []
+        _out_by_type: dict[str, int] = {}
+        for _o in _outs:
+            _k = _o.get("PTypeLabel") or "?"
+            _out_by_type[_k] = _out_by_type.get(_k, 0) + 1
+
+        rows.append({"key": "analytics_insights", "value": {
+            "generated": analytics.get("generated"),
+            "risk": {k: _r.get(k) for k in
+                     ("model", "histogram", "by_type", "buckets", "computed")},
+            "trend": {
+                "periods": _t.get("periods") or [],
+                "system": {k: _series(sr) for k, sr in (_t.get("system") or {}).items()},
+                "by_type": {ty: {
+                    "label": (sr or {}).get("label"),
+                    "color": (sr or {}).get("color"),
+                    "ph_rate": _series((sr or {}).get("ph_rate")),
+                    "avg_los": _series((sr or {}).get("avg_los")),
+                } for ty, sr in (_t.get("by_type") or {}).items()},
+            },
+            "survival": {
+                "types": {pt: {k: (d or {}).get(k) for k in _SURV_KEYS}
+                          for pt, d in (_sv.get("types") or {}).items()},
+                "table": _sv.get("table") or [],
+                "outliers_agg": {"total": len(_outs), "by_type": _out_by_type},
+            },
+        }})
     return rows
 
 
@@ -752,11 +878,13 @@ def build_all(dry: bool):
             "period",
         ),
         "drill_clients": (
-            lambda: build_drill_clients(get_drill()),
+            lambda: build_drill_clients(get_drill())
+            + build_outlier_drills(get_analytics())
+            + build_risk_drills(get_analytics()),
             "period,project_id,metric",
         ),
         "meta": (
-            lambda: build_meta(data, qf, dq, get_bnl()),
+            lambda: build_meta(data, qf, dq, get_bnl(), get_analytics()),
             "key",
         ),
         "bnl_clients": (
