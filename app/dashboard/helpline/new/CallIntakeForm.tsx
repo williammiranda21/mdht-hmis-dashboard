@@ -469,7 +469,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
   );
 
   return (
-    <div className="panel" style={{ maxWidth: 720 }}>
+    <div className="panel" style={{ maxWidth: 720, margin: '0 auto' }}>
       <div className="panel-h">
         <div>
           <h3>New call</h3>
