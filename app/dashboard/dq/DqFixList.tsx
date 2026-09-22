@@ -401,22 +401,41 @@ export default function DqFixList({
     }
   };
   // Aligned record rows (user 2026-09-03: the wrapped chip cloud read as a
-  // jumble) — ID · entry date · days-on-list, sorted oldest entry first.
+  // jumble) — ID · entry date(s) · days-on-list, sorted oldest entry first.
+  // ONE ROW PER CLIENT (user 2026-09-22): duplicate/overlap checks emit one
+  // detail entry per offending STAY, which listed the same ID twice. Stays
+  // collapse into a single row carrying every entry date (the fix still
+  // needs to know which stays — the CSV export stays per-stay for that).
   const recordRows = (metric: string, detail: DetailRow[] | null, ids: string[]) => {
-    const rows = (detail ?? ids.map((id): DetailRow => ({ pid: id, entry: null })))
+    const flat = (detail ?? ids.map((id): DetailRow => ({ pid: id, entry: null })))
       .slice()
       .sort((a, b) => (a.entry ?? '9999').localeCompare(b.entry ?? '9999'));
+    const byPid = new Map<string, DetailRow[]>();
+    for (const d of flat) {
+      const arr = byPid.get(d.pid);
+      if (arr) arr.push(d); else byPid.set(d.pid, [d]);
+    }
+    const rows = [...byPid.values()];
     return (
       <div className="dqfx-rows">
-        {rows.map((d, i) => {
+        {rows.map((grp) => {
+          const d = grp[0];
           const age = openAges[`${metric}|${d.pid}`];
+          const entries = [...new Set(grp.map((g) => g.entry).filter(Boolean))] as string[];
+          const why = grp.find((g) => g.why)?.why;
           return (
-            <div className="dqfx-row" key={`${d.pid}-${i}`}>
+            <div className="dqfx-row" key={d.pid}>
               <CopyId pid={d.pid} />
-              <span className="dqfx-row-date">{d.entry ?? ''}</span>
-              {d.why && (
+              <span className="dqfx-row-date">{entries.join(' · ')}</span>
+              {grp.length > 1 && (
+                <span title="This client has multiple offending enrollments — each entry date above is one of them"
+                  style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--warn)', whiteSpace: 'nowrap' }}>
+                  ×{grp.length} enrollments
+                </span>
+              )}
+              {why && (
                 <span style={{ fontSize: 11, color: 'var(--muted)', flex: '1 1 220px',
-                  minWidth: 0, lineHeight: 1.35 }}>{d.why}</span>
+                  minWidth: 0, lineHeight: 1.35 }}>{why}</span>
               )}
               {age != null && <span className="dqfx-row-age">{age}d open</span>}
             </div>
@@ -555,7 +574,8 @@ export default function DqFixList({
                   <div className="dqfx-fix">→ {e.fix}</div>
                   {recordRows(`dq:${e.key}`, cat!.detail, cat!.ids)}
                   <button className="btn dqfx-copy" onClick={(ev) => {
-                    navigator.clipboard?.writeText((cat!.detail?.map((d) => d.pid) ?? cat!.ids).join('\n'));
+                    navigator.clipboard?.writeText(
+                      [...new Set(cat!.detail?.map((d) => d.pid) ?? cat!.ids)].join('\n'));
                     const el = ev.currentTarget; el.textContent = 'Copied ✓';
                     setTimeout(() => { el.textContent = '⧉ Copy these IDs'; }, 1200);
                   }}>⧉ Copy these IDs</button>
@@ -597,7 +617,7 @@ export default function DqFixList({
                         <div className="bnl-sub" style={{ marginTop: 2 }}>Affects: {check.breaks}</div>
                         {recordRows(`eva:${f.id}`, f.detail, f.ids)}
                         <button className="btn dqfx-copy" onClick={(ev) => {
-                          navigator.clipboard?.writeText(f.ids.join('\n'));
+                          navigator.clipboard?.writeText([...new Set(f.ids)].join('\n'));
                           const el = ev.currentTarget; el.textContent = 'Copied ✓';
                           setTimeout(() => { el.textContent = '⧉ Copy these IDs'; }, 1200);
                         }}>⧉ Copy these IDs</button>
