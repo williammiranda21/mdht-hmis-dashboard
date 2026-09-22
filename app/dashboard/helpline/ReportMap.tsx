@@ -28,12 +28,13 @@ const VIEWS = {
 } as const;
 type ViewKey = keyof typeof VIEWS;
 
+// `soft` is the chip tint when the layer is on — the *-light token of its stroke.
 const LAYERS = [
-  { key: 'districts', label: 'City of Miami districts', file: '/gis/districts.geojson', stroke: 'var(--secondary)', width: 2 },
-  { key: 'county', label: 'County districts', file: '/gis/county_districts.geojson', stroke: 'var(--accent)', width: 1.6 },
-  { key: 'muni', label: 'Municipalities', file: '/gis/municipalities.geojson', stroke: 'var(--danger)', width: 1.4 },
-  { key: 'zipcodes', label: 'ZIP codes', file: '/gis/zipcodes.geojson', stroke: 'var(--warn)', width: 1.4 },
-  { key: 'tracts', label: 'Census tracts', file: '/gis/census_tracts.geojson', stroke: 'var(--faint)', width: 0.8 },
+  { key: 'districts', label: 'City of Miami districts', file: '/gis/districts.geojson', stroke: 'var(--secondary)', width: 2, soft: 'var(--primary-soft)' },
+  { key: 'county', label: 'County districts', file: '/gis/county_districts.geojson', stroke: 'var(--accent)', width: 1.6, soft: 'var(--accent-light)' },
+  { key: 'muni', label: 'Municipalities', file: '/gis/municipalities.geojson', stroke: 'var(--danger)', width: 1.4, soft: 'var(--danger-light)' },
+  { key: 'zipcodes', label: 'ZIP codes', file: '/gis/zipcodes.geojson', stroke: 'var(--warn)', width: 1.4, soft: 'var(--warn-light)' },
+  { key: 'tracts', label: 'Census tracts', file: '/gis/census_tracts.geojson', stroke: 'var(--faint)', width: 0.8, soft: 'var(--track)' },
 ] as const;
 type LayerKey = (typeof LAYERS)[number]['key'];
 
@@ -90,6 +91,9 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
   const [center, setCenter] = useState<{ lat: number; lng: number }>(
     { lat: VIEWS.metro.lat, lng: VIEWS.metro.lng });
   const [z, setZ] = useState<number>(VIEWS.metro.z);
+  // which preset the map is showing — cleared the moment the user pans/zooms away
+  const [view, setView] = useState<ViewKey | null>('metro');
+  const fromRef = useRef<HTMLInputElement>(null);
   const [on, setOn] = useState<Record<LayerKey, boolean>>(
     { districts: false, county: false, muni: false, zipcodes: false, tracts: false });
   const [geo, setGeo] = useState<Record<LayerKey, GeoFC | 'missing' | 'loading' | undefined>>(
@@ -171,6 +175,7 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
       const { px, py } = project(under.lat, under.lng, nz);
       setZ(nz);
       setCenter(unproject(px - cx + cw / 2, py - cy + H / 2, nz)); // keep it there
+      setView(null);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -212,6 +217,7 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
     if (!d.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
     d.moved = true;
     draggedRef.current = true;
+    setView(null);
     d.x = e.clientX; d.y = e.clientY;
     setCenter((c) => {
       const { px, py } = project(c.lat, c.lng, z);
@@ -226,6 +232,7 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
   function zoomTo(nz: number, at?: { lat: number; lng: number }) {
     setZ(Math.min(18, Math.max(9, nz)));
     if (at) setCenter(at);
+    setView(null);
   }
   function onDblClick(e: React.MouseEvent) {
     const rect = (e.currentTarget as Element).getBoundingClientRect();
@@ -300,68 +307,75 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
             {' '}· drag to pan · scroll or double-click to zoom · click a boundary for its call count
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <input className="tinput" type="date" value={from} style={{ width: 140 }}
-            onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
-          <span className="bnl-sub">→</span>
-          <input className="tinput" type="date" value={to} style={{ width: 140 }}
-            onChange={(e) => setTo(e.target.value)} aria-label="To date" />
-          {(from || to) && (
-            <button className="tbtn" onClick={() => { setFrom(''); setTo(''); }}>Clear dates</button>
-          )}
-          {(Object.keys(VIEWS) as ViewKey[]).map((k) => (
-            <button key={k} className="tbtn"
-              onClick={() => { setCenter({ lat: VIEWS[k].lat, lng: VIEWS[k].lng }); setZ(VIEWS[k].z); }}>
-              {VIEWS[k].label}</button>
-          ))}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="dgroup">
+            <button type="button" className="dcal" aria-label="Pick a date range"
+              onClick={() => fromRef.current?.showPicker?.()}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </button>
+            <input ref={fromRef} type="date" value={from}
+              onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
+            <span className="dsep">→</span>
+            <input type="date" value={to}
+              onChange={(e) => setTo(e.target.value)} aria-label="To date" />
+            {(from || to) && (
+              <button type="button" className="dclr" title="Clear dates"
+                onClick={() => { setFrom(''); setTo(''); }}>✕</button>
+            )}
+          </span>
+          <span className="vseg" role="group" aria-label="Map view presets">
+            {(Object.keys(VIEWS) as ViewKey[]).map((k) => (
+              <button key={k} type="button" className={view === k ? 'on' : undefined}
+                onClick={() => { setCenter({ lat: VIEWS[k].lat, lng: VIEWS[k].lng }); setZ(VIEWS[k].z); setView(k); }}>
+                {VIEWS[k].label}</button>
+            ))}
+          </span>
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', padding: '0 18px 10px' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', padding: '0 18px 14px' }}>
         <span className="flabel">Layers</span>
         {LAYERS.map((L) => (
-          <label key={L.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
-            fontSize: 12.5, color: 'var(--muted)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={on[L.key]}
-              onChange={() => {
-                setOn((p) => ({ ...p, [L.key]: !p[L.key] }));
-                if (sel?.key === L.key) setSel(null);
-              }} />
-            <span style={{ borderBottom: `2px solid ${L.stroke}` }}>{L.label}</span>
-            {on[L.key] && geo[L.key] === 'loading' && <span className="bnl-sub">loading…</span>}
+          <button key={L.key} type="button" aria-pressed={on[L.key]}
+            className={on[L.key] ? 'lchip on' : 'lchip'}
+            style={on[L.key] ? { borderColor: L.stroke, background: L.soft } : undefined}
+            onClick={() => {
+              setOn((p) => ({ ...p, [L.key]: !p[L.key] }));
+              if (sel?.key === L.key) setSel(null);
+            }}>
+            <span className="sw" style={{ borderTop: `${Math.max(1, Math.round(L.width))}px solid ${L.stroke}` }} />
+            {L.label}
+            {on[L.key] && geo[L.key] === 'loading' && <span className="lst">· loading…</span>}
             {on[L.key] && geo[L.key] === 'missing' && (
-              <span className="bnl-sub" title={`Drop the file at hmis-web/public${L.file} (GeoJSON, WGS84 lon/lat)`}>
-                — file not loaded yet</span>
+              <span className="lst" title={`Drop the file at hmis-web/public${L.file} (GeoJSON, WGS84 lon/lat)`}>
+                · file missing</span>
             )}
-          </label>
+          </button>
         ))}
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
-          fontSize: 12.5, color: 'var(--muted)', cursor: 'pointer' }}>
-          <input type="checkbox" checked={onCustom}
-            onChange={() => {
-              setOnCustom(!onCustom);
-              if (sel?.key === 'custom') setSel(null);
-            }} />
-          <span style={{ borderBottom: '2px solid var(--info)' }}>Custom areas</span>
-          {onCustom && customs === null && <span className="bnl-sub">loading…</span>}
+        <button type="button" aria-pressed={onCustom}
+          className={onCustom ? 'lchip on' : 'lchip'}
+          style={onCustom ? { borderColor: 'var(--info)', background: 'var(--info-light)' } : undefined}
+          onClick={() => {
+            setOnCustom(!onCustom);
+            if (sel?.key === 'custom') setSel(null);
+          }}>
+          <span className="sw" style={{ borderTop: '2px dashed var(--info)' }} />
+          Custom areas
+          {onCustom && customs === null && <span className="lst">· loading…</span>}
+          {onCustom && customs != null && customs.length > 0 && <span className="lst">· {customs.length}</span>}
           {onCustom && customs?.length === 0 && (
-            <span className="bnl-sub" title={isAdmin
-              ? 'Use ✏ Draw custom area to create one'
-              : 'An admin can draw these on this map'}>— none drawn yet</span>
+            <span className="lst" title={isAdmin
+              ? 'Use Draw custom area to create one'
+              : 'An admin can draw these on this map'}>· none drawn yet</span>
           )}
-        </label>
+        </button>
         {isAdmin && !draw && (
-          <button className="tbtn" onClick={() => { setDraw([]); setSel(null); setDrawErr(null); }}
+          <button type="button" className="drawbtn"
+            onClick={() => { setDraw([]); setSel(null); setDrawErr(null); }}
             title="Click corners on the map to outline a new routing area, then name it">
-            ✏ Draw custom area</button>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            Draw custom area</button>
         )}
-        <span style={{ flex: 1 }} />
-        {Object.entries(DOT).map(([k, d]) => (
-          <span key={k} className="bnl-sub" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 9, height: 9, borderRadius: '50%', background: d.c, display: 'inline-block' }} />
-            {d.label}
-          </span>
-        ))}
       </div>
 
       {draw && (
@@ -483,12 +497,19 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
           </svg>
 
           {/* zoom controls */}
-          <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 4,
-            display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <button className="tbtn" style={{ width: 34, fontSize: 16, fontWeight: 700, background: 'var(--card)' }}
-              onClick={() => zoomTo(z + 1)} aria-label="Zoom in">+</button>
-            <button className="tbtn" style={{ width: 34, fontSize: 16, fontWeight: 700, background: 'var(--card)' }}
-              onClick={() => zoomTo(z - 1)} aria-label="Zoom out">−</button>
+          <div className="zoomg">
+            <button onClick={() => zoomTo(z + 1)} aria-label="Zoom in">+</button>
+            <button onClick={() => zoomTo(z - 1)} aria-label="Zoom out">−</button>
+          </div>
+
+          {/* status legend — lives on the map so the control rows stay clean */}
+          <div className="mlegend">
+            {Object.entries(DOT).map(([k, d]) => (
+              <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: d.c, display: 'inline-block' }} />
+                {d.label}
+              </span>
+            ))}
           </div>
 
           {/* selected-boundary counter (districts, municipalities, custom areas) */}

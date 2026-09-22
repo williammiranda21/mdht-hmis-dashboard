@@ -74,6 +74,7 @@ export default async function AdminPage() {
     policiesAttestedAt: p.policies_attested_at ?? null,
     ycAccess: Boolean(p.yc_access),
     hlAccess: Boolean(p.helpline_access),
+    hlAdmin: Boolean(p.helpline_admin),
     status: p.status,
     createdAt: p.created_at,
     lastSignInAt: lastSignIn.get(p.id) ?? null,

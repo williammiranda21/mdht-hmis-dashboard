@@ -60,6 +60,8 @@ export default function CallIntakeForm({ me }: { me: string }) {
     sleeping: '', household: '', notes: '',
   });
   const [factors, setFactors] = useState<string[]>([]);
+  // household-size follow-up — asked only when household = With children
+  const [hhSize, setHhSize] = useState('');
   const [prior, setPrior] = useState<PriorCase[]>([]);
   const [geo, setGeo] = useState<GeoHit[] | 'loading' | null>(null);
   const [pin, setPin] = useState<GeoHit | null>(null);
@@ -363,11 +365,15 @@ export default function CallIntakeForm({ me }: { me: string }) {
       return;
     }
     if (f.ssn4 && !/^\d{4}$/.test(f.ssn4)) { setErr('SSN-4 must be exactly 4 digits (or blank).'); return; }
+    if (hhSize.trim() && (!/^\d{1,2}$/.test(hhSize.trim()) || Number(hhSize) < 1)) {
+      setErr('Household size must be a whole number (or blank).'); return;
+    }
     setBusy(true); setErr(null);
     const row: Record<string, unknown> = { created_by: me, priority: pts, factors };
     for (const [k, v] of Object.entries(f)) if (v.trim()) row[k] = v.trim();
     if (pin) { row.lat = pin.lat; row.lng = pin.lng; }
     if (countyDist) row.county_district = countyDist;
+    if (f.household === 'With children' && hhSize.trim()) row.household_size = Number(hhSize);
     if (refer?.terminal) {
       // SOP referral resolved the call — no outreach dispatch for this case.
       row.status = 'referred_out';
@@ -378,7 +384,14 @@ export default function CallIntakeForm({ me }: { me: string }) {
       row.assigned_at = new Date().toISOString();
     }
     const db = supabaseBrowser();
-    const { data, error } = await db.from('helpline_cases').insert(row).select('id').single();
+    let { data, error } = await db.from('helpline_cases').insert(row).select('id').single();
+    if (error && row.household_size != null && error.message.includes('household_size')) {
+      // run-once supabase/helpline_household.sql hasn't run yet — keep the
+      // answer in the case notes so nothing the operator collected is lost
+      delete row.household_size;
+      row.notes = [`Household size: ${hhSize.trim()}`, row.notes].filter(Boolean).join(' — ');
+      ({ data, error } = await db.from('helpline_cases').insert(row).select('id').single());
+    }
     if (!error && data) {
       await db.from('helpline_calls').insert({ case_id: data.id, operator: me, kind: 'initial', notes: f.notes.trim() || null });
       if (refer) {
@@ -648,7 +661,30 @@ export default function CallIntakeForm({ me }: { me: string }) {
         <L>Where did they sleep last night?</L>
         <Chips options={SLEEPING_OPTIONS} value={f.sleeping} onPick={set('sleeping')} />
         <L>Household on the call</L>
-        <Chips options={HOUSEHOLD_OPTIONS} value={f.household} onPick={set('household')} />
+        <Chips options={HOUSEHOLD_OPTIONS} value={f.household}
+          onPick={(v) => { set('household')(v); if (v !== 'With children') setHhSize(''); }} />
+        {f.household === 'With children' && (
+          <>
+            <L>How many people in the household — including the caller?</L>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, alignItems: 'center' }}>
+              {['2', '3', '4', '5', '6'].map((n) => {
+                const on = hhSize === n;
+                return (
+                  <button key={n} type="button" aria-pressed={on}
+                    onClick={() => setHhSize(on ? '' : n)}
+                    style={{ border: `1px solid ${on ? 'var(--secondary)' : 'var(--border)'}`,
+                      background: on ? 'var(--primary-light)' : 'var(--card)',
+                      color: on ? 'var(--strong)' : 'var(--muted)',
+                      borderRadius: 20, padding: '7px 14px', fontSize: 12.5, fontWeight: 600,
+                      cursor: 'pointer', font: 'inherit' }}>{n}</button>
+                );
+              })}
+              <input className="tinput" type="number" min={1} max={99} value={hhSize}
+                placeholder="Other…" aria-label="Household size" style={{ width: 90 }}
+                onChange={(e) => setHhSize(e.target.value)} />
+            </div>
+          </>
+        )}
         <L>Factors — tap all that apply</L>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
           {FACTORS.map(({ key }) => {

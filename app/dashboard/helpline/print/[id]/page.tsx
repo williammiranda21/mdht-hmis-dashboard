@@ -176,7 +176,7 @@ export default async function DispatchSheet({ params }: { params: { id: string }
         <span className="k">Name</span><span className="v">{name}</span>
         {c.dob && <><span className="k">Date of birth</span><span className="v">{c.dob}</span></>}
         {c.sleeping && <><span className="k">Sleeping</span><span className="v">{c.sleeping}</span></>}
-        {c.household && <><span className="k">Household</span><span className="v">{c.household}</span></>}
+        {c.household && <><span className="k">Household</span><span className="v">{c.household}{c.household_size ? ` — ${c.household_size} in household` : ''}</span></>}
         {(c.factors ?? []).length > 0 && (
           <><span className="k">Factors</span><span className="v">{(c.factors as string[]).join(' · ')}</span></>
         )}

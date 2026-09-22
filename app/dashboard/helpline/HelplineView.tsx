@@ -32,6 +32,9 @@ export interface HlCase {
   lng: number | null;
   sleeping: string | null;
   household: string | null;
+  /** intake follow-up when household = 'With children'
+   *  (helpline_household.sql; undefined before it runs) */
+  household_size?: number | null;
   factors: string[];
   notes: string | null;
   priority: number;
@@ -158,6 +161,26 @@ const OPEN_STATUSES: CaseStatus[] = ['assigned', 'attempted', 'contacted'];
  *  tab labels so nothing hides, and the choice is remembered per person. */
 type HlTab = 'queue' | 'board' | 'cases' | 'map' | 'admin';
 const HL_TAB_KEY = 'hl-tab';
+
+/* stroke icons for the section tabs (feather-style, match the sidebar) */
+const PHONE_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+);
+const HL_TAB_ICONS: Record<HlTab, React.ReactNode> = {
+  queue: PHONE_ICON,
+  board: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="3" y="3" width="5" height="14" rx="1"/><rect x="10" y="3" width="5" height="10" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg>
+  ),
+  cases: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+  ),
+  map: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>
+  ),
+  admin: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+  ),
+};
 
 export interface HmisGlance {
   status: string | null; project: string | null; last_contact: string | null;
@@ -412,18 +435,45 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
   const verified = confirmed.filter((c) => c.verified_entry);
   const unverified = confirmed.filter((c) => !c.verified_entry);
 
+  // Stat-bar window (user ask 2026-09-22): re-count the six stats over cases
+  // OPENED in a CALENDAR window — Today (since midnight) / Week (since
+  // Monday) / Month (since the 1st) / All (default). Local clock = Miami for
+  // operators. Tab badges and the working lists stay unscoped on purpose:
+  // the queue is the queue.
+  const [statPeriod, setStatPeriod] = useState<'day' | 'week' | 'month' | 'all'>('all');
+  const statCases = useMemo(() => {
+    if (statPeriod === 'all') return cases;
+    const now = new Date();
+    const cut = statPeriod === 'day'
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+      : statPeriod === 'week'
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7)).getTime()
+      : new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    return cases.filter((c) => new Date(c.created_at).getTime() >= cut);
+  }, [cases, statPeriod]);
+  const sTriage = statCases.filter((c) => c.status === 'new');
+  const sWorking = statCases.filter((c) => OPEN_STATUSES.includes(c.status));
+  const sConfirmed = statCases.filter((c) => c.status === 'confirmed');
+  const sDone = statCases.filter((c) => ['declined', 'no_locate', 'closed', 'referred_out'].includes(c.status));
+  const sReferred = statCases.filter((c) => c.status === 'referred_out');
+  const sVerified = sConfirmed.filter((c) => c.verified_entry);
+  const sUnverified = sConfirmed.filter((c) => !c.verified_entry);
+  const scopeNote = statPeriod === 'all' ? ''
+    : ` — cases opened ${statPeriod === 'day' ? 'today (since midnight)'
+      : statPeriod === 'week' ? 'this week (since Monday)' : 'this month (since the 1st)'}`;
+
   const t = q.trim().toLowerCase();
   const searchable = (c: HlCase) =>
     `${nameOf(c)} ${c.phone_line ?? ''} ${c.phone_callback ?? ''} ${c.area ?? ''} ${c.address ?? ''} ${c.notes ?? ''}`.toLowerCase();
 
   const kpi = (lbl: string, val: number, note: string, kc: string, go?: HlTab) => (
-    <div className="bnl-kpi" style={{ ['--kc' as any]: kc, ...(go ? { cursor: 'pointer' } : {}) }}
-      title={go ? 'Open the matching tab' : undefined}
+    <button type="button" className="stat" style={{ ['--kc' as any]: kc }}
+      title={`${note}${go ? ' — click to open the matching tab' : ''}`}
       onClick={go ? () => setTab(go) : undefined}>
-      <div className="bnl-kpi-lbl">{lbl}</div>
-      <div className="bnl-kpi-val">{fmtInt(val)}</div>
-      <div className="bnl-kpi-note">{note}</div>
-    </div>
+      <span className="dot" />
+      <span className="lbl">{lbl}</span>
+      <span className="val">{fmtInt(val)}</span>
+    </button>
   );
 
   function CaseCell({ c, e }: { c: HlCase; e?: { base: number; aging: number; extra: number; pts: number; band: string } }) {
@@ -447,7 +497,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
         )}
         <div className="bnl-sub" style={{ lineHeight: 1.6 }}>
           {c.area ?? 'area unknown'}{c.county_district ? ` · ${c.county_district}` : ''}{c.address ? ` · ${c.address}` : ''}{c.landmark ? ` · ${c.landmark}` : ''}
-          {c.sleeping ? ` · ${c.sleeping}` : ''}{c.household && c.household !== 'Alone' ? ` · ${c.household}` : ''}
+          {c.sleeping ? ` · ${c.sleeping}` : ''}{c.household && c.household !== 'Alone' ? ` · ${c.household}${c.household_size ? ` (${c.household_size} in household)` : ''}` : ''}
           {c.factors.length > 0 && <> · {c.factors.join(', ')}</>}
           {(c.phone_callback || c.phone_line) && <> · ☎ {c.phone_callback ?? c.phone_line}</>}
           {(callsByCase[c.id] ?? 0) > 1 && (
@@ -525,43 +575,67 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
     );
   }
 
-  // Compact, wrapping control cluster — a nowrap one-liner here starved the
-  // Caller column of the whole table's width (user report 2026-08-20).
-  // Two tidy rows, fixed width (user report 2026-08-25 "crowded"): the
-  // suggestion spans the top; select + Refer + icon-only Pin share one row.
+  // One-row action cluster (user-approved mock 2026-09-22): split button —
+  // violet half assigns the suggested team (SHORT name; full name/why/open
+  // count in the tooltip), caret half is the real team <select> wearing only
+  // its chevron. Supersedes the 2026-08-25 two-row 280px layout.
+  // shortTeam: "City of Miami — Team 8 (District 5 + Gov Center)" → "Team 8".
   function AssignControls({ c }: { c: HlCase }) {
     const sug = suggestTeam(c, teams, openByTeam);
+    const shortTeam = (name: string) => {
+      const base = name.split('(')[0];
+      const parts = base.split('—');
+      const s = (parts[parts.length - 1] ?? '').trim() || base.trim() || name.trim();
+      return s.length > 18 ? `${s.slice(0, 16)}…` : s;
+    };
+    const teamOptions = (
+      <>
+        <option value="" disabled>{sug ? 'Other team…' : 'Assign team…'}</option>
+        {teams.filter((x) => x.active).map((x) => (
+          <option key={x.id} value={x.id}>{x.name} ({openByTeam.get(x.id) ?? 0} open)</option>
+        ))}
+      </>
+    );
+    const pickTeam = (e: React.ChangeEvent<HTMLSelectElement>) => {
+      if (e.target.value) assign(c, Number(e.target.value));
+    };
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 280,
-        marginLeft: 'auto', textAlign: 'left' }}>
-        {sug && (
-          <button className="btn primary" style={{ padding: '5px 12px', fontSize: 12,
-            width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-            disabled={busy} title={`Suggested: ${sug.why} — ${openByTeam.get(sug.team.id) ?? 0} open cases · full name: ${sug.team.name}`}
-            onClick={() => assign(c, sug.team.id)}>
-            Assign → {sug.team.name.length > 26 ? `${sug.team.name.slice(0, 24)}…` : sug.team.name}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
+        {sug ? (
+          <span className="split"
+            title={`Suggested: ${sug.why} — ${openByTeam.get(sug.team.id) ?? 0} open cases · full name: ${sug.team.name}`}>
+            <button type="button" className="smain" disabled={busy} onClick={() => assign(c, sug.team.id)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              Assign <em>{shortTeam(sug.team.name)}</em>
+            </button>
+            <span className="scaret">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+              <select aria-label="Assign a different team" defaultValue="" disabled={busy} onChange={pickTeam}>
+                {teamOptions}
+              </select>
+            </span>
+          </span>
+        ) : (
+          <select className="fselect" aria-label="Assign to team" defaultValue="" disabled={busy}
+            style={{ padding: '5px 22px 5px 12px', fontSize: 12, borderRadius: 999 }}
+            onChange={pickTeam}>
+            {teamOptions}
+          </select>
+        )}
+        <button className="tbtn" disabled={busy} style={{ flexShrink: 0 }}
+          title="SOP refer-out (prevention · veterans · DV · youth · other-provider areas) — shows the script first"
+          onClick={() => setReferFor(c)}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
+          Refer</button>
+        {isAdmin && (
+          <button className="tbtn" disabled={busy}
+            style={{ flexShrink: 0, ...(c.pinned ? { borderColor: 'var(--warn)', color: 'var(--warn)' } : {}) }}
+            aria-label={c.pinned ? 'Unpin from the top of the queue' : 'Pin to the top of the queue'}
+            title={c.pinned ? 'Pinned — click to unpin' : 'Pin to the top of the queue — reason goes in the case log'}
+            onClick={() => togglePin(c)}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill={c.pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg>
           </button>
         )}
-        <div style={{ display: 'flex', gap: 6 }}>
-          <select className="fselect" aria-label="Assign to team" defaultValue=""
-            style={{ flex: 1, minWidth: 0, padding: '5px 22px 5px 9px', fontSize: 12 }}
-            onChange={(e) => { if (e.target.value) assign(c, Number(e.target.value)); }}>
-            <option value="" disabled>{sug ? 'Other team…' : 'Assign team…'}</option>
-            {teams.filter((x) => x.active).map((x) => (
-              <option key={x.id} value={x.id}>{x.name} ({openByTeam.get(x.id) ?? 0} open)</option>
-            ))}
-          </select>
-          <button className="tbtn" disabled={busy} style={{ flexShrink: 0 }}
-            title="SOP refer-out (prevention · veterans · DV · youth · other-provider areas) — shows the script first"
-            onClick={() => setReferFor(c)}>↗ Refer</button>
-          {isAdmin && (
-            <button className="tbtn" disabled={busy}
-              style={{ flexShrink: 0, ...(c.pinned ? { borderColor: 'var(--warn)', color: 'var(--warn)' } : {}) }}
-              aria-label={c.pinned ? 'Unpin from the top of the queue' : 'Pin to the top of the queue'}
-              title={c.pinned ? 'Pinned — click to unpin' : 'Pin to the top of the queue — reason goes in the case log'}
-              onClick={() => togglePin(c)}>📌</button>
-          )}
-        </div>
       </div>
     );
   }
@@ -576,41 +650,51 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
       )}
       {error && <div className="lerror" style={{ marginBottom: 14 }} role="alert">{error}</div>}
 
-      <div className="bnl-kpis" style={{ marginBottom: 18 }}>
-        {kpi('Awaiting triage', triage.length,
-          triage.length ? `oldest ${fmtHours(Math.max(...triage.map((c) => hoursSince(c.created_at))))} ago` : 'queue is clear',
+      <div className="statbar" style={{ marginBottom: 16 }}>
+        {kpi('Awaiting triage', sTriage.length,
+          (sTriage.length ? `oldest ${fmtHours(Math.max(...sTriage.map((c) => hoursSince(c.created_at))))} ago` : 'queue is clear') + scopeNote,
           'var(--danger)', 'queue')}
-        {kpi('With outreach', working.length, 'assigned · attempted · contacted', 'var(--accent)', 'board')}
-        {kpi('Confirmed homeless', confirmed.length,
-          `${fmtInt(verified.length)} verified enrolled · ${fmtInt(unverified.length)} pending`, 'var(--info)', 'cases')}
-        {kpi('Enrollment gap', unverified.length,
-          unverified.length ? 'confirmed but no HMIS enrollment yet' : 'everyone confirmed is enrolled', 'var(--danger)', 'cases')}
-        {kpi('Referred out', referredOut.length,
-          'prevention · veterans · DV · youth — right-door diversions', 'var(--secondary)', 'cases')}
-        {kpi('All cases', cases.length, `${fmtInt(done.length)} closed/other`, 'var(--faint)', 'cases')}
+        {rules.slaHours != null && kpi('Past target',
+          sTriage.filter((c) => hoursSince(c.created_at) >= (rules.slaHours as number)).length,
+          `awaiting triage past the ${rules.slaHours}h response target${scopeNote}`, 'var(--danger)', 'queue')}
+        {kpi('With outreach', sWorking.length, 'assigned · attempted · contacted' + scopeNote, 'var(--accent)', 'board')}
+        {kpi('Confirmed homeless', sConfirmed.length,
+          `${fmtInt(sVerified.length)} verified enrolled · ${fmtInt(sUnverified.length)} pending${scopeNote}`, 'var(--info)', 'cases')}
+        {kpi('Enrollment gap', sUnverified.length,
+          (sUnverified.length ? 'confirmed but no HMIS enrollment yet' : 'everyone confirmed is enrolled') + scopeNote, 'var(--danger)', 'cases')}
+        {kpi('Referred out', sReferred.length,
+          'prevention · veterans · DV · youth — right-door diversions' + scopeNote, 'var(--secondary)', 'cases')}
+        {kpi('All cases', statCases.length, `${fmtInt(sDone.length)} closed/other${scopeNote}`, 'var(--faint)', 'cases')}
+        <span className="statper" role="group" aria-label="Stat window">
+          {([['day', 'Today', 'Cases opened today — since midnight'],
+             ['week', 'Week', 'Cases opened this week — since Monday'],
+             ['month', 'Month', 'Cases opened this month — since the 1st'],
+             ['all', 'All', 'Every loaded case']] as const).map(([k, lbl, tip]) => (
+            <button key={k} type="button" className={statPeriod === k ? 'on' : undefined}
+              title={tip} onClick={() => setStatPeriod(k)}>{lbl}</button>
+          ))}
+        </span>
       </div>
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
         <div className="seg" role="tablist" aria-label="Helpline sections">
           {([
-            { k: 'queue' as HlTab, lbl: '☎ Call queue', n: triage.length, bg: 'var(--danger-light)', fg: 'var(--danger)' },
+            { k: 'queue' as HlTab, lbl: 'Call queue', n: triage.length, bg: 'var(--danger-light)', fg: 'var(--danger)' },
             { k: 'board' as HlTab, lbl: 'Team board', n: working.length, bg: 'var(--accent-light)', fg: 'var(--accent)' },
             { k: 'cases' as HlTab, lbl: 'All cases', n: 0, bg: '', fg: '' },
             { k: 'map' as HlTab, lbl: 'Map & reporting', n: 0, bg: '', fg: '' },
-            ...(isAdmin ? [{ k: 'admin' as HlTab, lbl: '⚙ Settings', n: 0, bg: '', fg: '' }] : []),
+            ...(isAdmin ? [{ k: 'admin' as HlTab, lbl: 'Settings', n: 0, bg: '', fg: '' }] : []),
           ]).map(({ k, lbl, n, bg, fg }) => (
             <button key={k} type="button" role="tab" aria-selected={shownTab === k}
               className={shownTab === k ? 'on' : undefined} onClick={() => setTab(k)}>
+              {HL_TAB_ICONS[k]}
               {lbl}
-              {n > 0 && (
-                <span style={{ background: bg, color: fg, borderRadius: 9, padding: '0 7px',
-                  fontSize: 11, fontWeight: 700, marginLeft: 6 }}>{fmtInt(n)}</span>
-              )}
+              {n > 0 && <span className="segn" style={{ background: bg, color: fg }}>{fmtInt(n)}</span>}
             </button>
           ))}
         </div>
         <span style={{ flex: 1 }} />
-        <Link className="btn primary" href="/dashboard/helpline/new">☎ New call</Link>
+        <Link className="btn primary pill" href="/dashboard/helpline/new">{PHONE_ICON} New call</Link>
       </div>
 
       {shownTab === 'queue' && (
@@ -666,9 +750,13 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                     {c.matched_pid
                       ? <Link className="tbtn" href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}
                           title="Open this client's HMIS record on the By-Name List — history, enrollments, notes">
-                          linked · BNL →</Link>
-                      : <button className="tbtn" disabled={busy} onClick={() => findMatches(c.id)}>
-                          {openId === c.id ? 'Refresh' : 'Find matches'}</button>}
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                          BNL record</Link>
+                      : <button className="tbtn" disabled={busy}
+                          title="Search the HMIS client index for records matching this caller — you confirm a candidate before anything links"
+                          onClick={() => findMatches(c.id)}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                          {openId === c.id ? 'Refresh' : 'Find HMIS match'}</button>}
                   </td>
                   <td style={{ textAlign: 'right' }}><AssignControls c={c} /></td>
                   {openId === c.id ? <MatchPanel c={c} /> : null}
@@ -946,7 +1034,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
         <>
           <ReportMap cases={cases} teams={teams} isAdmin={isAdmin} onOpen={(c) => setDrawerC(c)} />
           <Reporting cases={cases} teams={teams} events={events} callsByCase={callsByCase}
-            callLog={callLog} rules={rules} />
+            callLog={callLog} rules={rules} hmis={hmis} />
         </>
       )}
 
@@ -1106,14 +1194,14 @@ function Funnel({ cases, callsN }: { cases: HlCase[]; callsN: number }) {
     <ReportCard title="Outcome funnel — from phone call to proven enrollment">
       <div style={{ display: 'grid', gap: 4, maxWidth: 640 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 13 }}>
-          <span style={{ width: 210, color: 'var(--muted)' }}>☎ Calls received</span>
+          <span style={{ width: 210, color: 'var(--text)' }}>☎ Calls received</span>
           <b>{fmtInt(callsN)}</b>
           {callsN > opened && <span className="bnl-sub">({fmtInt(callsN - opened)} repeat
             call{callsN - opened === 1 ? '' : 's'} joined an existing case)</span>}
         </div>
         {stages.map(([label, n], i) => (
           <div key={label} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
-            <span style={{ width: 210, color: 'var(--muted)', flex: 'none' }}>{label}</span>
+            <span style={{ width: 210, color: 'var(--text)', flex: 'none' }}>{label}</span>
             <div style={{ flex: 1, height: 16, background: 'var(--track)', borderRadius: 4,
               overflow: 'hidden' }}>
               <div style={{ width: `${opened ? Math.max(2, (n / opened) * 100) : 0}%`, height: '100%',
@@ -1357,20 +1445,208 @@ function FactorMix({ cases, rules }: { cases: HlCase[]; rules: PriorityRules }) 
           ⚠ unsheltered/car {fmtInt(emergency)} · {pctOf(emergency, cases.length)}</span>
       </div>
       {counts.length > 0 && (
-        <div style={{ display: 'grid', gap: 3, maxWidth: 520 }}>
+        <div style={{ display: 'grid', gap: 3, maxWidth: 640 }}>
           {counts.map(([k, n]) => (
-            <div key={k} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 12.5 }}>
-              <span style={{ width: 170, color: 'var(--muted)', flex: 'none' }}>{k}</span>
+            <div key={k} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
+              <span style={{ width: 210, color: 'var(--text)', flex: 'none' }}>{k}</span>
               <div style={{ flex: 1, height: 11, background: 'var(--track)', borderRadius: 3 }}>
                 <div style={{ width: `${(n / cases.length) * 100}%`, height: '100%',
                   background: 'var(--accent)', borderRadius: 3, minWidth: 2 }} />
               </div>
-              <span className="bnl-sub" style={{ width: 86, textAlign: 'right' }}>
-                {fmtInt(n)} · {pctOf(n, cases.length)}</span>
+              <b style={{ width: 40, textAlign: 'right' }}>{fmtInt(n)}</b>
+              <span className="bnl-sub" style={{ width: 78 }}>{pctOf(n, cases.length)} of cases</span>
             </div>
           ))}
         </div>
       )}
+    </ReportCard>
+  );
+}
+
+/** Shared row shape for the report cards — label 13px text, bar, bold count,
+ *  sub share. Matches the bnl-table baseline (normalization 2026-09-22). */
+function StatRow({ label, n, of, color = 'var(--accent)', sub, indent }: {
+  label: string; n: number; of: number; color?: string; sub?: string; indent?: boolean;
+}) {
+  return (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
+      <span style={{ width: 210, color: indent ? 'var(--muted)' : 'var(--text)', flex: 'none',
+        paddingLeft: indent ? 16 : 0 }}>{label}</span>
+      <div style={{ flex: 1, height: 11, background: 'var(--track)', borderRadius: 3 }}>
+        <div style={{ width: `${of ? (n / of) * 100 : 0}%`, height: '100%',
+          background: color, borderRadius: 3, minWidth: n ? 2 : 0 }} />
+      </div>
+      <b style={{ width: 40, textAlign: 'right' }}>{fmtInt(n)}</b>
+      <span className="bnl-sub" style={{ width: 78 }}>{sub ?? `${pctOf(n, of)} of cases`}</span>
+    </div>
+  );
+}
+
+/** Volume trend — cases opened per week (Mondays, local), verified overlay.
+ *  Answers "is volume rising and are outcomes keeping pace" over the window. */
+function WeeklyTrend({ cases }: { cases: HlCase[] }) {
+  const weeks = useMemo(() => {
+    const by = new Map<number, { opened: number; verified: number }>();
+    for (const c of cases) {
+      const d = new Date(c.created_at);
+      const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+      const k = monday.getTime();
+      const e = by.get(k) ?? { opened: 0, verified: 0 };
+      e.opened += 1;
+      if (c.verified_entry) e.verified += 1;
+      by.set(k, e);
+    }
+    return [...by.entries()].sort((a, b) => a[0] - b[0]).slice(-12);
+  }, [cases]);
+  if (weeks.length < 2) return null;
+  const max = Math.max(1, ...weeks.map(([, w]) => w.opened));
+  return (
+    <ReportCard title="Volume trend — cases opened per week">
+      <div style={{ display: 'grid', gap: 3, maxWidth: 640 }}>
+        {weeks.map(([k, w]) => (
+          <div key={k} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
+            <span style={{ width: 210, color: 'var(--text)', flex: 'none' }}>
+              week of {new Date(k).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+            <div style={{ flex: 1, height: 11, background: 'var(--track)', borderRadius: 3,
+              position: 'relative' }}>
+              <div style={{ width: `${(w.opened / max) * 100}%`, height: '100%',
+                background: 'var(--primary)', opacity: 0.55, borderRadius: 3, minWidth: 2 }} />
+              <div style={{ width: `${(w.verified / max) * 100}%`, height: '100%',
+                background: 'var(--accent)', borderRadius: 3, position: 'absolute', top: 0, left: 0 }} />
+            </div>
+            <b style={{ width: 40, textAlign: 'right' }}>{fmtInt(w.opened)}</b>
+            <span className="bnl-sub" style={{ width: 78 }}>
+              {w.verified ? `${fmtInt(w.verified)} verified` : '—'}</span>
+          </div>
+        ))}
+      </div>
+      <div className="bnl-sub" style={{ marginTop: 5 }}>
+        Violet = cases opened · green = later verified as HMIS-enrolled (same scale)
+      </div>
+    </ReportCard>
+  );
+}
+
+/** Known-to-HMIS mix — are callers new to the system, or people we already
+ *  know? Matches are operator-confirmed; flags read from the BNL roster. */
+function HmisMix({ cases, hmis }: {
+  cases: HlCase[]; hmis: Record<string, { chronic: boolean; veteran: boolean }>;
+}) {
+  if (!cases.length) return null;
+  const matched = cases.filter((c) => c.matched_pid);
+  const chronic = matched.filter((c) => hmis[c.matched_pid!]?.chronic);
+  const veteran = matched.filter((c) => hmis[c.matched_pid!]?.veteran);
+  return (
+    <ReportCard title="Known to HMIS — new faces vs returning">
+      <div style={{ display: 'grid', gap: 3, maxWidth: 640 }}>
+        <StatRow label="Matched to an HMIS record" n={matched.length} of={cases.length} color="var(--info)" />
+        {chronic.length > 0 && <StatRow indent label="chronic on the BNL" n={chronic.length} of={cases.length} color="var(--danger)" />}
+        {veteran.length > 0 && <StatRow indent label="veteran" n={veteran.length} of={cases.length} color="var(--secondary)" />}
+        <StatRow label="No HMIS match yet" n={cases.length - matched.length} of={cases.length} color="var(--faint)" />
+      </div>
+      <div className="bnl-sub" style={{ marginTop: 5 }}>
+        Matches are confirmed person-by-person via Find HMIS match — unmatched includes callers
+        not yet searched, so read this as a floor, not a census.
+      </div>
+    </ReportCard>
+  );
+}
+
+/** Coverage gaps — calls whose area AND county district no active team
+ *  covers. The direct to-do list for Settings → Team coverage. */
+function CoverageGaps({ cases, teams }: { cases: HlCase[]; teams: Team[] }) {
+  if (!cases.length) return null;
+  const covered = (z: string) => teams.some((t) => t.active && t.zones.includes(z));
+  const by = new Map<string, number>();
+  let noPin = 0;
+  for (const c of cases) {
+    const zs = [c.area, c.county_district].filter(Boolean) as string[];
+    if (!zs.length) { noPin += 1; continue; }
+    if (!zs.some(covered)) {
+      const k = c.area || c.county_district!;
+      by.set(k, (by.get(k) ?? 0) + 1);
+    }
+  }
+  const gaps = [...by.entries()].sort((a, b) => b[1] - a[1]);
+  return (
+    <ReportCard title="Coverage gaps — calls no team's zones reach">
+      {gaps.length ? (
+        <>
+          <div style={{ display: 'grid', gap: 3, maxWidth: 640 }}>
+            {gaps.slice(0, 8).map(([z, n]) => (
+              <StatRow key={z} label={z} n={n} of={cases.length} color="var(--warn)" />
+            ))}
+          </div>
+          <div className="bnl-sub" style={{ marginTop: 5 }}>
+            These calls needed manual routing — add the zone to a team under Settings → Team coverage.
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>
+          ✓ Every pinned call falls inside a covered zone.
+        </div>
+      )}
+      {noPin > 0 && (
+        <div className="bnl-sub" style={{ marginTop: 5 }}>
+          {fmtInt(noPin)} case{noPin === 1 ? '' : 's'} had no pin or area at all — unroutable
+          until a location lands.
+        </div>
+      )}
+    </ReportCard>
+  );
+}
+
+/** Repeat-caller pressure — rising repeats = people not resolved first pass. */
+function RepeatPressure({ cases, callsByCase }: {
+  cases: HlCase[]; callsByCase: Record<number, number>;
+}) {
+  if (!cases.length) return null;
+  const nOf = (c: HlCase) => Math.max(1, callsByCase[c.id] ?? 1);
+  const one = cases.filter((c) => nOf(c) === 1).length;
+  const two = cases.filter((c) => nOf(c) === 2).length;
+  const more = cases.filter((c) => nOf(c) >= 3);
+  const top = [...cases].filter((c) => nOf(c) >= 2)
+    .sort((a, b) => nOf(b) - nOf(a)).slice(0, 3);
+  return (
+    <ReportCard title="Repeat callers — who keeps calling back">
+      <div style={{ display: 'grid', gap: 3, maxWidth: 640 }}>
+        <StatRow label="Resolved in one call" n={one} of={cases.length} />
+        <StatRow label="Called twice" n={two} of={cases.length} color="var(--warn)" />
+        <StatRow label="Called 3+ times" n={more.length} of={cases.length} color="var(--danger)" />
+      </div>
+      {top.length > 0 && (
+        <div className="bnl-sub" style={{ marginTop: 5 }}>
+          Most calls: {top.map((c) => `#${c.id} ${[c.first_name, c.last_name].filter(Boolean).join(' ')
+            || 'anonymous'} (${nOf(c)})`).join(' · ')} — repeat calls join the open case, so high
+          counts mean unresolved need, not duplicates.
+        </div>
+      )}
+    </ReportCard>
+  );
+}
+
+/** Families — the "With children" cut, powered by the household-size intake
+ *  follow-up (helpline_household.sql). */
+function FamilyStats({ cases }: { cases: HlCase[] }) {
+  const fam = cases.filter((c) => c.household === 'With children');
+  if (!fam.length) return null;
+  const sized = fam.filter((c) => (c.household_size ?? 0) > 0);
+  const avg = sized.length
+    ? sized.reduce((s, c) => s + (c.household_size ?? 0), 0) / sized.length : null;
+  const single = cases.filter((c) => c.household === 'Alone');
+  const rate = (l: HlCase[]) => (l.length ? pctOf(l.filter((c) => c.verified_entry).length, l.length) : '—');
+  return (
+    <ReportCard title="Families on the line — callers with children">
+      <div style={{ display: 'grid', gap: 3, maxWidth: 640 }}>
+        <StatRow label="With children" n={fam.length} of={cases.length} color="var(--secondary)" />
+        {single.length > 0 && <StatRow label="Alone" n={single.length} of={cases.length} color="var(--faint)" />}
+      </div>
+      <div className="bnl-sub" style={{ marginTop: 5 }}>
+        {avg != null && <>Average household size <b style={{ color: 'var(--text)' }}>{avg.toFixed(1)}</b> (
+          {fmtInt(sized.length)} of {fmtInt(fam.length)} families answered the size question) · </>}
+        verified HMIS enrollment: families <b style={{ color: 'var(--text)' }}>{rate(fam)}</b> vs
+        single adults <b style={{ color: 'var(--text)' }}>{rate(single)}</b>
+      </div>
     </ReportCard>
   );
 }
@@ -1381,11 +1657,12 @@ function FactorMix({ cases, rules }: { cases: HlCase[]; rules: PriorityRules }) 
  * from call to assignment. Computed from the loaded cases (newest 500) —
  * when volume outgrows that, this moves server-side; the columns won't change.
  */
-function Reporting({ cases: allCases, teams, events, callsByCase = {}, callLog = [], rules }: {
+function Reporting({ cases: allCases, teams, events, callsByCase = {}, callLog = [], rules, hmis = {} }: {
   cases: HlCase[]; teams: Team[]; events: Record<number, { at: string; kind: string }[]>;
   callsByCase?: Record<number, number>;
   callLog?: { at: string; kind: string }[];
   rules: PriorityRules;
+  hmis?: Record<string, { chronic: boolean; veteran: boolean }>;
 }) {
   // One period filter feeds EVERY section below (cases by created_at, calls
   // by received_at) so the funnel, heat grid, districts, factors, team table
@@ -1486,10 +1763,15 @@ function Reporting({ cases: allCases, teams, events, callsByCase = {}, callLog =
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
         gap: 14, padding: '4px 18px 16px' }}>
       <Funnel cases={cases} callsN={callsN} />
+      <WeeklyTrend cases={cases} />
       <DemandHeat calls={calls} />
       <ZipHeat cases={cases} callsByCase={callsByCase} />
       <Districts cases={cases} />
+      <CoverageGaps cases={cases} teams={teams} />
       <FactorMix cases={cases} rules={rules} />
+      <HmisMix cases={cases} hmis={hmis} />
+      <RepeatPressure cases={cases} callsByCase={callsByCase} />
+      <FamilyStats cases={cases} />
       {(() => {
         // SOP external referrals — right-door diversion stats by destination
         // (user report 2026-08-25: the one-line tally wasn't enough to "check
@@ -2143,7 +2425,8 @@ function CaseDrawer({ c, teamName, events, me, onClose }: {
             )}
           </Row>
           <Row k="Situation">
-            {[c.sleeping, c.household, ...(c.factors ?? [])].filter(Boolean).join(' · ') || '—'}
+            {[c.sleeping, c.household, c.household_size ? `${c.household_size} in household` : null,
+              ...(c.factors ?? [])].filter(Boolean).join(' · ') || '—'}
             <span className="bnl-sub"> · priority {c.priority} pts</span>
           </Row>
           {c.referred_to && <Row k="Referred to">↗ {c.referred_to}</Row>}

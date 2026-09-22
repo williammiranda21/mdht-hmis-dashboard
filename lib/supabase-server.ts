@@ -71,6 +71,11 @@ export interface Viewer {
   /** May open Helpline Triage. Admins always; non-admins via `helpline_access`.
    *  Mirrors can_see_helpline() SQL. */
   canSeeHelpline: boolean;
+  /** May manage Helpline settings (teams, priority rules, referral resources,
+   *  custom routing areas, queue pins). Admins always; non-admins via the
+   *  `helpline_admin` grant. Mirrors is_helpline_admin() SQL
+   *  (helpline_admin.sql; a missing column reads undefined → false). */
+  isHelplineAdmin: boolean;
   /** May edit their OWN BNL notes (per-account grant, default off — mirrors
    *  can_edit_bnl_notes() SQL; every edit is history-archived by trigger). */
   canEditBnlNotes: boolean;
@@ -147,5 +152,6 @@ export async function getViewer(): Promise<Viewer | null> {
     // canSeeHelpline: isAdmin || (isApproved && Boolean(data?.helpline_access)),
     canSeeHelpline: isApproved
       && (data?.email ?? user.email) === 'william.miranda@miamidade.gov',
+    isHelplineAdmin: isAdmin || (isApproved && Boolean(data?.helpline_admin)),
   };
 }

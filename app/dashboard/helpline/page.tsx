@@ -121,7 +121,10 @@ export default async function HelplinePage() {
   return (
     <HelplineView
       me={viewer.id}
-      isAdmin={viewer.isAdmin}
+      // Settings tab + team/priority/resource/area management + queue pins:
+      // full admins AND accounts with the helpline_admin grant (RLS enforces
+      // the same boundary via is_helpline_admin() — helpline_admin.sql).
+      isAdmin={viewer.isHelplineAdmin}
       cases={cases}
       teams={(teamsRes.data ?? []) as Team[]}
       events={events}

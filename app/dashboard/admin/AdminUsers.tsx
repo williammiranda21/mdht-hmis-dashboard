@@ -29,6 +29,9 @@ export interface AdminProfile {
   ycAccess: boolean;
   /** Helpline Triage (call intake + assignment). Admins always have it. */
   hlAccess: boolean;
+  /** Helpline SETTINGS management (teams, priority rules, resources, custom
+   *  areas) without full dashboard admin — helpline_admin.sql. */
+  hlAdmin: boolean;
   status: 'pending' | 'approved' | 'disabled';
   createdAt: string;
   /** auth.users.last_sign_in_at — stamped on fresh sign-ins only (a session
@@ -136,6 +139,9 @@ export default function AdminUsers({
 
   const setHlAccess = (r: AdminProfile, hl: boolean) =>
     run(r.id, async () => db().from('profiles').update({ helpline_access: hl }).eq('id', r.id), { hlAccess: hl });
+
+  const setHlAdmin = (r: AdminProfile, on: boolean) =>
+    run(r.id, async () => db().from('profiles').update({ helpline_admin: on }).eq('id', r.id), { hlAdmin: on });
 
   async function saveProjects(r: AdminProfile, ids: number[]) {
     await run(r.id, async () => {
@@ -308,6 +314,13 @@ export default function AdminUsers({
                   title="Helpline Triage: call intake, triage queue, team assignment. For helpline operators and Trust staff."
                   onClick={() => setHlAccess(r, !r.hlAccess)}>
                   {r.hlAccess ? 'Revoke Helpline' : 'Grant Helpline'}
+                </button>
+              )}
+              {!r.isAdmin && r.status === 'approved' && r.hlAccess && (
+                <button className={`tbtn${r.hlAdmin ? ' tbtn-on' : ''}`} disabled={busy === r.id}
+                  title="Helpline SETTINGS: manage teams, priority rules, referral resources, custom routing areas, and queue pins — without full dashboard admin. Run supabase/helpline_admin.sql once first."
+                  onClick={() => setHlAdmin(r, !r.hlAdmin)}>
+                  {r.hlAdmin ? 'Revoke Helpline admin' : 'Grant Helpline admin'}
                 </button>
               )}
               <button className="tbtn" disabled={busy === r.id}

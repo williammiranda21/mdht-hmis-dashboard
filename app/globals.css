@@ -190,10 +190,31 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
 /* filter bar extras */
 .frow{display:flex;flex-wrap:wrap;gap:14px 16px;align-items:flex-end;width:100%}
 .fspacer{flex:1 1 auto}
-.seg{display:inline-flex;background:var(--track);border:1px solid var(--border-strong);border-radius:10px;padding:3px;gap:2px}
-.seg button{border:0;background:transparent;font:inherit;font-size:12.5px;font-weight:600;color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;white-space:nowrap;transition:all .15s}
-.seg button.on{background:var(--card);color:var(--primary);box-shadow:0 1px 2px rgba(20,40,90,.12)}
-:root[data-theme="dark"] .seg button.on{background:var(--primary);color:#fff;box-shadow:none}
+/* Segmented tabs — self-defined pill chips (2026-09-22 redesign, "Option A"):
+   every button carries its own edge; active = soft violet fill + violet keyline.
+   The .55 rgba tracks --primary (#7E67FE), identical in both themes. */
+.seg{display:inline-flex;flex-wrap:wrap;gap:6px}
+.seg button{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border-strong);background:var(--card);font:inherit;font-size:12.5px;font-weight:600;color:var(--muted);padding:8px 15px;border-radius:999px;cursor:pointer;white-space:nowrap;transition:color .15s,border-color .15s,background .15s}
+.seg button:hover{color:var(--text);border-color:var(--primary)}
+.seg button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--primary-light)}
+.seg button.on{background:var(--primary-soft);border-color:rgba(126,103,254,.55);color:var(--primary)}
+:root[data-theme="dark"] .seg button.on{color:var(--secondary)}
+.segn{font-size:10.5px;font-weight:700;line-height:1;border-radius:999px;padding:3px 7px;min-width:20px;text-align:center}
+/* Split assign button (helpline queue): violet half assigns the suggested team,
+   the caret half is a real <select> wearing only its chevron. */
+.split{display:inline-flex;align-items:stretch;border:1px solid rgba(126,103,254,.55);border-radius:999px;background:var(--primary-soft);overflow:hidden;vertical-align:middle;transition:background .15s}
+.split:hover{background:var(--primary-light)}
+.split .smain{border:0;background:transparent;color:var(--primary);font:inherit;font-size:12px;font-weight:600;padding:7px 10px 7px 13px;cursor:pointer;display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+:root[data-theme="dark"] .split .smain{color:var(--secondary)}
+.split .smain em{font-style:normal;font-weight:700}
+.split .smain:disabled{opacity:.55;cursor:default}
+.split .smain:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--primary)}
+.split .scaret{position:relative;display:flex;align-items:center;padding:0 9px;border-left:1px solid rgba(126,103,254,.35);color:var(--primary)}
+:root[data-theme="dark"] .split .scaret{color:var(--secondary)}
+.split .scaret:hover{background:var(--primary-light)}
+.split .scaret select{position:absolute;inset:0;width:100%;opacity:0;cursor:pointer}
+.split .scaret select:focus-visible{outline:none}
+.split .scaret:has(select:focus-visible){box-shadow:inset 0 0 0 2px var(--primary)}
 .finput{font:inherit;font-size:13px;color:var(--text);background:var(--card);border:1px solid var(--border-strong);border-radius:10px;padding:9px 12px 9px 32px;min-width:170px;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2392A0B8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><path d='M21 21l-4-4'/></svg>");background-repeat:no-repeat;background-position:left 11px center}
 .finput:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
@@ -209,12 +230,18 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
 .switch.off .tk{background:var(--border-strong)} .switch.off .tk::after{left:18px}
 .btn{font:inherit;font-size:13px;font-weight:600;border-radius:10px;padding:9px 16px;cursor:pointer;border:1px solid var(--border-strong);background:var(--card);color:var(--text);transition:all .15s}
 .btn:hover{border-color:var(--primary);color:var(--primary)}
+.btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--primary-light)}
 .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff} :root[data-theme="dark"] .btn.primary{color:#fff}
+.btn.primary:hover{filter:brightness(1.07)}
+/* pill variant for a page's single headline action (e.g. ☎ New call) */
+.btn.primary.pill{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:8px 16px;font-size:12.5px;box-shadow:0 4px 14px rgba(126,103,254,.30)}
+.btn.primary.pill:hover{transform:translateY(-1px)}
 
 /* table extras */
 .tools{display:flex;gap:8px}
-.tbtn{font:inherit;font-size:11.5px;font-weight:600;color:var(--muted);background:var(--card);border:1px solid var(--border-strong);border-radius:8px;padding:6px 10px;cursor:pointer}
+.tbtn{display:inline-flex;align-items:center;justify-content:center;gap:5px;vertical-align:middle;font:inherit;font-size:11.5px;font-weight:600;color:var(--muted);background:var(--card);border:1px solid var(--border-strong);border-radius:999px;padding:6px 12px;cursor:pointer;transition:color .15s,border-color .15s,background .15s}
 .tbtn:hover{border-color:var(--primary);color:var(--primary)}
+.tbtn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--primary-light)}
 /* granted-access / active-toggle state — green so admins see what a user can reach */
 .tbtn-on{color:var(--accent);border-color:var(--accent);background:var(--accent-light)}
 .tbtn-on:hover{color:var(--accent);border-color:var(--accent)}
@@ -299,6 +326,40 @@ table.hm{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
 .ugm .ugd{position:absolute;top:11px;left:50%;transform:translateX(-50%);font-size:9px;font-weight:700;white-space:nowrap;color:var(--warn)}
 .uctl{display:flex;gap:10px;align-items:center;margin:14px 0 18px;flex-wrap:wrap}
 .seglbl{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin-right:2px}
+
+/* ── Call-map controls (helpline ReportMap, 2026-09-22 redesign) ── */
+/* one date-range group instead of two floating inputs; native picker follows the theme */
+.dgroup{display:inline-flex;align-items:center;gap:2px;background:var(--card);border:1px solid var(--border-strong);border-radius:10px;padding:0 4px 0 8px;height:36px}
+.dgroup .dcal{border:0;background:transparent;color:var(--faint);cursor:pointer;padding:4px;margin-right:2px;display:flex;border-radius:8px}
+.dgroup .dcal:hover{color:var(--primary)}
+.dgroup input[type=date]{border:0;background:transparent;color:var(--text);font:inherit;font-size:12.5px;font-weight:500;padding:0 2px;width:94px;outline:none}
+.dgroup input[type=date]::-webkit-calendar-picker-indicator{display:none}
+.dgroup .dsep{color:var(--faint);font-size:12px;padding:0 2px}
+.dgroup .dclr{border:0;background:transparent;color:var(--faint);font-size:12px;line-height:1;cursor:pointer;padding:6px;border-radius:8px}
+.dgroup .dclr:hover{color:var(--danger);background:var(--danger-light)}
+:root[data-theme="dark"] input[type="date"],:root[data-theme="dark"] input[type="datetime-local"]{color-scheme:dark}
+/* connected view-preset segment (County | Miami metro | City core) */
+.vseg{display:inline-flex;background:var(--card);border:1px solid var(--border-strong);border-radius:10px;overflow:hidden;height:36px}
+.vseg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:600;padding:0 14px;cursor:pointer;transition:color .15s,background .15s}
+.vseg button+button{border-left:1px solid var(--hair)}
+.vseg button:hover{color:var(--text)}
+.vseg button.on{background:var(--primary-soft);color:var(--primary)}
+:root[data-theme="dark"] .vseg button.on{color:var(--secondary)}
+/* boundary-layer toggle chips — the swatch is the line style the layer draws with */
+.lchip{display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:12px;font-weight:600;line-height:1;color:var(--muted);background:var(--card);border:1px solid var(--border-strong);border-radius:999px;padding:8px 14px;cursor:pointer;transition:color .15s,border-color .15s,background .15s}
+.lchip:hover{color:var(--text);border-color:var(--primary)}
+.lchip:focus-visible{outline:none;box-shadow:0 0 0 3px var(--primary-light)}
+.lchip.on{color:var(--text)}
+.lchip .sw{width:16px;border-radius:2px;flex:none}
+.lchip .lst{font-weight:500;color:var(--faint);font-size:11px}
+.drawbtn{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;font-weight:600;color:var(--info);background:transparent;border:1px dashed var(--info);border-radius:999px;padding:8px 14px;cursor:pointer;opacity:.9}
+.drawbtn:hover{background:var(--info-light);opacity:1}
+/* joined zoom group + on-map status legend */
+.zoomg{position:absolute;top:10px;right:10px;z-index:4;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border-strong);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
+.zoomg button{width:34px;height:32px;border:0;background:transparent;color:var(--text);font-size:16px;font-weight:700;cursor:pointer}
+.zoomg button:hover{background:var(--rowhover);color:var(--strong)}
+.zoomg button+button{border-top:1px solid var(--hair)}
+.mlegend{position:absolute;left:10px;bottom:10px;z-index:3;display:flex;gap:13px;align-items:center;background:var(--card);border:1px solid var(--border-strong);border-radius:999px;padding:7px 15px;font-size:11px;color:var(--text);box-shadow:var(--shadow);pointer-events:none}
 .ubar{display:inline-flex;align-items:center;gap:8px;justify-content:flex-end;width:100%}
 .ubar .mb{width:60px;height:6px;border-radius:999px;background:var(--track);overflow:hidden;flex:none}.ubar .mb i{display:block;height:6px;border-radius:999px}
 
@@ -365,6 +426,23 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .bnl-kpi-lbl{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
 .bnl-kpi-val{font-size:27px;font-weight:800;color:var(--strong);margin-top:3px}
 .bnl-kpi-note{font-size:11.5px;color:var(--muted);margin-top:2px}
+/* single-line stat SUMMARY BAR — the helpline KPI strip (notes live in the
+   tooltip). Deliberately NOT pill-shaped: one flat divided container so it
+   reads as data, not as another row of tab buttons. */
+.statbar{display:flex;flex-wrap:wrap;align-items:stretch;background:linear-gradient(180deg,var(--card-top),var(--card));border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.stat{flex:1 1 auto;min-width:150px;display:inline-flex;align-items:center;justify-content:center;gap:8px;font:inherit;background:transparent;border:0;padding:9px 14px;cursor:pointer;transition:background .15s}
+.stat + .stat{border-left:1px solid var(--hair)}
+.stat:hover{background:var(--rowhover)}
+.stat:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--primary-light)}
+.stat .dot{width:8px;height:8px;border-radius:50%;background:var(--kc,var(--primary));flex:none}
+.stat .lbl{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.stat .val{font-size:15px;font-weight:800;color:var(--strong)}
+/* trailing 24h/7d/30d/All window switch inside the bar */
+.statper{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:2px;padding:0 10px;border-left:1px solid var(--hair);margin-left:auto}
+.statper button{border:0;background:transparent;font:inherit;font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--faint);padding:5px 8px;border-radius:7px;cursor:pointer;transition:color .15s,background .15s}
+.statper button:hover{color:var(--text)}
+.statper button.on{color:var(--secondary);background:var(--primary-soft)}
+.statper button:focus-visible{outline:none;box-shadow:0 0 0 2px var(--primary-light)}
 .bnl-flow{width:100%;height:190px;display:block;padding:0 14px 6px}
 .bnl-legend{display:flex;gap:16px;font-size:11.5px;color:var(--muted);padding:0 18px 14px;flex-wrap:wrap}
 .bnl-legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}

@@ -57,14 +57,15 @@ export default function ReferOut({ title, onPick, onClose }: {
         )}
         {Array.isArray(list) && !sel && (
           <>
-            <div className="bnl-sub" style={{ margin: '4px 0 10px' }}>
+            <div className="bnl-sub" style={{ margin: '4px 0 10px', fontSize: 13 }}>
               Pick where this caller should be referred — the script to read to them comes next.
             </div>
             {list.map((r) => (
               <button key={r.id} className="tbtn"
-                style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 6 }}
+                style={{ display: 'flex', justifyContent: 'flex-start', width: '100%', textAlign: 'left',
+                  marginBottom: 7, fontSize: 14, fontWeight: 600, color: 'var(--strong)', padding: '11px 16px' }}
                 onClick={() => setSelId(r.id)}>
-                {r.name}{r.phone ? <span className="bnl-sub"> · ☎ {r.phone}</span> : null}
+                {r.name}{r.phone ? <span className="bnl-sub" style={{ fontSize: 13.5 }}> · ☎ {r.phone}</span> : null}
               </button>
             ))}
             {list.length === 0 && (
@@ -82,7 +83,7 @@ export default function ReferOut({ title, onPick, onClose }: {
                 <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--strong)', margin: '6px 0' }}>
                   ☎ {sel.phone}</div>
               )}
-              <div style={{ fontSize: 13.5, whiteSpace: 'pre-wrap' }}>{sel.instructions}</div>
+              <div style={{ fontSize: 14, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{sel.instructions}</div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn primary" onClick={() => onPick(sel, true)}>
