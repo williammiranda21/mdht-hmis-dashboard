@@ -12,6 +12,7 @@ import { fetchPriorityRules } from '../../../../lib/priority-rules';
 import { featuresAt, inFeature, type GeoFC } from '../../../../lib/slippy';
 import { fetchCustomAreas } from '../../../../lib/custom-areas';
 import ReferOut, { type ReferralResource } from '../../../../components/ReferOut';
+import { CopyId } from '../../analytics/shared';
 import PinMap from '../../../../components/PinMap';
 
 // District boundary files, fetched once per session (same-origin static).
@@ -38,6 +39,13 @@ const isTollFree = (digits: string) => /^1?8(00|88|77|66|55|44|33)\d{7}$/.test(d
  *  these should ATTACH, not spawn a duplicate queue row */
 const STILL_OPEN = ['new', 'assigned', 'attempted', 'contacted', 'confirmed'];
 interface GeoHit { label: string; lat: number; lng: number }
+interface HmisCand {
+  pid: string; name: string; dob: string | null; score: number; why: string[];
+  bnl: { status: string | null; project: string | null; last_contact: string | null;
+    chronic?: boolean; veteran?: boolean;
+    enroll?: { open: boolean; project: string; entry: string | null;
+      exit?: string | null; dest?: string | null; more?: number } | null } | null;
+}
 
 /**
  * Call intake — built for an operator on the phone: one screen, tap-first,
@@ -62,6 +70,33 @@ export default function CallIntakeForm({ me }: { me: string }) {
   const [factors, setFactors] = useState<string[]>([]);
   // household-size follow-up — asked only when household = With children
   const [hhSize, setHhSize] = useState('');
+  // live HMIS glance (2026-09-22): as identity fields land, propose HMIS
+  // candidates (same scorer/gate as the queue's Find HMIS match) so the
+  // operator sees who this is BEFORE saving / referring / assigning.
+  // Suggest-only: linking is an explicit click, saved as matched_pid.
+  const [hmisCands, setHmisCands] = useState<HmisCand[] | null>(null);
+  const [linked, setLinked] = useState<HmisCand | null>(null);
+  // "None of these" hides the panel; any change to an identity field looks
+  // again — new info (a DOB, a corrected spelling) can surface the real match.
+  const [hmisDismissed, setHmisDismissed] = useState(false);
+  useEffect(() => {
+    setHmisDismissed(false);
+    const first = f.first_name.trim(), last = f.last_name.trim();
+    const dob = f.dob.trim(), ssn4 = /^\d{4}$/.test(f.ssn4) ? f.ssn4 : '';
+    if (!dob && !ssn4 && !(first && last)) { setHmisCands(null); return; }
+    const t = setTimeout(async () => {
+      try {
+        const qs = new URLSearchParams();
+        if (first) qs.set('first', first);
+        if (last) qs.set('last', last);
+        if (dob) qs.set('dob', dob);
+        if (ssn4) qs.set('ssn4', ssn4);
+        const r = await fetch(`/api/helpline/match?${qs.toString()}`);
+        if (r.ok) setHmisCands(((await r.json()).candidates ?? []) as HmisCand[]);
+      } catch { /* glance is best-effort — intake never blocks on it */ }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [f.first_name, f.last_name, f.dob, f.ssn4]);
   const [prior, setPrior] = useState<PriorCase[]>([]);
   const [geo, setGeo] = useState<GeoHit[] | 'loading' | null>(null);
   const [pin, setPin] = useState<GeoHit | null>(null);
@@ -374,6 +409,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
     if (pin) { row.lat = pin.lat; row.lng = pin.lng; }
     if (countyDist) row.county_district = countyDist;
     if (f.household === 'With children' && hhSize.trim()) row.household_size = Number(hhSize);
+    if (linked) row.matched_pid = linked.pid;   // operator-confirmed HMIS link
     if (refer?.terminal) {
       // SOP referral resolved the call — no outreach dispatch for this case.
       row.status = 'referred_out';
@@ -598,6 +634,92 @@ export default function CallIntakeForm({ me }: { me: string }) {
           </div>
         </div>
 
+        {linked ? (
+          <div style={{ background: 'var(--accent-light)', border: '1px solid var(--accent)',
+            borderRadius: 8, padding: '10px 14px', marginTop: 10, fontSize: 12.5 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <b style={{ color: 'var(--strong)' }}>🔗 About this client — {linked.name || 'HMIS record'}</b>
+              <button type="button" className="tbtn" onClick={() => setLinked(null)}>✕ Unlink</button>
+            </div>
+            <div style={{ marginTop: 4, color: 'var(--text)' }}>
+              {linked.dob && <>DOB {linked.dob} · </>}
+              HMIS: <b>{linked.bnl?.status ?? 'known record'}</b>
+              {linked.bnl?.last_contact && <> · last contact {linked.bnl.last_contact}</>}
+            </div>
+            <div style={{ marginTop: 3, display: 'flex', gap: 6, alignItems: 'baseline' }}>
+              <span className="bnl-sub">ID</span>
+              <CopyId id={linked.pid} />
+            </div>
+            {linked.bnl?.enroll ? (
+              <div style={{ marginTop: 3, color: 'var(--text)' }}>
+                {linked.bnl.enroll.open ? (
+                  <>Open enrollment: <b style={{ color: 'var(--strong)' }}>{linked.bnl.enroll.project}</b>
+                    {linked.bnl.enroll.entry && <> · since {linked.bnl.enroll.entry}</>}
+                    {(linked.bnl.enroll.more ?? 0) > 0 && <> · +{linked.bnl.enroll.more} more open</>}</>
+                ) : (
+                  <>Last enrollment: <b style={{ color: 'var(--strong)' }}>{linked.bnl.enroll.project}</b>
+                    {linked.bnl.enroll.entry && <> · {linked.bnl.enroll.entry}</>}
+                    {linked.bnl.enroll.exit && <> → exited {linked.bnl.enroll.exit}</>}
+                    {linked.bnl.enroll.dest && <> → {linked.bnl.enroll.dest}</>}</>
+                )}
+              </div>
+            ) : linked.bnl ? null : (
+              <div style={{ marginTop: 3, color: 'var(--strong)', fontWeight: 700 }}>
+                In HMIS: no recent homeless episode on record.
+              </div>
+            )}
+            {(linked.bnl?.chronic || linked.bnl?.veteran) && (
+              <div style={{ marginTop: 5, display: 'flex', gap: 6 }}>
+                {linked.bnl?.chronic && <span className="bnl-chip"
+                  style={{ background: 'var(--danger-light)', color: 'var(--danger)' }}>chronic</span>}
+                {linked.bnl?.veteran && <span className="bnl-chip"
+                  style={{ background: 'var(--info-light)', color: 'var(--info)' }}>veteran</span>}
+              </div>
+            )}
+            <div className="bnl-sub" style={{ marginTop: 4 }}>
+              Saves with the case as the confirmed HMIS link — the queue, verification,
+              and the BNL drawer all use it.
+            </div>
+          </div>
+        ) : hmisCands && hmisCands.length > 0 && !hmisDismissed ? (
+          <div style={{ border: '1px solid var(--border-strong)', borderRadius: 10,
+            padding: '10px 14px', marginTop: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em',
+              textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>
+              Possible HMIS matches — link only if it&rsquo;s the same person</div>
+            {hmisCands.map((m) => (
+              <div key={m.pid} style={{ display: 'flex', gap: 10, alignItems: 'center',
+                flexWrap: 'wrap', padding: '6px 0', borderTop: '1px solid var(--hair)', fontSize: 12.5 }}>
+                <b style={{ color: 'var(--strong)' }}>{m.name || '(no name)'}</b>
+                {m.dob && <span className="bnl-sub">DOB {m.dob}</span>}
+                <span className="bnl-sub">{m.score}% · {m.why.join(' · ')}</span>
+                {m.bnl && (
+                  <span className="bnl-sub">
+                    BNL: {m.bnl.status}{m.bnl.project ? ` · ${m.bnl.project}` : ''}
+                    {m.bnl.last_contact ? ` · seen ${m.bnl.last_contact}` : ''}</span>
+                )}
+                <span style={{ flex: 1 }} />
+                <button type="button" className="tbtn" onClick={() => setLinked(m)}>🔗 Link</button>
+              </div>
+            ))}
+            {new Set(hmisCands.map((m) => `${(m.name || '').toLowerCase()}|${m.dob ?? ''}`)).size
+              < hmisCands.length && (
+              <div className="bnl-sub" style={{ marginTop: 6, color: 'var(--warn)', fontWeight: 600 }}>
+                ⚠ Two records share the same name + DOB — likely duplicate HMIS records.
+                Link the one showing BNL info; the duplicate should be merged in WellSky.
+              </div>
+            )}
+            <button type="button" className="tbtn" style={{ marginTop: 8 }}
+              title="Hide these suggestions — the case saves unlinked; changing a name, DOB, or SSN-4 looks again"
+              onClick={() => setHmisDismissed(true)}>
+              ✕ None of these — close</button>
+          </div>
+        ) : hmisCands && (f.dob || /^\d{4}$/.test(f.ssn4)) ? (
+          <div className="bnl-sub" style={{ marginTop: 8 }}>
+            No HMIS match on these identifiers — likely new to the system.
+          </div>
+        ) : null}
+
         <L>Address or intersection — as exact as they can give</L>
         <div style={{ display: 'flex', gap: 8 }}>
           <input className="tinput" style={{ flex: 1 }} value={f.address} maxLength={160}
@@ -752,22 +874,27 @@ export default function CallIntakeForm({ me }: { me: string }) {
           </div>
         )}
 
-        {/* color-coded, equal-size actions (user directive 2026-08-20):
-            green = save, blue = save + refer, red = cancel (two-step, no
-            browser dialogs anywhere on this form) */}
+        {/* color-coded, equal-size actions (user directives 2026-08-20 colors,
+            2026-09-22 soft tint + ALL CAPS): green = save, blue = save +
+            refer, red = cancel (two-step, no browser dialogs on this form) */}
         <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button className="btn primary" disabled={busy} onClick={() => submit()}
-            style={{ background: 'var(--accent)', minWidth: 160 }}>
+          <button className="abtn" disabled={busy} onClick={() => submit()}
+            style={{ color: 'var(--accent)', borderColor: 'var(--accent)',
+              background: 'var(--accent-light)', minWidth: 160 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
             {busy ? 'Saving…' : assignNow && sug ? `Save + assign → ${sug.team.name}` : 'Save call'}
           </button>
-          <button className="btn primary" type="button" disabled={busy}
-            style={{ background: 'var(--info)', minWidth: 160 }}
+          <button className="abtn" type="button" disabled={busy}
+            style={{ color: 'var(--info)', borderColor: 'var(--info)',
+              background: 'var(--info-light)', minWidth: 160 }}
             title="SOP specialized referrals (prevention · veterans · DV · youth) and other-provider areas — shows the script to read to the caller, then saves the call"
             onClick={() => setReferOpen(true)}>
-            ↗ Save + refer out
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
+            Save + refer out
           </button>
-          <button className="btn primary" type="button" disabled={busy}
-            style={{ background: 'var(--danger)', minWidth: 160 }}
+          <button className="abtn" type="button" disabled={busy}
+            style={{ color: 'var(--danger)', borderColor: 'var(--danger)',
+              background: 'var(--danger-light)', minWidth: 160 }}
             title="Discard this call and return to triage — nothing is saved"
             onClick={() => {
               const touched = Object.values(f).some((v) => v.trim() !== '')
@@ -776,6 +903,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
               setArmCancel(true);
               setTimeout(() => setArmCancel(false), 4000);
             }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             {armCancel ? 'Discard? Click again' : 'Cancel call'}
           </button>
         </div>

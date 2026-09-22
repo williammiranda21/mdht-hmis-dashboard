@@ -239,7 +239,7 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
 
 /* table extras */
 .tools{display:flex;gap:8px}
-.tbtn{display:inline-flex;align-items:center;justify-content:center;gap:5px;vertical-align:middle;font:inherit;font-size:11.5px;font-weight:600;color:var(--muted);background:var(--card);border:1px solid var(--border-strong);border-radius:999px;padding:6px 12px;cursor:pointer;transition:color .15s,border-color .15s,background .15s}
+.tbtn{display:inline-flex;align-items:center;justify-content:center;gap:5px;vertical-align:middle;white-space:nowrap;font:inherit;font-size:11.5px;font-weight:600;color:var(--muted);background:var(--card);border:1px solid var(--border-strong);border-radius:999px;padding:6px 12px;cursor:pointer;transition:color .15s,border-color .15s,background .15s}
 .tbtn:hover{border-color:var(--primary);color:var(--primary)}
 .tbtn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--primary-light)}
 /* granted-access / active-toggle state — green so admins see what a user can reach */
@@ -340,7 +340,7 @@ table.hm{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
 :root[data-theme="dark"] input[type="date"],:root[data-theme="dark"] input[type="datetime-local"]{color-scheme:dark}
 /* connected view-preset segment (County | Miami metro | City core) */
 .vseg{display:inline-flex;background:var(--card);border:1px solid var(--border-strong);border-radius:10px;overflow:hidden;height:36px}
-.vseg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:600;padding:0 14px;cursor:pointer;transition:color .15s,background .15s}
+.vseg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:600;padding:0 14px;cursor:pointer;white-space:nowrap;flex:none;transition:color .15s,background .15s}
 .vseg button+button{border-left:1px solid var(--hair)}
 .vseg button:hover{color:var(--text)}
 .vseg button.on{background:var(--primary-soft);color:var(--primary)}
@@ -352,6 +352,12 @@ table.hm{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
 .lchip.on{color:var(--text)}
 .lchip .sw{width:16px;border-radius:2px;flex:none}
 .lchip .lst{font-weight:500;color:var(--faint);font-size:11px}
+/* soft color-coded action pills (intake Save / Save+refer / Cancel — user
+   directive 2026-09-22: tinted + ALL CAPS, not solid blocks) */
+.abtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font:inherit;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:9px 18px;cursor:pointer;border:1px solid;background:transparent;transition:filter .15s}
+.abtn:hover{filter:brightness(1.15)}
+.abtn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--primary-light)}
+.abtn:disabled{opacity:.55;cursor:default}
 .drawbtn{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;font-weight:600;color:var(--info);background:transparent;border:1px dashed var(--info);border-radius:999px;padding:8px 14px;cursor:pointer;opacity:.9}
 .drawbtn:hover{background:var(--info-light);opacity:1}
 /* joined zoom group + on-map status legend */
@@ -429,18 +435,18 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 /* single-line stat SUMMARY BAR — the helpline KPI strip (notes live in the
    tooltip). Deliberately NOT pill-shaped: one flat divided container so it
    reads as data, not as another row of tab buttons. */
-.statbar{display:flex;flex-wrap:wrap;align-items:stretch;background:linear-gradient(180deg,var(--card-top),var(--card));border:1px solid var(--border);border-radius:10px;overflow:hidden}
-.stat{flex:1 1 auto;min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:7px;font:inherit;background:transparent;border:0;padding:9px 11px;cursor:pointer;transition:background .15s}
+/* single row ALWAYS (user directive 9/22): no wrapping — labels ellipsize
+   under pressure instead of the switcher dropping to a second line */
+.statbar{display:flex;flex-wrap:nowrap;align-items:stretch;background:linear-gradient(180deg,var(--card-top),var(--card));border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.stat{flex:1 1 auto;min-width:0;display:inline-flex;align-items:center;justify-content:center;gap:7px;font:inherit;background:transparent;border:0;padding:9px 11px;cursor:pointer;transition:background .15s}
 .stat + .stat{border-left:1px solid var(--hair)}
 .stat:hover{background:var(--rowhover)}
 .stat:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--primary-light)}
 .stat .dot{width:8px;height:8px;border-radius:50%;background:var(--kc,var(--primary));flex:none}
-.stat .lbl{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.stat .lbl{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stat .val{font-size:15px;font-weight:800;color:var(--strong)}
 /* trailing 24h/7d/30d/All window switch inside the bar */
-/* fills its whole row when the bar wraps, so a wrap reads as a second strip
-   rather than dead space with a floating control */
-.statper{flex:1 0 auto;display:inline-flex;align-items:center;justify-content:flex-end;gap:2px;padding:2px 10px;border-left:1px solid var(--hair);margin-left:auto}
+.statper{flex:none;display:inline-flex;align-items:center;gap:1px;padding:0 8px;border-left:1px solid var(--hair);margin-left:auto}
 .statper button{border:0;background:transparent;font:inherit;font-size:10.5px;font-weight:700;letter-spacing:.04em;color:var(--faint);padding:5px 8px;border-radius:7px;cursor:pointer;transition:color .15s,background .15s}
 .statper button:hover{color:var(--text)}
 .statper button.on{color:var(--secondary);background:var(--primary-soft)}

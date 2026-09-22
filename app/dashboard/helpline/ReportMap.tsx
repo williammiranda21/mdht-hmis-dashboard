@@ -38,12 +38,13 @@ const LAYERS = [
 ] as const;
 type LayerKey = (typeof LAYERS)[number]['key'];
 
-// Dot colors are a user directive (2026-08-20): red = needs action, green =
-// being worked, blue = confirmed. Same tokens as the status chips/KPIs.
+// Dot colors are a user directive (2026-09-22, supersedes 8/20): red = needs
+// action, BLUE = being worked, GREEN = confirmed. Same tokens as the status
+// chips/KPIs — change all together.
 const DOT: Record<string, { c: string; label: string }> = {
   new: { c: 'var(--danger)', label: 'awaiting triage' },
-  open: { c: 'var(--accent)', label: 'with outreach' },
-  confirmed: { c: 'var(--info)', label: 'confirmed homeless' },
+  open: { c: 'var(--info)', label: 'with outreach' },
+  confirmed: { c: 'var(--accent)', label: 'confirmed homeless' },
   closed: { c: 'var(--faint)', label: 'closed / other' },
 };
 function dotGroup(c: HlCase): keyof typeof DOT {
@@ -99,6 +100,9 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
   const [geo, setGeo] = useState<Record<LayerKey, GeoFC | 'missing' | 'loading' | undefined>>(
     { districts: undefined, county: undefined, muni: undefined, zipcodes: undefined, tracts: undefined });
   const [sel, setSel] = useState<{ key: LayerKey | 'custom'; idx: number } | null>(null);
+  // date window — same Today/Week/Month/All/Custom pattern as the stat bar
+  // and the reporting panel, so all three levels read the same way
+  const [dPeriod, setDPeriod] = useState<'day' | 'week' | 'month' | 'all' | 'custom'>('all');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
 
@@ -258,11 +262,23 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
   const frame = frameFor(center.lat, center.lng, z, W, H);
   const tiles = tilesFor(center.lat, center.lng, z, W, H);
 
-  // date-range filter (created_at date, inclusive both ends)
-  const shown = useMemo(() => cases.filter((c) => {
-    const d = c.created_at.slice(0, 10);
-    return (!from || d >= from) && (!to || d <= to);
-  }), [cases, from, to]);
+  // date-window filter (created_at; calendar presets, custom inclusive both ends)
+  const shown = useMemo(() => {
+    const now = new Date();
+    const lo = dPeriod === 'day'
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+      : dPeriod === 'week'
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7)).getTime()
+      : dPeriod === 'month'
+      ? new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+      : dPeriod === 'custom' && from ? new Date(`${from}T00:00:00`).getTime()
+      : 0;
+    const hi = dPeriod === 'custom' && to ? new Date(`${to}T23:59:59.999`).getTime() : Infinity;
+    return cases.filter((c) => {
+      const t = new Date(c.created_at).getTime();
+      return t >= lo && t <= hi;
+    });
+  }, [cases, dPeriod, from, to]);
   const dots = shown.filter((c) => c.lat != null && c.lng != null);
   const noGeo = shown.length - dots.length;
 
@@ -307,22 +323,34 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
             {' '}· drag to pan · scroll or double-click to zoom · click a boundary for its call count
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+          justifyContent: 'flex-end', marginLeft: 'auto' }}>
+          <span className="vseg" role="group" aria-label="Map date window">
+            {([['day', 'Today'], ['week', 'Week'], ['month', 'Month'], ['all', 'All'],
+               ['custom', 'Custom']] as const).map(([k, lbl]) => (
+              <button key={k} type="button" className={dPeriod === k ? 'on' : undefined}
+                onClick={() => setDPeriod(k)}>{lbl}</button>
+            ))}
+          </span>
+          {dPeriod === 'custom' && (
           <span className="dgroup">
             <button type="button" className="dcal" aria-label="Pick a date range"
               onClick={() => fromRef.current?.showPicker?.()}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
             </button>
             <input ref={fromRef} type="date" value={from}
+              onClick={(e) => e.currentTarget.showPicker?.()}
               onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
             <span className="dsep">→</span>
             <input type="date" value={to}
+              onClick={(e) => e.currentTarget.showPicker?.()}
               onChange={(e) => setTo(e.target.value)} aria-label="To date" />
             {(from || to) && (
               <button type="button" className="dclr" title="Clear dates"
                 onClick={() => { setFrom(''); setTo(''); }}>✕</button>
             )}
           </span>
+          )}
           <span className="vseg" role="group" aria-label="Map view presets">
             {(Object.keys(VIEWS) as ViewKey[]).map((k) => (
               <button key={k} type="button" className={view === k ? 'on' : undefined}
@@ -526,7 +554,7 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
               </div>
               <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--strong)', margin: '2px 0' }}>
                 {selCounts.total} <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted)' }}>
-                  call{selCounts.total === 1 ? '' : 's'}{(from || to) ? ' in range' : ''}</span>
+                  call{selCounts.total === 1 ? '' : 's'}{dPeriod !== 'all' ? ' in range' : ''}</span>
               </div>
               {Object.entries(DOT).map(([k, d]) => (selCounts.by[k] ?? 0) > 0 && (
                 <div key={k} className="bnl-sub" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

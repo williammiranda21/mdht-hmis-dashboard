@@ -90,14 +90,15 @@ function bandColor(band: string): string {
   return band === 'HIGH' ? 'var(--danger)' : band === 'MED' ? 'var(--warn)' : 'var(--faint)';
 }
 
-// One color language with the call map (user directive 2026-08-20): red =
-// awaiting action, green = being worked by outreach, blue = confirmed.
+// One color language with the call map (user directive 2026-09-22, supersedes
+// 8/20): red = awaiting action, BLUE = being worked by outreach,
+// GREEN = confirmed.
 const STATUS_CHIP: Record<CaseStatus, [string, string, string]> = {
   new: ['new', 'var(--danger-light)', 'var(--danger)'],
-  assigned: ['assigned', 'var(--accent-light)', 'var(--accent)'],
-  attempted: ['attempted', 'var(--accent-light)', 'var(--accent)'],
-  contacted: ['contacted', 'var(--accent-light)', 'var(--accent)'],
-  confirmed: ['confirmed homeless', 'var(--info-light)', 'var(--info)'],
+  assigned: ['assigned', 'var(--info-light)', 'var(--info)'],
+  attempted: ['attempted', 'var(--info-light)', 'var(--info)'],
+  contacted: ['contacted', 'var(--info-light)', 'var(--info)'],
+  confirmed: ['confirmed homeless', 'var(--accent-light)', 'var(--accent)'],
   declined: ['declined help', 'var(--track)', 'var(--muted)'],
   no_locate: ['could not locate', 'var(--track)', 'var(--muted)'],
   closed: ['closed', 'var(--track)', 'var(--muted)'],
@@ -658,9 +659,9 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
         {rules.slaHours != null && kpi('Past target',
           sTriage.filter((c) => hoursSince(c.created_at) >= (rules.slaHours as number)).length,
           `awaiting triage past the ${rules.slaHours}h response target${scopeNote}`, 'var(--danger)', 'queue')}
-        {kpi('With outreach', sWorking.length, 'assigned · attempted · contacted' + scopeNote, 'var(--accent)', 'board')}
+        {kpi('With outreach', sWorking.length, 'assigned · attempted · contacted' + scopeNote, 'var(--info)', 'board')}
         {kpi('Confirmed homeless', sConfirmed.length,
-          `${fmtInt(sVerified.length)} verified enrolled · ${fmtInt(sUnverified.length)} pending${scopeNote}`, 'var(--info)', 'cases')}
+          `${fmtInt(sVerified.length)} verified enrolled · ${fmtInt(sUnverified.length)} pending${scopeNote}`, 'var(--accent)', 'cases')}
         {kpi('Enrollment gap', sUnverified.length,
           (sUnverified.length ? 'confirmed but no HMIS enrollment yet' : 'everyone confirmed is enrolled') + scopeNote, 'var(--danger)', 'cases')}
         {kpi('Referred out', sReferred.length,
@@ -681,7 +682,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
         <div className="seg" role="tablist" aria-label="Helpline sections">
           {([
             { k: 'queue' as HlTab, lbl: 'Call queue', n: triage.length, bg: 'var(--danger-light)', fg: 'var(--danger)' },
-            { k: 'board' as HlTab, lbl: 'Team board', n: working.length, bg: 'var(--accent-light)', fg: 'var(--accent)' },
+            { k: 'board' as HlTab, lbl: 'Team board', n: working.length, bg: 'var(--info-light)', fg: 'var(--info)' },
             { k: 'cases' as HlTab, lbl: 'All cases', n: 0, bg: '', fg: '' },
             { k: 'map' as HlTab, lbl: 'Map & reporting', n: 0, bg: '', fg: '' },
             ...(isAdmin ? [{ k: 'admin' as HlTab, lbl: 'Settings', n: 0, bg: '', fg: '' }] : []),
@@ -1055,6 +1056,11 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
 
       {shownTab === 'admin' && isAdmin && (
         <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <Link href="/field" className="tbtn"
+              title="Mobile app for outreach workers — share this link with field staff">
+              📱 Field app — share with outreach staff</Link>
+          </div>
           <PriorityRulesAdmin me={me} rules={rules}
             onSaved={() => { invalidatePriorityRules(); fetchPriorityRules(true).then(setRules); }} />
           <TeamAdmin teams={teams} busy={busy}
@@ -1313,6 +1319,130 @@ function Districts({ cases }: { cases: HlCase[] }) {
       {table('Cases by County Commission District', dist, true)}
       {areas.length > 0 && table('Top areas / municipalities', areas, false)}
     </>
+  );
+}
+
+/** Breakdown explorer — one cross-tab answers the granular questions:
+ *  "which district refers most to what resource", "20 calls from District 5,
+ *  10% seniors". Rows = a case dimension, split = a second one; cells show
+ *  n and % of that row's calls. Factors are tap-all-that-apply, so a case
+ *  can appear in several factor columns. */
+type BdRow = 'district' | 'area' | 'team' | 'household' | 'sleeping' | 'band' | 'status' | 'referred';
+type BdCol = 'none' | 'referred' | 'factor' | 'household' | 'sleeping' | 'band' | 'status';
+const BD_ROWS: [BdRow, string][] = [
+  ['district', 'County district'], ['area', 'Area / municipality'], ['team', 'Team'],
+  ['household', 'Household'], ['sleeping', 'Sleeping situation'], ['band', 'Priority band'],
+  ['status', 'Status'], ['referred', 'Referred to'],
+];
+const BD_COLS: [BdCol, string][] = [
+  ['referred', 'Referred to'], ['factor', 'Factor'], ['household', 'Household'],
+  ['sleeping', 'Sleeping situation'], ['band', 'Priority band'], ['status', 'Status'],
+  ['none', '— counts only —'],
+];
+function Breakdown({ cases, teams, rules }: { cases: HlCase[]; teams: Team[]; rules: PriorityRules }) {
+  const [row, setRow] = useState<BdRow>('district');
+  const [col, setCol] = useState<BdCol>('referred');
+  if (!cases.length) return null;
+  const teamName = new Map(teams.map((t) => [t.id, t.name]));
+  const rowOf = (c: HlCase): string => {
+    switch (row) {
+      case 'district': return c.county_district || '(no pin)';
+      case 'area': return c.area || c.county_district || '(none)';
+      case 'team': return c.team_id != null ? (teamName.get(c.team_id) ?? `Team ${c.team_id}`) : '(unassigned)';
+      case 'household': return c.household || '(not asked)';
+      case 'sleeping': return c.sleeping || '(not asked)';
+      case 'band': return priorityBand(c.priority ?? 0, rules);
+      case 'status': return STATUS_CHIP[c.status]?.[0] ?? c.status;
+      case 'referred': return c.referred_to || (c.status === 'referred_out' ? '(unspecified)' : '(not referred)');
+    }
+  };
+  const colsOf = (c: HlCase): string[] => {
+    switch (col) {
+      case 'none': return [];
+      case 'referred': return c.referred_to ? [c.referred_to]
+        : c.status === 'referred_out' ? ['(unspecified)'] : [];
+      case 'factor': return c.factors ?? [];
+      case 'household': return c.household ? [c.household] : [];
+      case 'sleeping': return c.sleeping ? [c.sleeping] : [];
+      case 'band': return [priorityBand(c.priority ?? 0, rules)];
+      case 'status': return [STATUS_CHIP[c.status]?.[0] ?? c.status];
+    }
+  };
+  const rowTotals = new Map<string, number>();
+  const cells = new Map<string, Map<string, number>>();
+  const colTotals = new Map<string, number>();
+  for (const c of cases) {
+    const r = rowOf(c);
+    rowTotals.set(r, (rowTotals.get(r) ?? 0) + 1);
+    for (const k of colsOf(c)) {
+      colTotals.set(k, (colTotals.get(k) ?? 0) + 1);
+      const m = cells.get(r) ?? new Map<string, number>();
+      m.set(k, (m.get(k) ?? 0) + 1);
+      cells.set(r, m);
+    }
+  }
+  const rowList = [...rowTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14);
+  const colList = [...colTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k]) => k);
+  const shortCol = (k: string) => (k.length > 26 ? `${k.slice(0, 24)}…` : k);
+  const exportCsv = () => {
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const head = [BD_ROWS.find(([k]) => k === row)![1], 'cases', 'pct_of_all', ...colList];
+    const body = rowList.map(([r, n]) => [r, n, `${Math.round((n / cases.length) * 100)}%`,
+      ...colList.map((k) => cells.get(r)?.get(k) ?? 0)].map(esc).join(','));
+    const blob = new Blob(['﻿' + [head.join(','), ...body].join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `helpline_breakdown_${row}_by_${col}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  return (
+    <ReportCard span title={
+      <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', textTransform: 'none' }}>
+        <span style={{ textTransform: 'uppercase' }}>🔍 Breakdown —</span>
+        <select className="fselect" value={row} style={{ minWidth: 0, padding: '4px 24px 4px 9px', fontSize: 12 }}
+          onChange={(e) => setRow(e.target.value as BdRow)}>
+          {BD_ROWS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+        <span style={{ textTransform: 'uppercase' }}>split by</span>
+        <select className="fselect" value={col} style={{ minWidth: 0, padding: '4px 24px 4px 9px', fontSize: 12 }}
+          onChange={(e) => setCol(e.target.value as BdCol)}>
+          {BD_COLS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+        <button className="tbtn" style={{ marginLeft: 4 }} onClick={exportCsv}>⬇ CSV</button>
+      </span>
+    }>
+      <div className="scroll"><table className="bnl-table">
+        <thead><tr>
+          <th>{BD_ROWS.find(([k]) => k === row)![1]}</th>
+          <th className="num">Cases</th><th className="num">% of all</th>
+          {colList.map((k) => <th key={k} className="num" title={k}>{shortCol(k)}</th>)}
+        </tr></thead>
+        <tbody>
+          {rowList.map(([r, n]) => (
+            <tr key={r} style={{ cursor: 'default' }}>
+              <td style={r.startsWith('(') ? { color: 'var(--faint)' } : undefined}>{r}</td>
+              <td className="num"><b>{fmtInt(n)}</b></td>
+              <td className="num"><span className="bnl-sub">{pctOf(n, cases.length)}</span></td>
+              {colList.map((k) => {
+                const v = cells.get(r)?.get(k) ?? 0;
+                return (
+                  <td key={k} className="num">
+                    {v ? <>{fmtInt(v)} <span className="bnl-sub">· {pctOf(v, n)}</span></>
+                      : <span className="bnl-sub">—</span>}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table></div>
+      <div className="bnl-sub" style={{ marginTop: 6 }}>
+        Cell % = share of that row&rsquo;s calls — &ldquo;20 calls from County District 5 · 2 (10%) with the
+        60+ factor&rdquo;.{col === 'factor' && ' Factors are tap-all-that-apply, so one call can land in several columns.'}
+        {' '}Follows the window above; top 14 rows and 8 columns shown, full pivot in the CSV.
+      </div>
+    </ReportCard>
   );
 }
 
@@ -1654,6 +1784,190 @@ function FamilyStats({ cases }: { cases: HlCase[] }) {
   );
 }
 
+/** SLA attainment — % of calls assigned within the response target + weekly
+ *  trend. The target itself is admin-set (Settings → Priority rules). */
+function SlaCard({ cases, rules }: { cases: HlCase[]; rules: PriorityRules }) {
+  if (rules.slaHours == null) {
+    return (
+      <ReportCard title="Response target — assignment SLA">
+        <div className="bnl-sub">No response target set — an admin can set SLA hours under
+          Settings → Priority rules, and this card will score every call against it.</div>
+      </ReportCard>
+    );
+  }
+  const sla = rules.slaHours as number;
+  const hrs = (c: HlCase) =>
+    (new Date(c.assigned_at!).getTime() - new Date(c.created_at).getTime()) / 3_600_000;
+  const assigned = cases.filter((c) => c.assigned_at && hrs(c) >= 0);
+  const within = assigned.filter((c) => hrs(c) <= sla);
+  const breaching = cases.filter((c) => c.status === 'new' && hoursSince(c.created_at) >= sla);
+  if (!assigned.length && !breaching.length) return null;
+  const by = new Map<number, { n: number; ok: number }>();
+  for (const c of assigned) {
+    const d = new Date(c.created_at);
+    const k = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)).getTime();
+    const e = by.get(k) ?? { n: 0, ok: 0 };
+    e.n += 1;
+    if (hrs(c) <= sla) e.ok += 1;
+    by.set(k, e);
+  }
+  const weeks = [...by.entries()].sort((a, b) => a[0] - b[0]).slice(-8);
+  const rate = assigned.length ? within.length / assigned.length : 0;
+  return (
+    <ReportCard title={`Response target — assigned within ${sla}h`}>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 8 }}>
+        <span style={{ fontSize: 24, fontWeight: 800,
+          color: rate >= 0.8 ? 'var(--accent)' : rate >= 0.5 ? 'var(--warn)' : 'var(--danger)' }}>
+          {pctOf(within.length, assigned.length)}</span>
+        <span className="bnl-sub">{fmtInt(within.length)} of {fmtInt(assigned.length)} assigned within target</span>
+        {breaching.length > 0 && (
+          <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>
+            ⚑ {fmtInt(breaching.length)} in the queue past it right now</span>
+        )}
+      </div>
+      {weeks.length >= 2 && (
+        <div style={{ display: 'grid', gap: 3, maxWidth: 640 }}>
+          {weeks.map(([k, w]) => (
+            <div key={k} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
+              <span style={{ width: 210, color: 'var(--text)', flex: 'none' }}>
+                week of {new Date(k).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+              <div style={{ flex: 1, height: 11, background: 'var(--track)', borderRadius: 3 }}>
+                <div style={{ width: `${(w.ok / w.n) * 100}%`, height: '100%',
+                  background: 'var(--accent)', borderRadius: 3, minWidth: w.ok ? 2 : 0 }} />
+              </div>
+              <b style={{ width: 52, textAlign: 'right' }}>{pctOf(w.ok, w.n)}</b>
+              <span className="bnl-sub" style={{ width: 66 }}>n={fmtInt(w.n)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="bnl-sub" style={{ marginTop: 5 }}>
+        Counted call received → team assignment; calls never assigned aren&rsquo;t scored until they are.
+      </div>
+    </ReportCard>
+  );
+}
+
+/** Priority QA — is the scoring real? HIGH-band calls should reach a team
+ *  faster than LOW; if not, the queue is being worked out of order. */
+function BandQa({ cases, rules }: { cases: HlCase[]; rules: PriorityRules }) {
+  if (!cases.length) return null;
+  const fmtH = (h: number | null) =>
+    (h == null ? '—' : h < 1 ? `${Math.round(h * 60)}m` : `${h.toFixed(1)}h`);
+  const rows = (['HIGH', 'MED', 'LOW'] as const).map((b) => {
+    const list = cases.filter((c) => priorityBand(c.priority ?? 0, rules) === b);
+    const asg = list.filter((c) => c.assigned_at)
+      .map((c) => (new Date(c.assigned_at!).getTime() - new Date(c.created_at).getTime()) / 3_600_000)
+      .filter((h) => h >= 0);
+    const contacted = list.filter((c) => (c.contacts ?? 0) > 0 || c.confirmed_at
+      || c.verified_entry || ['contacted', 'confirmed'].includes(c.status)).length;
+    return { b, n: list.length, med: median(asg), contacted };
+  }).filter((r) => r.n > 0);
+  if (rows.length < 2) return null;
+  const hi = rows[0];
+  const lo = rows[rows.length - 1];
+  const verdict = hi.b === 'HIGH' && hi.med != null && lo.med != null
+    ? (hi.med <= lo.med
+      ? `HIGH calls reach a team ${fmtH(lo.med - hi.med)} faster than ${lo.b} — the scoring is doing its job.`
+      : `⚠ HIGH calls are NOT moving faster than ${lo.b} — the queue is being worked out of priority order.`)
+    : null;
+  return (
+    <ReportCard title="Priority check — do HIGH calls move faster?">
+      <table className="bnl-table" style={{ maxWidth: 560 }}>
+        <thead><tr><th>Band</th><th className="num">Cases</th>
+          <th className="num">Median call → assigned</th><th className="num">Contacted</th></tr></thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.b} style={{ cursor: 'default' }}>
+              <td><b style={{ color: bandColor(r.b) }}>{r.b}</b></td>
+              <td className="num">{fmtInt(r.n)}</td>
+              <td className="num">{fmtH(r.med)}</td>
+              <td className="num">{pctOf(r.contacted, r.n)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {verdict && <div className="bnl-sub" style={{ marginTop: 6 }}>{verdict}</div>}
+    </ReportCard>
+  );
+}
+
+/** Refer-out bounce — diverted callers who came back as a NEW case (same
+ *  phone, last-7-digit match — the attachToCase convention). High bounce =
+ *  that referral door isn't actually holding. */
+function ReferBounce({ cases, pool }: { cases: HlCase[]; pool: HlCase[] }) {
+  const ro = cases.filter((c) => c.status === 'referred_out');
+  if (!ro.length) return null;
+  const ph = (c: HlCase) => {
+    const p = (c.phone_callback || c.phone_line || '').replace(/\D/g, '');
+    return p.length >= 7 ? p.slice(-7) : null;
+  };
+  const trackable = ro.filter((c) => ph(c));
+  const bounced = (c: HlCase, days: number) => {
+    const p = ph(c);
+    if (!p) return false;
+    const t0 = new Date(c.created_at).getTime();
+    return pool.some((o) => o.id !== c.id && ph(o) === p
+      && new Date(o.created_at).getTime() > t0
+      && new Date(o.created_at).getTime() <= t0 + days * 86_400_000);
+  };
+  const b30 = trackable.filter((c) => bounced(c, 30));
+  const b60 = trackable.filter((c) => bounced(c, 60));
+  return (
+    <ReportCard title="↩ Referral bounce — diverted callers who came back">
+      <div style={{ display: 'grid', gap: 3, maxWidth: 640 }}>
+        <StatRow label="Referred out, trackable by phone" n={trackable.length} of={ro.length}
+          color="var(--secondary)" sub={`of ${fmtInt(ro.length)} referred`} />
+        <StatRow label="Back as a new case ≤ 30d" n={b30.length} of={trackable.length}
+          color="var(--warn)" sub={pctOf(b30.length, trackable.length)} />
+        <StatRow label="Back as a new case ≤ 60d" n={b60.length} of={trackable.length}
+          color="var(--danger)" sub={pctOf(b60.length, trackable.length)} />
+      </div>
+      <div className="bnl-sub" style={{ marginTop: 5 }}>
+        Same phone reappearing as a NEW case after the referral — repeat calls that
+        joined the original case don&rsquo;t count. {ro.length - trackable.length > 0 &&
+          `${fmtInt(ro.length - trackable.length)} referral${ro.length - trackable.length === 1 ? '' : 's'}
+          had no phone and can't be tracked.`}
+      </div>
+    </ReportCard>
+  );
+}
+
+/** Tries-to-reach funnel — attempts before the FIRST contact, from the
+ *  per-try event log; calibrates the 3-strike rule. */
+function TriesFunnel({ cases, events }: {
+  cases: HlCase[]; events: Record<number, { at: string; kind: string }[]>;
+}) {
+  const tracked = cases.filter((c) => (events[c.id] ?? []).length > 0);
+  if (!tracked.length) return null;
+  let first = 0, second = 0, third = 0;
+  const unreached: HlCase[] = [];
+  for (const c of tracked) {
+    const i = events[c.id].findIndex((e) => e.kind === 'contact');
+    if (i < 0) { unreached.push(c); continue; }
+    if (i === 0) first += 1;
+    else if (i === 1) second += 1;
+    else third += 1;
+  }
+  const noLocate = unreached.filter((c) => c.status === 'no_locate').length;
+  const stillTrying = unreached.filter((c) => OPEN_STATUSES.includes(c.status)).length;
+  return (
+    <ReportCard title="Tries to reach someone — the 3-strike picture">
+      <div style={{ display: 'grid', gap: 3, maxWidth: 640 }}>
+        <StatRow label="Reached on the 1st try" n={first} of={tracked.length} />
+        <StatRow label="Reached on the 2nd try" n={second} of={tracked.length} color="var(--info)" />
+        <StatRow label="Reached on the 3rd+ try" n={third} of={tracked.length} color="var(--warn)" />
+        <StatRow label="Never reached — closed no-locate" n={noLocate} of={tracked.length} color="var(--danger)" />
+        <StatRow label="Never reached — still trying" n={stillTrying} of={tracked.length} color="var(--faint)" />
+      </div>
+      <div className="bnl-sub" style={{ marginTop: 5 }}>
+        Only cases with per-try tracking (2026-08-19 onward). Three failed tries
+        close a case as could-not-locate — the last two rows are that rule in motion.
+      </div>
+    </ReportCard>
+  );
+}
+
 /**
  * Per-team performance table (user ask 2026-08-19): assigned / open /
  * confirmed / verified-enrolled / no-locate / declined, plus median hours
@@ -1669,15 +1983,44 @@ function Reporting({ cases: allCases, teams, events, callsByCase = {}, callLog =
 }) {
   // One period filter feeds EVERY section below (cases by created_at, calls
   // by received_at) so the funnel, heat grid, districts, factors, team table
-  // and refer-outs always describe the same window.
-  const [period, setPeriod] = useState<'all' | '30' | '90'>('all');
-  const cutoff = period === 'all' ? 0 : Date.now() - Number(period) * 86_400_000;
-  const cases = useMemo(() => (cutoff
-    ? allCases.filter((c) => new Date(c.created_at).getTime() >= cutoff) : allCases),
-    [allCases, cutoff]);
-  const calls = useMemo(() => (cutoff
-    ? callLog.filter((e) => new Date(e.at).getTime() >= cutoff) : callLog),
-    [callLog, cutoff]);
+  // and refer-outs always describe the same window. Calendar presets + a
+  // custom from→to range (user ask 2026-09-22).
+  const [period, setPeriod] = useState<'day' | 'week' | 'month' | 'all' | 'custom'>('all');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const win = useMemo(() => {
+    const now = new Date();
+    if (period === 'day') {
+      return { lo: new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime(), hi: Infinity };
+    }
+    if (period === 'week') {
+      return { lo: new Date(now.getFullYear(), now.getMonth(),
+        now.getDate() - ((now.getDay() + 6) % 7)).getTime(), hi: Infinity };
+    }
+    if (period === 'month') {
+      return { lo: new Date(now.getFullYear(), now.getMonth(), 1).getTime(), hi: Infinity };
+    }
+    if (period === 'custom') {
+      return {
+        lo: from ? new Date(`${from}T00:00:00`).getTime() : 0,
+        hi: to ? new Date(`${to}T23:59:59.999`).getTime() : Infinity,
+      };
+    }
+    return { lo: 0, hi: Infinity };
+  }, [period, from, to]);
+  const cases = useMemo(() => allCases.filter((c) => {
+    const t = new Date(c.created_at).getTime();
+    return t >= win.lo && t <= win.hi;
+  }), [allCases, win]);
+  const calls = useMemo(() => callLog.filter((e) => {
+    const t = new Date(e.at).getTime();
+    return t >= win.lo && t <= win.hi;
+  }), [callLog, win]);
+  const winLabel = period === 'all' ? `Latest ${fmtInt(cases.length)} cases`
+    : period === 'day' ? `${fmtInt(cases.length)} cases opened today`
+    : period === 'week' ? `${fmtInt(cases.length)} cases opened this week`
+    : period === 'month' ? `${fmtInt(cases.length)} cases opened this month`
+    : `${fmtInt(cases.length)} cases ${from || '…'} → ${to || 'today'}`;
   // Calls in the window; falls back to per-case counts for sessions loaded
   // before timestamps rode along.
   const callsN = calls.length
@@ -1747,34 +2090,55 @@ function Reporting({ cases: allCases, teams, events, callsByCase = {}, callLog =
       <div className="panel-h">
         <div>
           <h3>Helpline reporting</h3>
-          <div className="meta">{period === 'all' ? `Latest ${fmtInt(cases.length)} cases` :
-            `${fmtInt(cases.length)} cases opened in the last ${period} days`} · confirmed →
+          <div className="meta">{winLabel} · confirmed →
             enrolled is the promise; every outcome verified against HMIS data</div>
         </div>
-        <select className="tinput" value={period} style={{ width: 130, padding: '5px 8px' }}
-          onChange={(e) => setPeriod(e.target.value as 'all' | '30' | '90')}>
-          <option value="all">All loaded</option>
-          <option value="30">Last 30 days</option>
-          <option value="90">Last 90 days</option>
-        </select>
-        <Link href="/field" className="tbtn"
-          title="Mobile app for outreach workers — share this link with field staff">📱 Field app</Link>
-        <Link href="/dashboard/helpline/report" className="tbtn"
-          title="Board-ready monthly report — print or save as PDF">🖨 Monthly report</Link>
-        <button className="tbtn" onClick={downloadCsv}>⬇ CSV</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+          justifyContent: 'flex-end', minWidth: 0 }}>
+          <span className="vseg" role="group" aria-label="Reporting window">
+            {([['day', 'Today'], ['week', 'Week'], ['month', 'Month'], ['all', 'All'],
+               ['custom', 'Custom']] as const).map(([k, lbl]) => (
+              <button key={k} type="button" className={period === k ? 'on' : undefined}
+                onClick={() => setPeriod(k)}>{lbl}</button>
+            ))}
+          </span>
+          {period === 'custom' && (
+            <span className="dgroup">
+              <input type="date" value={from} aria-label="Report from date"
+                onClick={(e) => e.currentTarget.showPicker?.()}
+                onChange={(e) => setFrom(e.target.value)} />
+              <span className="dsep">→</span>
+              <input type="date" value={to} aria-label="Report to date"
+                onClick={(e) => e.currentTarget.showPicker?.()}
+                onChange={(e) => setTo(e.target.value)} />
+              {(from || to) && (
+                <button type="button" className="dclr" title="Clear dates"
+                  onClick={() => { setFrom(''); setTo(''); }}>✕</button>
+              )}
+            </span>
+          )}
+          <Link href="/dashboard/helpline/report" className="tbtn"
+            title="Board-ready monthly report — print or save as PDF">🖨 Monthly report</Link>
+          <button className="tbtn" onClick={downloadCsv}>⬇ CSV</button>
+        </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
         gap: 14, padding: '4px 18px 16px' }}>
       <Funnel cases={cases} callsN={callsN} />
       <WeeklyTrend cases={cases} />
+      <SlaCard cases={cases} rules={rules} />
+      <BandQa cases={cases} rules={rules} />
       <DemandHeat calls={calls} />
       <ZipHeat cases={cases} callsByCase={callsByCase} />
       <Districts cases={cases} />
+      <Breakdown cases={cases} teams={teams} rules={rules} />
       <CoverageGaps cases={cases} teams={teams} />
       <FactorMix cases={cases} rules={rules} />
       <HmisMix cases={cases} hmis={hmis} />
+      <TriesFunnel cases={cases} events={events} />
       <RepeatPressure cases={cases} callsByCase={callsByCase} />
       <FamilyStats cases={cases} />
+      <ReferBounce cases={cases} pool={allCases} />
       {(() => {
         // SOP external referrals — right-door diversion stats by destination
         // (user report 2026-08-25: the one-line tally wasn't enough to "check

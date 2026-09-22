@@ -30,20 +30,42 @@ export async function GET(req: Request) {
   const viewer = await getViewer();
   if (!viewer) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-  const id = Number(new URL(req.url).searchParams.get('id'));
-  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+  const url = new URL(req.url);
+  const id = Number(url.searchParams.get('id'));
 
-  const { data: c, error: cErr } = await supabaseServer()
-    .from('helpline_cases')
-    .select('id, first_name, last_name, dob, ssn4')
-    .eq('id', id)
-    .maybeSingle();
-  if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
-  if (!c) return NextResponse.json({ error: 'not found' }, { status: 404 });
-  // RLS already refused viewers without helpline access (c would be null),
-  // so reaching here with a row implies access; keep the explicit belt anyway.
-  if (!viewer.isAdmin && !(viewer as any).canSeeHelpline) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  // Two modes, same scorer + gate: ?id= for a SAVED case (identity read via
+  // the caller's session so RLS decides), or direct identity params for the
+  // LIVE intake glance (2026-09-22) — nothing saved yet, so the viewer gate
+  // is the whole boundary and runs before anything is looked up.
+  let c: { first_name: string | null; last_name: string | null;
+    dob: string | null; ssn4: string | null };
+  if (id) {
+    const { data, error: cErr } = await supabaseServer()
+      .from('helpline_cases')
+      .select('id, first_name, last_name, dob, ssn4')
+      .eq('id', id)
+      .maybeSingle();
+    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
+    if (!data) return NextResponse.json({ error: 'not found' }, { status: 404 });
+    // RLS already refused viewers without helpline access (data would be
+    // null), so reaching here implies access; keep the explicit belt anyway.
+    if (!viewer.isAdmin && !(viewer as any).canSeeHelpline) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+    c = data;
+  } else {
+    if (!viewer.isAdmin && !(viewer as any).canSeeHelpline) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+    c = {
+      first_name: url.searchParams.get('first'),
+      last_name: url.searchParams.get('last'),
+      dob: url.searchParams.get('dob'),
+      ssn4: url.searchParams.get('ssn4'),
+    };
+    if (!c.dob && !c.ssn4 && !c.last_name) {
+      return NextResponse.json({ candidates: [] });
+    }
   }
 
   const first = (c.first_name ?? '').trim().toLowerCase();
@@ -82,10 +104,36 @@ export async function GET(req: Request) {
   if (scored.length) {
     const { data } = await admin
       .from('bnl_clients')
-      .select('pid, status, project, last_contact')
+      .select('pid, status, project, last_contact, chronic, veteran, timeline')
       .in('pid', scored.map((x) => x.pid));
-    (data ?? []).forEach((b: any) => { bnl[b.pid] = b; });
+    // Distill the timeline into one enrollment fact — newest OPEN enrollment
+    // (entry, no exit) or, failing that, the most recent exited one with its
+    // destination. The full history never leaves the server.
+    (data ?? []).forEach((b: any) => {
+      const tl: any[] = Array.isArray(b.timeline) ? b.timeline : [];
+      const opens = tl.filter((t) => t && t.project && !t.exit)
+        .sort((a, x) => String(x.entry ?? '').localeCompare(String(a.entry ?? '')));
+      const closed = tl.filter((t) => t && t.project && t.exit)
+        .sort((a, x) => String(x.exit).localeCompare(String(a.exit)));
+      const enroll = opens.length
+        ? { open: true, project: String(opens[0].project),
+            entry: opens[0].entry ?? null, more: opens.length - 1 }
+        : closed.length
+        ? { open: false, project: String(closed[0].project),
+            entry: closed[0].entry ?? null, exit: closed[0].exit,
+            dest: closed[0].dest ?? null }
+        : null;
+      bnl[b.pid] = { status: b.status, project: b.project,
+        last_contact: b.last_contact, chronic: b.chronic, veteran: b.veteran,
+        enroll };
+    });
   }
+
+  // Equal scores: surface the record that carries BNL data first — with
+  // duplicate client records (same human, two PersonalIDs) the roster-backed
+  // one is the record to link.
+  scored.sort((a, b) => b.score - a.score
+    || (bnl[b.pid] ? 1 : 0) - (bnl[a.pid] ? 1 : 0));
 
   return NextResponse.json({
     candidates: scored.map((x) => ({
