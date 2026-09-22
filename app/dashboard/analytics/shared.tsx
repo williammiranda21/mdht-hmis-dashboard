@@ -42,7 +42,7 @@ export function CopyId({ id }: { id: string }) {
       style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
         font: 'inherit', fontSize: 11, textAlign: 'left', wordBreak: 'break-all',
         color: copied ? 'var(--accent)' : 'inherit',
-        textDecoration: copied ? 'none' : 'underline dotted',
+        textDecoration: copied ? 'none' : 'underline',
         textUnderlineOffset: 3 }}>
       {copied ? '✓ copied' : id}
     </button>

@@ -14,6 +14,7 @@ import { fetchPriorityRules, invalidatePriorityRules } from '../../../lib/priori
 import { inFeature, project, type GeoFC } from '../../../lib/slippy';
 import { fetchCustomAreas } from '../../../lib/custom-areas';
 import ReferOut, { type ReferralResource } from '../../../components/ReferOut';
+import { CopyId } from '../analytics/shared';
 
 export interface HlCase {
   id: number;
@@ -486,7 +487,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
         <button className="bnl-nm" onClick={() => setDrawerC(c)}
           title="Open the case drawer — full details, notes, and history"
           style={{ background: 'none', border: 'none', padding: 0, font: 'inherit',
-            cursor: 'pointer', textDecoration: 'underline dotted',
+            cursor: 'pointer', textDecoration: 'underline',
             textUnderlineOffset: 3, color: 'var(--strong)' }}>{nameOf(c)}</button>{' '}
         <b style={{ color: bandColor(band), fontSize: 11 }}
           title={e ? `${e.base} pts at intake${e.aging ? ` · +${e.aging} for waiting` : ''}${e.extra ? ` · +${e.extra} event/repeat boost` : ''}` : undefined}>
@@ -749,7 +750,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {c.matched_pid
                       ? <Link className="tbtn" href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}
-                          title="Open this client's HMIS record on the By-Name List — history, enrollments, notes">
+                          target="_blank" rel="noopener"
+                          title="Open this client's HMIS record on the By-Name List in a NEW TAB — the helpline stays put">
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                           BNL record</Link>
                       : <button className="tbtn" disabled={busy}
@@ -818,7 +820,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                           ) : (
                             <Link className="tbtn"
                               href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}
-                              title="Open this client's HMIS record on the By-Name List — history, enrollments, notes">
+                              target="_blank" rel="noopener"
+                              title="Open this client's HMIS record on the By-Name List in a NEW TAB — the board stays put">
                               BNL →</Link>
                           )}
                           {(c.lat != null || c.address || c.landmark) && (
@@ -2430,7 +2433,7 @@ function CaseDrawer({ c, teamName, events, me, onClose }: {
             <span className="bnl-sub"> · priority {c.priority} pts</span>
           </Row>
           {c.referred_to && <Row k="Referred to">↗ {c.referred_to}</Row>}
-          {c.matched_pid && <Row k="HMIS">record {c.matched_pid.slice(0, 12)}…</Row>}
+          {c.matched_pid && <Row k="HMIS"><CopyId id={c.matched_pid} /></Row>}
           <Row k="Outreach">
             <Trail events={events} c={c} />
           </Row>
