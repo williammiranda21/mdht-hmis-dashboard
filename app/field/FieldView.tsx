@@ -84,6 +84,31 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
   const seen = () => fetch('/api/seen', { method: 'POST' }).catch(() => { /* retried on action */ });
   useEffect(() => { seen(); setQueued(readQ().length); }, []);
 
+  // Home-screen bookmark reality (user report 2026-09-22): reopening restored
+  // the CACHED page and the list never refetched — a case assigned from the
+  // desktop "never came in". Refetch whenever the app comes back into view
+  // (focus / visibility / bfcache pageshow) and every 60s while visible; each
+  // refresh also pings /api/seen so field use counts as activity for the
+  // idle gate.
+  useEffect(() => {
+    const fresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      seen();
+      router.refresh();
+    };
+    window.addEventListener('focus', fresh);
+    window.addEventListener('pageshow', fresh);
+    document.addEventListener('visibilitychange', fresh);
+    const t = setInterval(fresh, 60_000);
+    return () => {
+      window.removeEventListener('focus', fresh);
+      window.removeEventListener('pageshow', fresh);
+      document.removeEventListener('visibilitychange', fresh);
+      clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function toast(msg: string) {
     setToastMsg(msg);
     if (toastT.current) clearTimeout(toastT.current);
