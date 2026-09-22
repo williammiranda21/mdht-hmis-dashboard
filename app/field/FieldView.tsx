@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../lib/supabase-browser';
 import { MAX_FAILED_ATTEMPTS, priorityBand } from '../../lib/helpline-options';
 import type { HlCase } from '../dashboard/helpline/HelplineView';
+import QrShare from '../../components/QrShare';
 
 /**
  * The field app screen (mock approved 2026-09-10). One-thumb design rules:
@@ -260,6 +261,7 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
             : `${teamLabel} · ${myName}`}</div>
         </div>
         <span className={queued ? 'fsync q' : 'fsync'}>{queued ? `↑ ${queued} to send` : '● Synced'}</span>
+        {!current && <QrShare path="/field" label="QR" />}
       </div>
 
       {!current && (

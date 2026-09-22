@@ -15,6 +15,7 @@ import { inFeature, project, type GeoFC } from '../../../lib/slippy';
 import { fetchCustomAreas } from '../../../lib/custom-areas';
 import ReferOut, { type ReferralResource } from '../../../components/ReferOut';
 import { CopyId } from '../analytics/shared';
+import QrShare from '../../../components/QrShare';
 
 export interface HlCase {
   id: number;
@@ -1056,10 +1057,11 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
 
       {shownTab === 'admin' && isAdmin && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
             <Link href="/field" className="tbtn"
               title="Mobile app for outreach workers — share this link with field staff">
               📱 Field app — share with outreach staff</Link>
+            <QrShare path="/field" label="QR code" />
           </div>
           <PriorityRulesAdmin me={me} rules={rules}
             onSaved={() => { invalidatePriorityRules(); fetchPriorityRules(true).then(setRules); }} />
