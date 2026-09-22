@@ -381,10 +381,16 @@ worklists** — those rows don't open anything, so a 🔍 there would be a false
 The **Housing Predictor** (`predictor_ml`) remains unbuilt — needs explicit sign-off on framing
 (see the Phase 3 memory). Do not surface a per-client success score without it.
 
-### Refresh runbook — CURRENT FULL ORDER (2026-08-04; ten load steps)
-ETL half: `py refresh.py` (unzips newest export, runs all four generators).
-Load half, in order (`py hmis-web/pipeline/<script>` — use SYSTEM `py`, the root
-`.venv` lacks the supabase/truststore packages):
+### Refresh runbook — CURRENT FULL ORDER (2026-09-22; twelve load steps)
+**One click: `../full_refresh.bat`** (drop the zip in the root, double-click —
+runs both halves with abort-on-failure + completion beeps). Manually:
+ETL half: `py refresh.py` (unzips newest export, runs all four generators);
+load half: `../run_load_half.bat` or the steps below in order
+(`py hmis-web/pipeline/<script>` — use SYSTEM `py`, the root `.venv` lacks
+the supabase/truststore packages). The upsert loader runs 5 concurrent batch
+workers since 2026-09-22 (`HMIS_LOAD_WORKERS=1` restores sequential).
+County export window is **2022-10-01 → current** (expanded 2026-09-22);
+export_merge treats every load as a FULL wholesale replace (ALWAYS_FULL).
 1. `upsert_to_supabase.py --verify` (now also prunes its own tables' stale rows — §6; `--no-prune` opts out)
 2. `recompute_util.py` (authoritative utilization, DV-excluded)
 3. `recompute_dest.py` (destination profiles)
