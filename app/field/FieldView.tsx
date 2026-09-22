@@ -64,9 +64,17 @@ const SHEET_COPY: Record<Outcome, { t: string; s: string; btn: string; cls: stri
   confirm: { t: '🏠 Confirmed homeless', s: 'Marks the case confirmed in the field. The system then watches HMIS for the enrollment to verify it.', btn: 'Confirm', cls: 'green' },
 };
 
-export default function FieldView({ me, myName, teamLabel, scoped, cases: initial, events }: {
+export interface HmisGlance {
+  status: string | null; last_contact: string | null;
+  chronic: boolean; veteran: boolean;
+  enroll: { open: boolean; project: string; entry: string | null;
+    exit?: string | null; dest?: string | null } | null;
+}
+
+export default function FieldView({ me, myName, teamLabel, scoped, cases: initial, events, hmis = {} }: {
   me: string; myName: string; teamLabel: string; scoped: boolean;
   cases: HlCase[]; events: Record<number, Ev[]>;
+  hmis?: Record<string, HmisGlance>;
 }) {
   const router = useRouter();
   const [cases, setCases] = useState<HlCase[]>(initial);
@@ -360,6 +368,26 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
               {current.notes && <><span className="k">Intake note</span><span className="v" style={{ fontWeight: 400 }}>{current.notes}</span></>}
             </div>
           </div>
+
+          {current.matched_pid && hmis[current.matched_pid] && (() => {
+            const g = hmis[current.matched_pid!];
+            return (
+              <div className="fcard">
+                <h2>HMIS — what we already know</h2>
+                <div className="fkv">
+                  {g.status && <><span className="k">Status</span><span className="v">{g.status}
+                    {g.chronic ? ' · chronic' : ''}{g.veteran ? ' · veteran' : ''}</span></>}
+                  {g.last_contact && <><span className="k">Last contact</span><span className="v">{g.last_contact}</span></>}
+                  {g.enroll && (g.enroll.open
+                    ? <><span className="k">Enrolled now</span><span className="v">{g.enroll.project}
+                        {g.enroll.entry ? ` · since ${g.enroll.entry}` : ''}</span></>
+                    : <><span className="k">Last program</span><span className="v">{g.enroll.project}
+                        {g.enroll.exit ? ` · exited ${g.enroll.exit}` : ''}
+                        {g.enroll.dest ? ` → ${g.enroll.dest}` : ''}</span></>)}
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="fcard">
             <h2>Outreach so far</h2>

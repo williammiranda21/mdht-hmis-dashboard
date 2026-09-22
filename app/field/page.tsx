@@ -1,6 +1,7 @@
 import { supabaseServer, getViewer } from '../../lib/supabase-server';
+import { supabaseAdmin } from '../../lib/supabase';
 import PolicyAttestation from '../../components/PolicyAttestation';
-import FieldView from './FieldView';
+import FieldView, { type HmisGlance } from './FieldView';
 import type { HlCase, Team } from '../dashboard/helpline/HelplineView';
 
 export const dynamic = 'force-dynamic';
@@ -68,6 +69,41 @@ export default async function FieldPage() {
     }
   }
 
+  // HMIS glance for MATCHED cases (user ask 2026-09-22: "know without having
+  // to open HMIS") — same minimal-disclosure posture as the helpline page:
+  // service role on purpose (field workers may lack the BNL grant), only
+  // these fields leave the roster, and the timeline is distilled server-side
+  // into ONE enrollment fact. canSeeHelpline above is the boundary.
+  const hmis: Record<string, HmisGlance> = {};
+  const mpids = [...new Set(cases.map((c) => c.matched_pid).filter(Boolean))] as string[];
+  if (mpids.length) {
+    try {
+      const { data } = await supabaseAdmin()
+        .from('bnl_clients')
+        .select('pid, status, project, last_contact, chronic, veteran, timeline')
+        .in('pid', mpids);
+      for (const b of (data ?? []) as any[]) {
+        const tl: any[] = Array.isArray(b.timeline) ? b.timeline : [];
+        const opens = tl.filter((t) => t && t.project && !t.exit)
+          .sort((a, x) => String(x.entry ?? '').localeCompare(String(a.entry ?? '')));
+        const closed = tl.filter((t) => t && t.project && t.exit)
+          .sort((a, x) => String(x.exit).localeCompare(String(a.exit)));
+        hmis[String(b.pid)] = {
+          status: b.status ?? null,
+          last_contact: b.last_contact ?? null,
+          chronic: Boolean(b.chronic),
+          veteran: Boolean(b.veteran),
+          enroll: opens.length
+            ? { open: true, project: String(opens[0].project), entry: opens[0].entry ?? null }
+            : closed.length
+            ? { open: false, project: String(closed[0].project), entry: closed[0].entry ?? null,
+                exit: closed[0].exit, dest: closed[0].dest ?? null }
+            : null,
+        };
+      }
+    } catch { /* roster unavailable — the card simply doesn't render */ }
+  }
+
   const at = viewer.policiesAttestedAt ? new Date(viewer.policiesAttestedAt).getTime() : null;
   const stale = at == null || Number.isNaN(at) || (Date.now() - at) > 365 * 24 * 60 * 60 * 1000;
 
@@ -81,6 +117,7 @@ export default async function FieldPage() {
         scoped={mine.length > 0}
         cases={cases}
         events={events}
+        hmis={hmis}
       />
     </>
   );
