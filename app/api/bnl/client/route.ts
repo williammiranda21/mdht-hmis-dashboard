@@ -44,7 +44,8 @@ export async function GET(req: Request) {
   // card. Best-effort: any failure degrades to no strip.
   let risk: {
     housing?: { score: number; state: string | null };
-    ret?: { score: number; s6: number | null; bucket: string; exit: string | null };
+    ret?: { score: number; s6: number | null; bucket: string; exit: string | null;
+            returned: boolean; retDays: number | null };
   } | null = null;
   try {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -68,7 +69,8 @@ export async function GET(req: Request) {
       risk = {
         ...(h ? { housing: { score: Number(h.score), state: (h.state as string) ?? null } } : {}),
         ...(rt ? { ret: { score: Number(rt.score), s6: rt.s6 != null ? Number(rt.s6) : null,
-                          bucket: String(rt.bucket ?? ''), exit: (rt.exit as string) ?? null } } : {}),
+                          bucket: String(rt.bucket ?? ''), exit: (rt.exit as string) ?? null,
+                          returned: Boolean(rt.ret), retDays: rt.retd != null ? Number(rt.retd) : null } } : {}),
       };
       if (!risk.housing && !risk.ret) risk = null;
     }

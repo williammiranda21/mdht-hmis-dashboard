@@ -181,11 +181,20 @@ interface Comment {
 
 /** Record-anchored notes for one category (project + element) — the
  *  agency ↔ Homeless Trust loop ("re-entered the source record" / "confirmed,
- *  watching Friday's refresh"). Anchored and auditable, not a DM system. */
-function Thread({ metric, comments, viewerId, onPost, onDelete }: {
+ *  watching Friday's refresh"). Anchored and auditable, not a DM system.
+ *
+ *  Notes outlive refreshes but the RECORD LIST doesn't (user 2026-09-18:
+ *  a "Fixed" note above errors that arrived later reads as if the current
+ *  list were fixed). Each note is therefore checked against the ledger ages
+ *  of the records open TODAY: any that first appeared after the note was
+ *  written get counted and the note is flagged as describing an earlier
+ *  state. Day-level precision (ledger ships ages, not timestamps). */
+function Thread({ metric, comments, viewerId, onPost, onDelete, openSinceIso = [] }: {
   metric: string; comments: Comment[]; viewerId: string | null;
   onPost: (metric: string, body: string) => Promise<boolean>;
   onDelete: (id: number) => Promise<void>;
+  /** first_seen ISO timestamps of the currently open records (dq_items). */
+  openSinceIso?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [val, setVal] = useState('');
@@ -195,10 +204,45 @@ function Thread({ metric, comments, viewerId, onPost, onDelete }: {
     setBusy(true);
     try { if (await onPost(metric, val.trim())) setVal(''); } finally { setBusy(false); }
   };
+  // Two staleness checks per note, on EXACT timestamps (day-rounded ages tie
+  // when a note and the refresh capture land on the same day — the observed
+  // Sep-1 "fixed." case, where the provider truly fixed the old records and
+  // the same refresh delivered new ones minutes later):
+  //  1. records captured AFTER the note → the note predates them;
+  //  2. records from BEFORE the note still open past a refresh cycle → the
+  //     note's claim never materialized in the data. 7-day grace = one
+  //     weekly refresh, so "fixed in WellSky, awaiting the export" isn't
+  //     flagged prematurely.
+  const STILL_OPEN_GRACE_DAYS = 7;
+  const noteDays = (c: Comment) =>
+    Math.floor((Date.now() - new Date(c.created_at).getTime()) / 86400000);
+  const newSince = (c: Comment) => {
+    const t = new Date(c.created_at).getTime();
+    return openSinceIso.filter((ts) => new Date(ts).getTime() > t).length;
+  };
+  const stillOpenSince = (c: Comment) =>
+    openSinceIso.length - newSince(c) > 0 && noteDays(c) >= STILL_OPEN_GRACE_DAYS
+      ? openSinceIso.length - newSince(c) : 0;
+  const newest = comments.length
+    ? comments.reduce((a, b) => (new Date(a.created_at) > new Date(b.created_at) ? a : b))
+    : null;
+  const newestOvertaken = newest ? newSince(newest) : 0;
+  const newestStillOpen = newest ? stillOpenSince(newest) : 0;
   return (
     <div style={{ display: 'inline-block', marginLeft: 8 }}>
       <button className="btn dqfx-copy" style={{ marginTop: 0 }} onClick={() => setOpen((o) => !o)}>
         💬 Notes{comments.length ? ` (${comments.length})` : ''}
+        {newestOvertaken > 0 ? (
+          <span style={{ color: 'var(--warn)', fontWeight: 700 }}
+            title={`${newestOvertaken} of the current open records appeared after the latest note`}>
+            {' '}· ⚠ new errors since
+          </span>
+        ) : newestStillOpen > 0 && (
+          <span style={{ color: 'var(--warn)', fontWeight: 700 }}
+            title={`${newestStillOpen} record${newestStillOpen === 1 ? '' : 's'} from before the latest note ${newestStillOpen === 1 ? 'is' : 'are'} still open ${newest ? noteDays(newest) : ''} days later`}>
+            {' '}· ⚠ still open since
+          </span>
+        )}
       </button>
       {open && (
         <div style={{ marginTop: 8, display: 'grid', gap: 8, maxWidth: 640 }}>
@@ -220,6 +264,17 @@ function Thread({ metric, comments, viewerId, onPost, onDelete }: {
                   onClick={() => onDelete(c.id)}>✕</button>
               )}
               <div>{c.body}</div>
+              {newSince(c) > 0 ? (
+                <div style={{ fontSize: 11.5, color: 'var(--warn)', marginTop: 2 }}>
+                  ⚠ {newSince(c)} of the current open record{newSince(c) === 1 ? '' : 's'} appeared
+                  {' '}after this note — it describes an earlier state of this list.
+                </div>
+              ) : stillOpenSince(c) > 0 && (
+                <div style={{ fontSize: 11.5, color: 'var(--warn)', marginTop: 2 }}>
+                  ⚠ {stillOpenSince(c)} record{stillOpenSince(c) === 1 ? '' : 's'} from before this
+                  {' '}note {stillOpenSince(c) === 1 ? 'is' : 'are'} still open {noteDays(c)} days later.
+                </div>
+              )}
             </div>
           ))}
           {comments.length === 0 && (
@@ -273,6 +328,9 @@ export default function DqFixList({
   // Timeliness (dq_items ledger): '<metric>|<pid>' → days open; due dates per
   // element metric; canSetDue = the viewer is a Homeless Trust admin.
   const [openAges, setOpenAges] = useState<Record<string, number>>({});
+  // Exact first-capture timestamps ('<metric>|<pid>' → ISO) — feed the
+  // note-staleness checks in Thread.
+  const [openSince, setOpenSince] = useState<Record<string, string>>({});
   const [dueDates, setDueDates] = useState<Record<string, string>>({});
   const [canSetDue, setCanSetDue] = useState(false);
   // Record-anchored notes (dq_comments) — one thread per category.
@@ -290,6 +348,7 @@ export default function DqFixList({
         setEva((j.eva ?? []) as EvaFinding[]);
         setEvaPeriod(j.evaPeriod ?? null);
         setOpenAges((j.openAges ?? {}) as Record<string, number>);
+        setOpenSince((j.openSince ?? {}) as Record<string, string>);
         setDueDates((j.dueDates ?? {}) as Record<string, string>);
         setCanSetDue(!!j.canSetDue);
       })
@@ -320,6 +379,13 @@ export default function DqFixList({
     if (r.ok) setComments((c) => c.filter((x) => x.id !== id));
   };
   const threadFor = (metric: string) => comments.filter((c) => c.metric === metric);
+  // Ledger first-capture timestamps of this category's CURRENT records —
+  // feed each note's staleness checks. Empty when the ledger hasn't
+  // captured the category (degrades to no staleness badges).
+  const sinceFor = (metric: string) =>
+    Object.entries(openSince)
+      .filter(([k]) => k.startsWith(`${metric}|`))
+      .map(([, v]) => v);
 
   const setDue = async (metric: string, due: string | null) => {
     const r = await fetch('/api/dq-due', {
@@ -494,7 +560,8 @@ export default function DqFixList({
                     setTimeout(() => { el.textContent = '⧉ Copy these IDs'; }, 1200);
                   }}>⧉ Copy these IDs</button>
                   <Thread metric={`dq:${e.key}`} comments={threadFor(`dq:${e.key}`)}
-                    viewerId={viewerId} onPost={postComment} onDelete={deleteComment} />
+                    viewerId={viewerId} onPost={postComment} onDelete={deleteComment}
+                    openSinceIso={sinceFor(`dq:${e.key}`)} />
                 </div>
               ))}
 
@@ -535,7 +602,8 @@ export default function DqFixList({
                           setTimeout(() => { el.textContent = '⧉ Copy these IDs'; }, 1200);
                         }}>⧉ Copy these IDs</button>
                         <Thread metric={`eva:${f.id}`} comments={threadFor(`eva:${f.id}`)}
-                          viewerId={viewerId} onPost={postComment} onDelete={deleteComment} />
+                          viewerId={viewerId} onPost={postComment} onDelete={deleteComment}
+                          openSinceIso={sinceFor(`eva:${f.id}`)} />
                       </div>
                     );
                   })}

@@ -52,7 +52,8 @@ export default function ClientDrawer({ row, asOf, isAdmin = false, onClose, focu
   // is in neither scored set.
   const [risk, setRisk] = useState<{
     housing?: { score: number; state: string | null };
-    ret?: { score: number; s6: number | null; bucket: string; exit: string | null };
+    ret?: { score: number; s6: number | null; bucket: string; exit: string | null;
+            returned?: boolean; retDays?: number | null };
   } | null>(null);
   // Add-to-cohort (admin-only) — cohort list loads lazily on first open.
   const [cohortOpts, setCohortOpts] = useState<{ id: number; name: string }[] | null>(null);
@@ -125,7 +126,15 @@ export default function ClientDrawer({ row, asOf, isAdmin = false, onClose, focu
                 {risk.housing.state && <span className="bnl-sub"> · {risk.housing.state}</span>}
               </span>
             )}
-            {risk.ret && (
+            {risk.ret && (risk.ret.returned ? (
+              // The forecast is realized — say what HAPPENED, never a
+              // probability that reads as "still housed" (user 2026-09-18).
+              <span title="This client's PH exit already ended in an observed return to homelessness">
+                ↩ <b style={{ color: 'var(--danger)' }}>Returned to homelessness</b>
+                {risk.ret.retDays != null && <> <b className="num">{risk.ret.retDays}d</b> after</>}
+                {risk.ret.exit && <span className="bnl-sub"> the {risk.ret.exit} PH exit</span>}
+              </span>
+            ) : (
               <span title="Return-risk model (Analytics tab) — probability of returning to homelessness after the PH exit">
                 ⚠ Return risk{' '}
                 <b className="num" style={{ color: risk.ret.score >= 40 ? 'var(--danger)' : risk.ret.score >= 20 ? 'var(--warn)' : 'var(--accent)' }}>
@@ -134,7 +143,7 @@ export default function ClientDrawer({ row, asOf, isAdmin = false, onClose, focu
                 {risk.ret.s6 != null && <> overall · <b className="num">{Number(risk.ret.s6).toFixed(0)}%</b> ≤6 mo</>}
                 {risk.ret.exit && <span className="bnl-sub"> · exited {risk.ret.exit}</span>}
               </span>
-            )}
+            ))}
             <a className="bnl-sub pp-noprint" style={{ fontSize: 11, textDecoration: 'underline dotted', textUnderlineOffset: 3 }}
               href={`/dashboard/analytics?section=${risk.ret ? 'risk' : 'predictor'}&pid=${encodeURIComponent(row.pid)}`}
               title="Opens the Analytics tab with this client's full dossier — factors, horizons, exit-package what-ifs">

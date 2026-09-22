@@ -497,6 +497,23 @@ const FEAT_LABELS = [
   'Longer stay so far', 'More prior episodes', 'Youth (18-24)', 'Older adult (55+)', 'Unknown age',
   'Family household', 'More prior housing exits', 'Disabling condition', 'Veteran',
 ];
+// Hover explanations, index-aligned with FEAT_LABELS (2026-09-18 user ask).
+const FEAT_TIPS = [
+  'Currently enrolled in emergency shelter — program types measured against Street Outreach, the reference.',
+  'Currently enrolled in Safe Haven (vs Street Outreach).',
+  'Currently enrolled in Transitional Housing (vs Street Outreach).',
+  'Currently enrolled in RRH (vs Street Outreach) — the strongest program factor, since an RRH exit IS housing.',
+  'Currently enrolled in a PSH-type program without a move-in yet (vs Street Outreach).',
+  'Days enrolled so far (bucketed). The strongest factor overall — placements take time, and staying engaged predicts eventually being housed.',
+  'Prior enrollment spells (bucketed 0–3+). Deeper history makes this enrollment less likely to end in housing.',
+  'Age 18–24 at entry — youth reach housing slightly more often.',
+  'Age 55+ at entry — housing exits become less likely with age.',
+  'Date of birth missing in the record.',
+  'The household includes a minor — families reach housing more often than single adults.',
+  'Previous exits to permanent housing (capped at 2) — clients who got housed before are likelier to again.',
+  'HUD 3.08 disabling condition — lowers the probability; PSH prioritization exists for exactly this population.',
+  'Veteran status — VA housing resources raise the odds.',
+];
 const STATE_FULL: Record<string, string> = {
   SO: 'Street Outreach', ES: 'Emergency Shelter', SH: 'Safe Haven',
   TH: 'Transitional Housing', RRH: 'Rapid Rehousing', PSH: 'Perm. Supportive Housing',
@@ -636,11 +653,11 @@ export function PredictorSection({ pi, initialPid = null }: { pi: PathwayIntel; 
           </div>
           {(() => {
             const ws = pm.weights.slice(0, FEAT_LABELS.length)
-              .map((w, i) => ({ label: FEAT_LABELS[i] ?? `f${i}`, w }))
+              .map((w, i) => ({ label: FEAT_LABELS[i] ?? `f${i}`, tip: FEAT_TIPS[i], w }))
               .sort((a, b) => Math.abs(b.w) - Math.abs(a.w));
             const max = Math.max(...ws.map((x) => Math.abs(x.w)), 1e-9);
-            return ws.map(({ label, w }) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0' }}>
+            return ws.map(({ label, tip, w }) => (
+              <div key={label} title={tip} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0', cursor: 'help' }}>
                 <span style={{ flex: '0 0 220px', fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
                 <span style={{ flex: 1, height: 10, background: 'var(--hair)', borderRadius: 5, overflow: 'hidden' }}>
                   <span style={{ display: 'block', height: '100%', borderRadius: 5,
@@ -771,7 +788,7 @@ function DossierPanel({ client, pm, onClose }: {
   const w = pm.weights;
   const pct = Math.round(client.score * 100);
   const color = scoreColor(client.score);
-  const contrib = client.feat.map((v, i) => ({ label: FEAT_LABELS[i] ?? `f${i}`, val: w[i] * v }));
+  const contrib = client.feat.map((v, i) => ({ label: FEAT_LABELS[i] ?? `f${i}`, tip: FEAT_TIPS[i], val: w[i] * v }));
   const helping = contrib.filter((x) => x.val > 0).sort((a, b) => b.val - a.val).slice(0, 3);
   const hurting = contrib.filter((x) => x.val < 0).sort((a, b) => a.val - b.val).slice(0, 3);
   const losB = client.los < 30 ? 0 : client.los < 90 ? 1 : client.los < 180 ? 2 : client.los < 365 ? 3 : 4;
@@ -803,13 +820,13 @@ function DossierPanel({ client, pm, onClose }: {
           <div style={GROUP_LBL}>Factors</div>
           {helping.length > 0 && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', margin: '4px 0' }}>Helping ↑</div>}
           {helping.map((x) => (
-            <div key={x.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 6px', background: 'var(--accent-light)', borderRadius: 4, margin: '3px 0' }}>
+            <div key={x.label} title={x.tip} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 6px', background: 'var(--accent-light)', borderRadius: 4, margin: '3px 0', cursor: 'help' }}>
               <span>{x.label}</span><b className="num" style={{ color: 'var(--accent)' }}>+{x.val.toFixed(3)}</b>
             </div>
           ))}
           {hurting.length > 0 && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--danger)', margin: '6px 0 4px' }}>Hurting ↓</div>}
           {hurting.map((x) => (
-            <div key={x.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 6px', background: 'var(--danger-light)', borderRadius: 4, margin: '3px 0' }}>
+            <div key={x.label} title={x.tip} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 6px', background: 'var(--danger-light)', borderRadius: 4, margin: '3px 0', cursor: 'help' }}>
               <span>{x.label}</span><b className="num" style={{ color: 'var(--danger)' }}>{x.val.toFixed(3)}</b>
             </div>
           ))}

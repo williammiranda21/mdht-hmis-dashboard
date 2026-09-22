@@ -190,11 +190,13 @@ function KMChart({ types, curveKey }: {
 }
 
 /** Horizontal bar row (label · scaled bar · value) — shared across sections. */
-function BarRow({ label, value, max, display, color, sub }: {
+function BarRow({ label, value, max, display, color, sub, tip }: {
   label: string; value: number; max: number; display: string; color: string; sub?: string;
+  /** Hover explanation of what the metric/factor means. */
+  tip?: string;
 }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0' }}>
+    <div title={tip} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', cursor: tip ? 'help' : undefined }}>
       <span style={{ flex: '0 0 240px', fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {label}{sub && <span className="bnl-sub"> · {sub}</span>}
       </span>
@@ -481,12 +483,51 @@ interface RiskClientRow {
   dest?: number | null; sub?: number | null;
   // Horizon probabilities in percent; `score` is the 24-month (overall).
   s6?: number | null; s12?: number | null;
+  // Already-returned: the observed return happened `retd` days after this
+  // exit — a realized outcome, not a forecast.
+  ret?: number | null; retd?: number | null;
 }
 const TIER_COLOR: Record<string, string> = {
   'Low (<20%)': 'var(--accent)',
   'Moderate (20–40%)': 'var(--warn)',
   'Elevated (40–60%)': '#f97316',
   'High (>60%)': 'var(--danger)',
+};
+
+/** Hover explanations per return-model feature (keyed by feat_col so they
+ *  survive label edits). Written from the 2026-09-18 factor analysis — keep
+ *  in sync with the model when features change. */
+const RETURN_FACTOR_TIPS: Record<string, string> = {
+  pt_0: 'The exit was from an ES (entry/exit) program — measured against the other program types.',
+  pt_2: 'The exit was from Transitional Housing — measured against the other program types.',
+  pt_3: 'The exit was from PSH — measured against the other program types.',
+  pt_4: 'The exit was from Street Outreach — measured against the other program types.',
+  pt_13: 'The exit was from RRH — measured against the other program types.',
+  los_log: 'Days enrolled before the exit (log scale). Longer stays carry slightly higher return risk system-wide.',
+  age_norm: 'The LINEAR piece of the age curve: risk climbs steadily from young adulthood (12% at 18–24) into the late 50s (23% at 55–61). Reads TOGETHER with the two age-band factors — the three jointly draw one hump-shaped curve.',
+  is_45_61: 'Band adjustment on top of the linear age term — near zero because the linear term already carries the mid-age rise. Raw rates peak in this band (23.1%).',
+  is_62p: 'The BEND at retirement age: relative to where the linear age trend would put them, 62+ leavers return less (17.8% raw — deep-subsidy senior placements are common). Net of both terms, a 62+ client sits above a young adult but below the 55–61 peak — not a contradiction, one curve in pieces.',
+  prior_clip: 'HUD-defined homeless episodes before this exit (capped at 10). More episodes, more returns.',
+  prior_enroll_log: 'Raw count of prior program enrollments (log). The strongest factor — leavers with 7+ prior enrollments returned 46.6% of the time.',
+  hh_size_c: 'People in the household (capped at 6). Larger households return less: singles ~22%, 4+ member families under 10%.',
+  HasMinorChild: 'The household includes a child under 18 — families return far less than single adults.',
+  HasIncomeAtExit: 'EMPLOYMENT income recorded at exit — the protective form of income. Benefits-only income is not protective.',
+  inc_low: '$1–500/mo total income at exit — the riskiest income band (27% raw), typically marking benefit churn without employment. Measured vs the $0 baseline.',
+  inc_mid: '$500–1,500/mo total income at exit, vs the $0 baseline.',
+  inc_high: '$1,500+/mo total income at exit, vs the $0 baseline. Adds little once earned income and the landing are known.',
+  has_disab: 'HUD 3.08 disabling condition — mostly absorbed by the specific disability flags and pathway factors.',
+  HasPhys: 'Physical disability reported at entry (+4pp raw; largely absorbed by correlated factors).',
+  HasChronic: 'Chronic health condition reported at entry.',
+  HasMH: 'Mental health disorder at entry. Near-zero on its own: MH clients are routed to subsidized housing (50% vs 35%), and the co-occurring risk shows under substance use.',
+  HasSUD: 'Substance use disorder at entry — the clinical factor that predicts returns (28–30% raw, alone or co-occurring).',
+  gap_log: 'Days between the previous episode and this one (log scale).',
+  rapid_return: 'A previous re-entry within 90 days — a churn marker, mostly absorbed by the prior-enrollment count.',
+  dest_fam_perm: 'Exited to staying with family or friends on "permanent" tenure — the riskiest PH landing (26%/20% raw returns). The arrangement, not the tenure label, is what fails.',
+  dest_psh: 'Rental backed by PSH / GPD TIP / public housing (FY2024 subsidy codes 439/428/434).',
+  dest_long_subsidy: 'Ongoing voucher or subsidy (VASH, HCV, EHV, FUP, FYI, other ongoing). Deep subsidies hold at every income level — the strongest protective landing.',
+  dest_rrh: 'RRH time-limited subsidy — protective overall; the risk concentrates after the subsidy ends.',
+  proj_return_rate: "The exiting program's own historical 2-year return rate (shrunk toward its type average for small programs). A track-record prior, not an individual attribute.",
+  recv_proj_return_rate: 'Same idea for the housing program that received the client within 30 days of the exit.',
 };
 
 type RiskScoring = NonNullable<NonNullable<AnalyticsInsights['risk']['model']>['scoring']>;
@@ -533,6 +574,7 @@ function RiskDossier({ client, m, onClose }: {
         label: m.features?.[i] ?? col,
         note: isBin ? (x[i] >= 0.5 ? 'yes' : 'no')
           : (x[i] > sc.feat_mean[i] ? 'above avg' : 'below avg'),
+        tip: RETURN_FACTOR_TIPS[col],
         val: w * ((x[i] - sc.feat_mean[i]) / (sc.feat_std[i] || 1)),
       };
     }).sort((a, b) => Math.abs(b.val) - Math.abs(a.val))
@@ -573,6 +615,15 @@ function RiskDossier({ client, m, onClose }: {
 
   return (
     <div className="panel" style={{ padding: '14px 18px', borderLeft: `4px solid ${tierC}`, marginBottom: 14 }}>
+      {!!client.ret && (
+        <div style={{ padding: '8px 12px', marginBottom: 12, borderRadius: 6, background: 'var(--danger-light)',
+          color: 'var(--danger)', fontSize: 13, fontWeight: 600 }}>
+          ↩ This return already happened — re-entered homelessness
+          {client.retd != null ? ` ${fmt(client.retd)} days` : ''} after this exit.
+          The probabilities below were the model&rsquo;s pre-return forecast (now realized);
+          for current planning use the housing predictor — they&rsquo;re back in the active caseload.
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
@@ -600,14 +651,14 @@ function RiskDossier({ client, m, onClose }: {
           {contribs == null && <p className="bnl-sub">Factor detail loads with the next data refresh.</p>}
           {raising.length > 0 && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--danger)', margin: '4px 0' }}>Raising ↑</div>}
           {raising.map((c) => (
-            <div key={c.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 6px', background: 'var(--danger-light)', borderRadius: 4, margin: '3px 0', gap: 8 }}>
+            <div key={c.label} title={c.tip} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 6px', background: 'var(--danger-light)', borderRadius: 4, margin: '3px 0', gap: 8, cursor: c.tip ? 'help' : undefined }}>
               <span>{c.label} <span className="bnl-sub" style={{ fontSize: 10.5 }}>· {c.note}</span></span>
               <b className="num" style={{ color: 'var(--danger)' }}>+{c.val.toFixed(2)}</b>
             </div>
           ))}
           {protecting.length > 0 && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', margin: '6px 0 4px' }}>Protecting ↓</div>}
           {protecting.map((c) => (
-            <div key={c.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 6px', background: 'var(--accent-light)', borderRadius: 4, margin: '3px 0', gap: 8 }}>
+            <div key={c.label} title={c.tip} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 6px', background: 'var(--accent-light)', borderRadius: 4, margin: '3px 0', gap: 8, cursor: c.tip ? 'help' : undefined }}>
               <span>{c.label} <span className="bnl-sub" style={{ fontSize: 10.5 }}>· {c.note}</span></span>
               <b className="num" style={{ color: 'var(--accent)' }}>{c.val.toFixed(2)}</b>
             </div>
@@ -682,13 +733,19 @@ function RiskSection({ a, initialPid = null }: { a: AnalyticsInsights; initialPi
       .catch((e: Error) => { if (!dead) setClErr(e.message); });
     return () => { dead = true; };
   }, []);
+  // Already-returned leavers are hidden by default (user 2026-09-18): their
+  // "risk" is a realized outcome — they belong to the active caseload now.
+  // The toggle reveals them for accountability/model-validation reading.
+  const [showRet, setShowRet] = useState(false);
+  const retCount = useMemo(() => (clients?.rows ?? []).filter((r) => r.ret).length, [clients]);
   const shownClients = useMemo(() => {
     const rows = clients?.rows ?? [];
     const needle = q.trim().toLowerCase();
     return rows.filter((r) =>
+      (showRet || !r.ret) &&
       (!tier || r.bucket === tier) &&
       (!needle || r.pid.toLowerCase().includes(needle) || r.project.toLowerCase().includes(needle)));
-  }, [clients, q, tier]);
+  }, [clients, q, tier, showRet]);
 
   if (!m || !a.risk.computed) {
     return (
@@ -709,8 +766,10 @@ function RiskSection({ a, initialPid = null }: { a: AnalyticsInsights; initialPi
   // list is the point; small-weight factors like the income buckets must
   // still be visible).
   const signed = m.importances_signed ?? null;
+  const featCols = m.scoring?.feat_cols ?? null;
   const factors = (m.features ?? []).map((f, i) => ({
     f, w: (signed ?? m.importances)?.[i] ?? 0,
+    tip: featCols ? RETURN_FACTOR_TIPS[featCols[i]] : undefined,
   })).sort((x, y) => Math.abs(y.w) - Math.abs(x.w));
   const wMax = Math.max(...factors.map((x) => Math.abs(x.w)), 1e-9);
   const hist = a.risk.histogram;
@@ -772,8 +831,8 @@ function RiskSection({ a, initialPid = null }: { a: AnalyticsInsights; initialPi
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>
               ↑ Raises return risk
             </div>
-            {factors.filter(({ w }) => w >= 0).map(({ f, w }) => (
-              <BarRow key={f} label={f} value={w} max={wMax}
+            {factors.filter(({ w }) => w >= 0).map(({ f, w, tip }) => (
+              <BarRow key={f} label={f} value={w} max={wMax} tip={tip}
                 display={`+${w.toFixed(2)}`} color="var(--danger)" />
             ))}
           </div>
@@ -781,8 +840,8 @@ function RiskSection({ a, initialPid = null }: { a: AnalyticsInsights; initialPi
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)', marginBottom: 6 }}>
               ↓ Protective
             </div>
-            {factors.filter(({ w }) => w < 0).map(({ f, w }) => (
-              <BarRow key={f} label={f} value={w} max={wMax}
+            {factors.filter(({ w }) => w < 0).map(({ f, w, tip }) => (
+              <BarRow key={f} label={f} value={w} max={wMax} tip={tip}
                 display={w.toFixed(2)} color="var(--accent)" />
             ))}
           </div>
@@ -897,6 +956,13 @@ function RiskSection({ a, initialPid = null }: { a: AnalyticsInsights; initialPi
             <option value="">All risk tiers</option>
             {Object.keys(TIER_COLOR).map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
+          {retCount > 0 && (
+            <label className="bnl-sub" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}
+              title="Leavers whose return has already been observed — realized outcomes, hidden from the forecast list by default">
+              <input type="checkbox" checked={showRet} onChange={(e) => setShowRet(e.target.checked)} />
+              show already-returned ({fmt(retCount)})
+            </label>
+          )}
           <a className="btn" href="/api/analytics/risk?format=csv">⬇ Export CSV</a>
         </div>
         {clErr && <p className="bnl-sub">Couldn&rsquo;t load the client list ({clErr}).</p>}
@@ -949,18 +1015,27 @@ function RiskSection({ a, initialPid = null }: { a: AnalyticsInsights; initialPi
                           <td className="num" style={{ textAlign: 'right' }}>{r.eps ?? '—'}</td>
                           <td className="num" style={{ textAlign: 'right',
                             color: r.s6 != null && r.s6 >= 40 ? 'var(--danger)' : r.s6 != null && r.s6 >= 20 ? 'var(--warn)' : 'var(--muted)' }}>
-                            {r.s6 != null ? `${Number(r.s6).toFixed(1)}%` : '—'}
+                            {r.ret ? '—' : r.s6 != null ? `${Number(r.s6).toFixed(1)}%` : '—'}
                           </td>
                           <td style={{ textAlign: 'right' }}>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                              <span style={{ width: 48, height: 6, background: 'var(--hair)', borderRadius: 3, overflow: 'hidden' }}>
-                                <span style={{ display: 'block', height: '100%', width: `${Math.min(Math.max(r.score, 2), 100)}%`, background: c, borderRadius: 3 }} />
+                            {r.ret ? (
+                              <b style={{ fontSize: 11.5, color: 'var(--danger)', whiteSpace: 'nowrap' }}
+                                title="This return already happened — the score was the model's pre-return forecast">
+                                ↩ returned{r.retd != null ? ` +${fmt(r.retd)}d` : ''}
+                              </b>
+                            ) : (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                                <span style={{ width: 48, height: 6, background: 'var(--hair)', borderRadius: 3, overflow: 'hidden' }}>
+                                  <span style={{ display: 'block', height: '100%', width: `${Math.min(Math.max(r.score, 2), 100)}%`, background: c, borderRadius: 3 }} />
+                                </span>
+                                <b className="num" style={{ color: c }}>{Number(r.score).toFixed(1)}%</b>
                               </span>
-                              <b className="num" style={{ color: c }}>{Number(r.score).toFixed(1)}%</b>
-                            </span>
+                            )}
                           </td>
                           <td style={{ textAlign: 'center' }}>
-                            <span style={{ fontSize: 10.5, fontWeight: 700, color: c, whiteSpace: 'nowrap' }}>{r.bucket}</span>
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: r.ret ? 'var(--danger)' : c, whiteSpace: 'nowrap' }}>
+                              {r.ret ? 'Returned' : r.bucket}
+                            </span>
                           </td>
                           <td>
                             <button type="button" className="btn" style={{ fontSize: 11, padding: '2px 9px' }}

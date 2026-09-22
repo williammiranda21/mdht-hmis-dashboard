@@ -26,6 +26,9 @@ interface DetailRow {
   s6?: number | null; s12?: number | null;
   // Raw model feature vector (dossier fetch only — stripped from the list).
   feat?: number[] | null;
+  // Already-returned: the observed return happened `retd` days after this
+  // exit — a realized outcome, not a forecast. Absent on older loads.
+  ret?: number | null; retd?: number | null;
 }
 
 export async function GET(req: Request) {
@@ -93,12 +96,14 @@ export async function GET(req: Request) {
       sub: d.sub ?? null,
       s6: d.s6 ?? null,
       s12: d.s12 ?? null,
+      ret: d.ret ?? null,
+      retd: d.retd ?? null,
     }));
   }).sort((a, b) => b.score - a.score);
 
   // CSV as a real server download (county Web Isolation kills blob URLs).
   if (wantCsv) {
-    const lines = ['client_id,program,program_type,exit_date,destination,subsidy_type,los_days,prior_episodes,risk_6mo_pct,risk_12mo_pct,risk_24mo_pct,risk_tier'];
+    const lines = ['client_id,program,program_type,exit_date,destination,subsidy_type,los_days,prior_episodes,risk_6mo_pct,risk_12mo_pct,risk_24mo_pct,risk_tier,already_returned,returned_after_days'];
     for (const r of rows) {
       const destLbl = r.dest != null ? (DEST_LABELS[r.dest] ?? String(r.dest)) : '';
       const subLbl = r.sub != null ? (SUBSIDY_LABELS[r.sub] ?? String(r.sub)) : '';
@@ -107,7 +112,8 @@ export async function GET(req: Request) {
         r.los != null ? Math.round(r.los) : '', r.eps ?? '',
         r.s6 != null ? Number(r.s6).toFixed(1) : '',
         r.s12 != null ? Number(r.s12).toFixed(1) : '',
-        Number(r.score).toFixed(1), '"' + r.bucket + '"'].join(','));
+        Number(r.score).toFixed(1), '"' + r.bucket + '"',
+        r.ret ? 1 : 0, r.retd ?? ''].join(','));
     }
     return new NextResponse('﻿' + lines.join('\r\n'), {
       headers: {

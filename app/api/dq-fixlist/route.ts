@@ -120,10 +120,15 @@ export async function GET(req: Request) {
     .select('metric, due_date').eq('project_id', projectId);
   const dueRes = { data: dueRows };
   const openAges: Record<string, number> = {};
+  // Exact first-capture timestamps — the note-staleness checks compare these
+  // against note timestamps directly (day-rounded ages tie at the boundary
+  // when a note and a capture land on the same day; observed 2026-09-18).
+  const openSince: Record<string, string> = {};
   const nowMs = Date.now();
   for (const r of openItems) {
     openAges[`${r.metric}|${r.pid}`] =
       Math.max(0, Math.round((nowMs - +new Date(r.first_seen)) / 86400000));
+    openSince[`${r.metric}|${r.pid}`] = r.first_seen;
   }
   const dueDates: Record<string, string> = Object.fromEntries(
     ((dueRes.data ?? []) as { metric: string; due_date: string }[])
@@ -161,6 +166,6 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     project_id: projectId, period, categories, eva, evaPeriod,
-    openAges, dueDates, canSetDue: viewer.isAdmin,
+    openAges, openSince, dueDates, canSetDue: viewer.isAdmin,
   });
 }

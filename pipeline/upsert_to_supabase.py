@@ -57,8 +57,17 @@ REPO = WEB.parent                                 # repo root (the existing proj
 NETLIFY = REPO / "outputs" / "netlify"
 
 BATCH = 1000                                       # default rows per upsert request
-# drill_clients rows carry large personal_ids[] arrays — keep payloads small.
-BATCH_OVERRIDE = {"drill_clients": 150}
+# drill_clients rows carry large personal_ids[]/detail payloads — smaller
+# batches. 150→500 (2026-09-22): the limit that bit us was URL length on
+# DELETE .in_() chunks, not POST body size; ~4MB bodies ride fine and cut
+# the round-trip count ~3×.
+BATCH_OVERRIDE = {"drill_clients": 500}
+# Concurrent upsert workers (2026-09-22, user: "make it faster"): the load is
+# round-trip-bound through the county proxy, so a small pool multiplies
+# throughput almost linearly. Kept modest — the 9/15 DB incident was stacked
+# HEAVY reads; five parallel small writes are a different animal. Override
+# with HMIS_LOAD_WORKERS=1 to restore the sequential behavior.
+WORKERS = max(1, int(os.environ.get("HMIS_LOAD_WORKERS", "5")))
 
 # Granularity codes used as table period keys.
 GRAN_MONTHLY, GRAN_QUARTERLY, GRAN_FISCAL = "monthly", "quarterly", "fiscal"
@@ -399,7 +408,8 @@ def build_risk_drills(an: dict | None) -> list[dict]:
                     "score": o.get("RiskScore"), "bucket": o.get("RiskBucket"),
                     "dest": o.get("Dest"), "sub": o.get("Sub"),
                     "s6": o.get("Risk6mo"), "s12": o.get("Risk12mo"),
-                    "feat": o.get("Feat")}
+                    "feat": o.get("Feat"),
+                    "ret": o.get("Returned"), "retd": o.get("RetDays")}
                    for o in items],
     } for projid, items in by_proj.items()]
 
@@ -474,6 +484,10 @@ def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None,
         # Appended below only when readable, so a missing file can never
         # blank a good value.
     ]
+    # Export window start — drives the trend-chart cut below (2026-09-22:
+    # the county window moved to 10/1/2022, so the cut is derived from the
+    # export instead of hardcoded; falls back to the old 2023-10-01).
+    _export_start = datetime(2023, 10, 1)
     try:
         import csv as _csv
         with (REPO / "hud_data" / "Export.csv").open(encoding="utf-8-sig", newline="") as f:
@@ -481,6 +495,12 @@ def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None,
         _eed = ((_exp or {}).get("ExportEndDate") or "").strip()
         if _eed:
             rows.append({"key": "export_end", "value": _eed})
+        _esd = ((_exp or {}).get("ExportStartDate") or "").strip()[:10]
+        if _esd:
+            try:
+                _export_start = datetime.strptime(_esd, "%Y-%m-%d")
+            except ValueError:
+                pass
     except OSError:
         pass
     rows += [
@@ -523,16 +543,16 @@ def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None,
         _SERIES_KEYS = ("values", "label", "color", "slope_pm", "direction",
                         "fit", "proj_labels", "proj", "proj_lower", "proj_upper")
 
-        # Trend charts start at the county export window (FULL_START =
-        # 2023-10-01, export_merge.py) — the legacy master runs back to 1995
-        # and that tail crushed the readable part of every chart (user
-        # 2026-09-18). Slope/fit are unaffected: the fit window is the last
-        # 18 months regardless of what's displayed.
+        # Trend charts start at the county export window (read from
+        # Export.csv ExportStartDate above — 10/1/2022 as of 2026-09-22) —
+        # legacy series run back to 1995 and that tail crushed the readable
+        # part of every chart (user 2026-09-18). Slope/fit are unaffected:
+        # the fit window is the last 18 months regardless of what's shown.
         _periods = _t.get("periods") or []
         _cut = 0
         for _i, _lbl in enumerate(_periods):
             try:
-                if datetime.strptime(_lbl, "%b %Y") >= datetime(2023, 10, 1):
+                if datetime.strptime(_lbl, "%b %Y") >= _export_start:
                     _cut = _i
                     break
             except ValueError:
@@ -1155,10 +1175,28 @@ def main() -> None:
             for r in rows:
                 r["loaded_at"] = run_ts
         n = 0
-        for batch in chunked(rows, BATCH_OVERRIDE.get(table, BATCH)):
-            upsert_batch(client, table, batch, on_conflict)
-            n += len(batch)
-            print(f"  upserted {n:,}/{len(rows):,}", flush=True)
+        batches = list(chunked(rows, BATCH_OVERRIDE.get(table, BATCH)))
+        if WORKERS <= 1 or len(batches) <= 1:
+            for batch in batches:
+                upsert_batch(client, table, batch, on_conflict)
+                n += len(batch)
+                print(f"  upserted {n:,}/{len(rows):,}", flush=True)
+        else:
+            # Batches are PK-disjoint and order-independent; each keeps its
+            # own retry/halving logic. First failure cancels the queue and
+            # aborts the run exactly like the sequential path did.
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+                futs = {ex.submit(upsert_batch, client, table, b, on_conflict): len(b)
+                        for b in batches}
+                try:
+                    for f in as_completed(futs):
+                        f.result()
+                        n += futs[f]
+                        print(f"  upserted {n:,}/{len(rows):,}", flush=True)
+                except BaseException:
+                    ex.shutdown(cancel_futures=True)
+                    raise
         # Prune only when THIS run just rewrote the table's entire source; an
         # empty build (missing side-car file) must never empty the table.
         if table in PRUNED_TABLES and rows and not args.no_prune:
