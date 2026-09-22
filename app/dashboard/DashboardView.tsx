@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Granularity, ProjectMetric } from '../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../lib/types';
-import { periodLabel, fmtInt } from '../../lib/format';
+import { periodLabel, fmtInt, typeAbbr, typeFull } from '../../lib/format';
 import { fmtTarget } from '../../lib/target-metrics';
 import type { TargetMiss } from '../../lib/target-flags';
 import ProjectPanel from './ProjectPanel';
@@ -295,7 +295,7 @@ export default function DashboardView({
           <div className="fgroup">
             <span className="flabel">Project type</span>
             <select className="fselect" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-              {typeOptions.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : t}</option>)}
+              {typeOptions.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : typeAbbr(t)}</option>)}
             </select>
           </div>
           <div className="fgroup">
@@ -422,7 +422,7 @@ export default function DashboardView({
                         )}
                       </span>
                     </td>
-                    <td><span className="ty">{r.type_name}</span></td>
+                    <td><span className="ty" title={typeFull(r.type_name)}>{typeAbbr(r.type_name)}</span></td>
                     <td className="num">
                       {canDrill && r.clients_served ? (
                         <span className="drill" role="button" tabIndex={0}

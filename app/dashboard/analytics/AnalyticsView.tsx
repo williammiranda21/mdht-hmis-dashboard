@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { DEST_LABELS, SUBSIDY_LABELS, fmtInt } from '../../../lib/format';
+import { DEST_LABELS, SUBSIDY_LABELS, fmtInt, typeAbbr } from '../../../lib/format';
 import type { AnalyticsInsights, PathwayIntel, SystemForecast, TrendSeries } from '../../../lib/queries';
 import { CopyId, fmt, pct1 } from './shared';
 import { PathwaysSection, BottleneckSection, PredictorSection, SimulatorSection } from './PathwaySections';
@@ -1180,7 +1180,7 @@ function SurvivalSection({ a }: { a: AnalyticsInsights }) {
               background: 'var(--surface)', color: 'var(--text)', width: 200 }} />
           <select className="fselect" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
             <option value="">All types</option>
-            {outTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+            {outTypes.map((t) => <option key={t} value={t}>{typeAbbr(t)}</option>)}
           </select>
           <a className="btn" href="/api/analytics/outliers?format=csv">⬇ Export CSV</a>
         </div>

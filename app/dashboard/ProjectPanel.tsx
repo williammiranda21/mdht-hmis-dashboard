@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { periodLabel, fmtInt } from '../../lib/format';
+import { periodLabel, fmtInt, typeAbbr, typeFull } from '../../lib/format';
 import { TimeToHousing, type SurvivalRow } from '../../components/TimeToHousing';
 import PerformanceDiagnosis from './PerformanceDiagnosis';
 import DestProfile from './DestProfile';
@@ -246,7 +246,7 @@ export default function ProjectPanel({
           <>
             <h3>{proj.name ?? `Project ${proj.project_id}`}</h3>
             <div className="bnl-sub" style={{ marginTop: 2 }}>
-              {proj.type_name ?? '—'}
+              {proj.type_name ? <span title={typeFull(proj.type_name)}>{typeAbbr(proj.type_name)}</span> : '—'}
               {proj.operating_start && (
                 <> · {proj.operating_start.slice(0, 7)} – {proj.operating_end ? proj.operating_end.slice(0, 7) : 'ongoing'}</>
               )}
@@ -510,7 +510,7 @@ function PeerBench({
   return (
     <>
       <div className="bnl-sub" style={{ marginBottom: 8 }}>
-        {others.length} peer project{others.length === 1 ? '' : 's'} · {proj.type_name} · {periodLabel(period)}
+        {others.length} peer project{others.length === 1 ? '' : 's'} · {typeAbbr(proj.type_name)} · {periodLabel(period)}
       </div>
       {metrics.map((m) => {
         const vals = others.map((p) => pick(p, m)).filter((v): v is number => v != null).sort((a, b) => a - b);

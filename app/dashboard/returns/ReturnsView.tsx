@@ -11,7 +11,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Granularity } from '../../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../../lib/types';
-import { periodLabel, lookbackLabel, fmtInt, DEST_LABELS } from '../../../lib/format';
+import { periodLabel, lookbackLabel, fmtInt, DEST_LABELS, typeAbbr, typeFull } from '../../../lib/format';
 import ProjectPanel from '../ProjectPanel';
 import ProjectPicker from '../../../components/ProjectPicker';
 import { useClientDrill, DrillModal } from '../../../components/ClientDrill';
@@ -177,7 +177,7 @@ export default function ReturnsView({ periods, granularity, period, household, s
           <div className="fgroup">
             <span className="flabel">Project type</span>
             <select className="fselect" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-              {typeOptions.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : t}</option>)}
+              {typeOptions.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : typeAbbr(t)}</option>)}
             </select>
           </div>
           <div className="fgroup">
@@ -235,7 +235,7 @@ export default function ReturnsView({ periods, granularity, period, household, s
                       {r.name}
                     </span>
                   </td>
-                  <td><span className="ty">{r.type_name}</span></td>
+                  <td><span className="ty" title={typeFull(r.type_name)}>{typeAbbr(r.type_name)}</span></td>
                   <td className="num"><strong>{drillCell(r, 'returns_exits', 'PH exits', r.exits)}</strong></td>
                   <td className="num">{drillCell(r, 'returns_lt6', 'Returned within 6 months', r.lt6)}</td>
                   <RateCell band={r.lt6} exits={r.exits} />

@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Granularity, ProjectMetric } from '../../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../../lib/types';
-import { periodLabel, fmtInt } from '../../../lib/format';
+import { periodLabel, fmtInt, typeAbbr, typeFull } from '../../../lib/format';
 import { fmtTarget } from '../../../lib/target-metrics';
 import type { TargetMiss } from '../../../lib/target-flags';
 
@@ -115,7 +115,7 @@ export default function RankingsView({ rows, periods, granularity, period, house
           <div className="fgroup">
             <span className="flabel">Project type</span>
             <select className="fselect" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-              {typeOptions.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : t}</option>)}
+              {typeOptions.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : typeAbbr(t)}</option>)}
             </select>
           </div>
           <div className={`switch${activeOnly ? '' : ' off'}`} onClick={() => setActiveOnly((v) => !v)}>
@@ -136,9 +136,9 @@ export default function RankingsView({ rows, periods, granularity, period, house
               <div className="rkrow" key={r.project_id}>
                 <span className="rank">{i + 1}</span>
                 {/* .nm is ellipsised at 300px, so carry the full name in a title */}
-                <span className="pnm" title={r.type_name ? `${r.project_name} · ${r.type_name}` : r.project_name ?? ''}>
+                <span className="pnm" title={r.type_name ? `${r.project_name} · ${typeFull(r.type_name)}` : r.project_name ?? ''}>
                   <span className="nm">{r.project_name}</span>
-                  <span className="ty">{r.type_name}</span>
+                  <span className="ty">{typeAbbr(r.type_name)}</span>
                   {(() => {
                     const miss = (targetFlags[r.project_id] ?? []).filter((e) => !e.met);
                     // Icon-only in the fixed-width name block; tooltip carries

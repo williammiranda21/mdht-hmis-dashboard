@@ -254,7 +254,7 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
           <span className="fmark">HT</span>
         )}
         <div style={{ minWidth: 0 }}>
-          <h1>{current ? nameOf(current) : 'My assignments'}</h1>
+          <h1>{current ? nameOf(current) : 'MY ASSIGNMENTS'}</h1>
           <div className="fsub">{current
             ? `Case #${current.id} · ${priorityBand(current.priority ?? 0)} priority`
             : `${teamLabel} · ${myName}`}</div>

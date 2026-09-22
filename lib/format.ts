@@ -83,3 +83,42 @@ export const DEST_LABELS: Record<number, string> = {
 
 export const granularityFromPeriod = (period: string): Granularity =>
   /^\d{4}-\d{2}$/.test(period) ? 'monthly' : /-Q[1-4]$/.test(period) ? 'quarterly' : 'fiscal';
+
+/** Project-type display labels — ALL abbreviated (user directive 2026-09-22).
+ *  Keys are the pipeline's stored names (apr_monthly_report.py
+ *  PROJECT_TYPE_NAMES), which stay in the data so filters, targets, and CSV
+ *  exports never shift; this pair is display-only. typeAbbr() renders the
+ *  short label, typeFull() the spelled-out name for tooltips. Unknown
+ *  strings pass through unchanged. */
+const TYPE_ABBR: Record<string, string> = {
+  'ES – Entry Exit': 'ES – EE',
+  'ES – Night-by-Night': 'ES – NbN',
+  'Transitional Housing': 'TH',
+  'Street Outreach': 'SO',
+  'Services Only': 'SSO',
+  'Safe Haven': 'SH',
+  'PH – Housing Only': 'PH – HO',
+  'PH – Housing w/ Services': 'PH – HwS',
+  'Homelessness Prevention': 'HP',
+  'Coordinated Entry': 'CE',
+};
+const TYPE_FULL: Record<string, string> = {
+  'ES – Entry Exit': 'Emergency Shelter – Entry Exit',
+  'ES – Night-by-Night': 'Emergency Shelter – Night-by-Night',
+  'Transitional Housing': 'Transitional Housing',
+  'PSH': 'Permanent Supportive Housing',
+  'RRH': 'Rapid Re-Housing',
+  'Street Outreach': 'Street Outreach',
+  'Services Only': 'Supportive Services Only',
+  'Safe Haven': 'Safe Haven',
+  'PH – Housing Only': 'Permanent Housing – Housing Only',
+  'PH – Housing w/ Services': 'Permanent Housing – Housing with Services',
+  'Homelessness Prevention': 'Homelessness Prevention',
+  'Coordinated Entry': 'Coordinated Entry',
+  'Day Shelter': 'Day Shelter',
+  'Other': 'Other',
+};
+export const typeAbbr = (t: string | null | undefined): string =>
+  (t ? TYPE_ABBR[t] ?? t : '');
+export const typeFull = (t: string | null | undefined): string =>
+  (t ? TYPE_FULL[t] ?? t : '');

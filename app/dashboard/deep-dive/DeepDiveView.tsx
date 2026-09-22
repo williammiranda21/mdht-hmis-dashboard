@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { fmtInt, periodLabel } from '../../../lib/format';
+import { fmtInt, periodLabel, typeAbbr, typeFull } from '../../../lib/format';
 import PerformanceGrid from './PerformanceGrid';
 import ProjectPathways from './ProjectPathways';
 import DigestSection from './DigestSection';
@@ -125,10 +125,10 @@ export default function DeepDiveView({
             // Names are ellipsised to keep the grid tidy, so the full name lives
             // in a title on the whole row — hovering anywhere reveals it.
             <label key={o.id} className={`dd-opt${sel.includes(o.id) ? ' on' : ''}`}
-              title={o.type ? `${o.name} · ${o.type}` : o.name}>
+              title={o.type ? `${o.name} · ${typeFull(o.type)}` : o.name}>
               <input type="checkbox" checked={sel.includes(o.id)} onChange={() => toggle(o.id)} />
               <span className="dd-nm">{o.name}</span>
-              {o.type && <span className="ty">{o.type}</span>}
+              {o.type && <span className="ty">{typeAbbr(o.type)}</span>}
             </label>
           ))}
           {!shown.length && <div className="hc-none">No projects match that filter.</div>}

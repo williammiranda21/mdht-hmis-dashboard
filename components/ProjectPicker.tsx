@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { typeAbbr } from '../lib/format';
 
 /**
  * Multi-project filter — button + fixed popover with search and checkboxes.
@@ -108,7 +109,7 @@ export default function ProjectPicker({ options, selected, onChange, title, mode
                     <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap', fontSize: 13,
                       color: isInactive(o.name) ? 'var(--muted)' : undefined }}>{o.name}</span>
-                    {o.type && <span className="ty" style={{ marginLeft: 0, flexShrink: 0 }}>{o.type}</span>}
+                    {o.type && <span className="ty" style={{ marginLeft: 0, flexShrink: 0 }}>{typeAbbr(o.type)}</span>}
                   </label>
                 ))}
                 {!opts.length && <div className="hc-none">No projects match that search.</div>}

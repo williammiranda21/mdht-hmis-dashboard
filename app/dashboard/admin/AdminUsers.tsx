@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
-import { fmtInt } from '../../../lib/format';
+import { fmtInt, typeAbbr } from '../../../lib/format';
 
 export interface AdminProfile {
   id: string;
@@ -468,7 +468,7 @@ function ProjectPicker({
           <label key={p.id} className="colmenu-row">
             <input type="checkbox" checked={sel.has(p.id)} onChange={() => toggle(p.id)} />
             <span style={{ flex: 1 }}>{p.name}</span>
-            <span className="ty">{p.type}</span>
+            <span className="ty">{typeAbbr(p.type)}</span>
           </label>
         ))}
         {!shown.length && <div className="empty" style={{ padding: 20 }}>No projects match.</div>}

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { TARGET_METRICS, fmtTarget, metricAppliesTo, type TargetMetric } from '../../../../lib/target-metrics';
+import { typeAbbr } from '../../../../lib/format';
 
 export interface ProjOpt { id: number; name: string; type: number | null; typeName: string }
 export interface ProjectTargetRow { project_id: number; metric: string; target: number }
@@ -75,7 +76,7 @@ export default function TargetsAdmin({
     : (proj == null ? {} : (pT[proj.id] ?? {}));
   const fallback = proj?.type != null ? (tT[proj.type] ?? {}) : null;
   const typeName = mode === 'type' && typeSel !== ''
-    ? (types.find((t) => t.code === typeSel)?.name ?? `Type ${typeSel}`) : '';
+    ? typeAbbr(types.find((t) => t.code === typeSel)?.name ?? `Type ${typeSel}`) : '';
 
   const context = (m: TargetMetric): string => {
     if (mode === 'type') {
@@ -150,7 +151,7 @@ export default function TargetsAdmin({
               onChange={(e) => setTypeSel(e.target.value === '' ? '' : Number(e.target.value))}>
               <option value="">Choose a project type…</option>
               {types.map((t) => (
-                <option key={t.code} value={t.code}>{t.name} ({t.count} projects)</option>
+                <option key={t.code} value={t.code}>{typeAbbr(t.name)} ({t.count} projects)</option>
               ))}
             </select>
           ) : (
@@ -161,7 +162,7 @@ export default function TargetsAdmin({
                 onChange={(e) => setProjSel(e.target.value === '' ? '' : Number(e.target.value))}>
                 <option value="">Choose a project… ({filteredProjects.length})</option>
                 {filteredProjects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}{p.typeName ? ` — ${p.typeName}` : ''}</option>
+                  <option key={p.id} value={p.id}>{p.name}{p.typeName ? ` — ${typeAbbr(p.typeName)}` : ''}</option>
                 ))}
               </select>
             </>

@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Granularity } from '../../../lib/types';
-import { periodLabel, fmtInt } from '../../../lib/format';
+import { periodLabel, fmtInt, typeAbbr, typeFull } from '../../../lib/format';
 import DqFixList from './DqFixList';
 
 type DqRecord = Record<string, number | null>;
@@ -293,7 +293,7 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
           <div className="fgroup">
             <span className="flabel">Project type</span>
             <select className="fselect" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-              {typeOptions.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : t}</option>)}
+              {typeOptions.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : typeAbbr(t)}</option>)}
             </select>
           </div>
           <div className="fgroup">
@@ -462,7 +462,7 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
                         </span>
                       )}
                     </td>
-                    <td><span className="ty">{r.type_name}</span></td>
+                    <td><span className="ty" title={typeFull(r.type_name)}>{typeAbbr(r.type_name)}</span></td>
                     <td className="num"><Gauge score={d.DQ_Score} t={dqTargets[r.project_id]} /></td>
                     {vis('pii') && <td className="num"><ScorePill v={d.DQ_PII_Score} t={dqTargets[r.project_id]} /></td>}
                     {vis('univ') && <td className="num"><ScorePill v={d.DQ_Univ_Score} t={dqTargets[r.project_id]} /></td>}
