@@ -10,3 +10,8 @@ tsconfig.tsbuildinfo
 pipeline/__pycache__/
 # Temp login credentials written by seed_users.py — never commit
 pipeline/.seeded_credentials.txt
+
+# Claude Code personal settings + impeccable's per-machine engine binary
+.claude/settings.local.json
+.claude/skills/impeccable/scripts/bin/
+.github/skills/impeccable/scripts/bin/
