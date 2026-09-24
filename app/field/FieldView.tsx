@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -6,6 +6,7 @@ import { supabaseBrowser } from '../../lib/supabase-browser';
 import { MAX_FAILED_ATTEMPTS, priorityBand } from '../../lib/helpline-options';
 import type { HlCase } from '../dashboard/helpline/HelplineView';
 import QrShare from '../../components/QrShare';
+import { IconCompass, IconHome } from '../../components/icons';
 
 /**
  * The field app screen (mock approved 2026-09-10). One-thumb design rules:
@@ -61,7 +62,7 @@ function getGps(): Promise<string | null> {
 const SHEET_COPY: Record<Outcome, { t: string; s: string; btn: string; cls: string }> = {
   attempt: { t: '✗ Couldn’t locate', s: 'Logs a failed attempt with today’s date — dispatch sees it immediately.', btn: 'Log attempt', cls: 'red' },
   contact: { t: '✓ Made contact', s: 'Logs a successful contact on the outreach trail.', btn: 'Log contact', cls: '' },
-  confirm: { t: '🏠 Confirmed homeless', s: 'Marks the case confirmed in the field. The system then watches HMIS for the enrollment to verify it.', btn: 'Confirm', cls: 'green' },
+  confirm: { t: 'Confirmed homeless', s: 'Marks the case confirmed in the field. The system then watches HMIS for the enrollment to verify it.', btn: 'Confirm', cls: 'green' },
 };
 
 export interface HmisGlance {
@@ -338,10 +339,10 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
             {current.area && <div className="fsub2">{current.area}{current.county_district ? ` · ${current.county_district}` : ''}</div>}
             {current.lat != null && current.lng != null ? (
               <a className="fnav" target="_blank" rel="noreferrer"
-                href={`https://maps.google.com/?q=${current.lat},${current.lng}`}>🧭 Navigate there</a>
+                href={`https://maps.google.com/?q=${current.lat},${current.lng}`}><IconCompass size={14} /> Navigate there</a>
             ) : current.address ? (
               <a className="fnav" target="_blank" rel="noreferrer"
-                href={`https://maps.google.com/?q=${encodeURIComponent(`${current.address}, ${current.area ?? ''} FL`)}`}>🧭 Navigate there</a>
+                href={`https://maps.google.com/?q=${encodeURIComponent(`${current.address}, ${current.area ?? ''} FL`)}`}><IconCompass size={14} /> Navigate there</a>
             ) : null}
           </div>
 
@@ -417,7 +418,7 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
           <button className="fabtn fa-contact" disabled={busy} onClick={() => { setSheet('contact'); setNote(''); }}>
             ✓ Made<br />contact</button>
           <button className="fabtn fa-confirm" disabled={busy} onClick={() => { setSheet('confirm'); setNote(''); }}>
-            🏠 Confirmed<br />homeless<small>starts HMIS verification</small></button>
+            <IconHome size={17} /> Confirmed<br />homeless<small>starts HMIS verification</small></button>
         </div>
       )}
 
@@ -439,7 +440,7 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
         </>
       )}
 
-      <div className={toastMsg ? 'ftoast on' : 'ftoast'}>{toastMsg}</div>
+      <div className={toastMsg ? 'ftoast on' : 'ftoast'} aria-live="polite">{toastMsg}</div>
     </div>
   );
 }
@@ -448,7 +449,9 @@ const FIELD_CSS = `
   .fApp{--fbg:var(--bg); --fcardc:var(--card); --fink:var(--text); --fmut:var(--muted);
     --fline:var(--border); --fbrand:var(--accent); --fred:var(--danger); --fgreen:#0b8a5c;
     --fblue:#3b82f6; --famber:var(--warn);
-    max-width:520px; margin:0 auto; min-height:100vh; font-size:16px; position:relative}
+    max-width:520px; margin:0 auto; min-height:100vh; min-height:100dvh; font-size:16px; position:relative}
+  /* phone touch minimum (44pt) for the small pills that reach this surface */
+  .fApp .tbtn{min-height:44px;padding:10px 16px}
   .fApp button{font-family:inherit}
   .ftop{position:sticky; top:0; z-index:20; background:var(--fcardc); border-bottom:1px solid var(--fline);
     padding:12px 16px; display:flex; align-items:center; gap:10px}

@@ -1,8 +1,9 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import type { PathwayIntel, SankeyData, SankeyLink } from '../../../lib/queries';
 import { CopyId, fmt, pct1 } from './shared';
+import { IconClock, IconDownload } from '../../../components/icons';
 
 /**
  * Pathway Intelligence — the four system tabs of the old static pathways page,
@@ -212,7 +213,7 @@ function PathList({ paths, colorMap }: {
             {dur && (
               <span className="bnl-sub" title="Median time from first entry to outcome"
                 style={{ fontSize: 10, whiteSpace: 'nowrap', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>
-                ⏱ {dur}
+                <IconClock size={10} /> {dur}
               </span>
             )}
             <b className="num" style={{ fontSize: 12, flexShrink: 0 }}>{fmt(n)}</b>
@@ -709,7 +710,7 @@ export function PredictorSection({ pi, initialPid = null }: { pi: PathwayIntel; 
           <option value="los_desc">Longest stay</option>
           <option value="prior_desc">Most prior episodes</option>
         </select>
-        <a className="btn" href="/api/analytics/predictor?format=csv">⬇ Export CSV</a>
+        <a className="btn" href="/api/analytics/predictor?format=csv"><IconDownload size={12} /> Export CSV</a>
         {pm && (
           <span className="bnl-sub" style={{ marginLeft: 'auto', border: '1px solid var(--border)', borderRadius: 12, padding: '3px 10px' }}>
             Model: {fmt(pm.n_trained)} clients · {(pm.accuracy * 100).toFixed(1)}% accuracy

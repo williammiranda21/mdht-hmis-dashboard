@@ -128,6 +128,13 @@ export default function ReturnsView({ periods, granularity, period, household, s
   }
   const car = (k: SortKey) => <span className="car">{sortKey === k ? (sortDir < 0 ? '▼' : '▲') : '▼'}</span>;
   const th = (k: SortKey, num = true) => `sortable${num ? ' num' : ''}${sortKey === k ? ' sorted' : ''}`;
+  // Keyboard-operable sort header (a11y 2026-09-24): real <button> + aria-sort.
+  const sTh = (k: SortKey, label: string, num = true) => (
+    <th key={k} className={th(k, num)}
+      aria-sort={sortKey === k ? (sortDir === 1 ? 'ascending' : 'descending') : undefined}>
+      <button type="button" className="thb" onClick={() => toggleSort(k)}>{label} {car(k)}</button>
+    </th>
+  );
 
   // KPI band rate + color class
   const kpiPct = (n: number) => (tot.exits > 0 ? `${((n / tot.exits) * 100).toFixed(1)}%` : 'N/A');
@@ -211,17 +218,17 @@ export default function ReturnsView({ periods, granularity, period, household, s
           <table>
             <thead>
               <tr>
-                <th className={th('name', false)} onClick={() => toggleSort('name')}>Project {car('name')}</th>
-                <th className={th('type_name', false)} onClick={() => toggleSort('type_name')}>Type {car('type_name')}</th>
-                <th className={th('exits')} onClick={() => toggleSort('exits')}>PH Exits {car('exits')}</th>
-                <th className={th('lt6')} onClick={() => toggleSort('lt6')}>&lt;6mo {car('lt6')}</th>
-                <th className={th('rlt6')} onClick={() => toggleSort('rlt6')}>Rate {car('rlt6')}</th>
-                <th className={th('r6')} onClick={() => toggleSort('r6')}>6–12mo {car('r6')}</th>
-                <th className={th('rr6')} onClick={() => toggleSort('rr6')}>Rate {car('rr6')}</th>
-                <th className={th('r13')} onClick={() => toggleSort('r13')}>13–24mo {car('r13')}</th>
-                <th className={th('rr13')} onClick={() => toggleSort('rr13')}>Rate {car('rr13')}</th>
-                <th className={th('r2')} onClick={() => toggleSort('r2')}>2yr Returns {car('r2')}</th>
-                <th className={th('rr2')} onClick={() => toggleSort('rr2')}>2yr Rate {car('rr2')}</th>
+                {sTh('name', 'Project', false)}
+                {sTh('type_name', 'Type', false)}
+                {sTh('exits', 'PH Exits')}
+                {sTh('lt6', '<6mo')}
+                {sTh('rlt6', 'Rate')}
+                {sTh('r6', '6–12mo')}
+                {sTh('rr6', 'Rate')}
+                {sTh('r13', '13–24mo')}
+                {sTh('rr13', 'Rate')}
+                {sTh('r2', '2yr Returns')}
+                {sTh('rr2', '2yr Rate')}
               </tr>
             </thead>
             <tbody>

@@ -1,7 +1,8 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { periodLabel, fmtInt, typeAbbr, typeFull } from '../../lib/format';
+import { IconPrinter } from '../../components/icons';
 import { TimeToHousing, type SurvivalRow } from '../../components/TimeToHousing';
 import PerformanceDiagnosis from './PerformanceDiagnosis';
 import DestProfile from './DestProfile';
@@ -235,7 +236,7 @@ export default function ProjectPanel({
               rest of the page and un-clips the scroll areas so the full history
               table prints. "Save as PDF" in the browser's print dialog. */}
           <button className="btn pp-noprint" onClick={() => window.print()}
-            title="Opens the print dialog — choose “Save as PDF”">🖨 PDF</button>
+            title="Opens the print dialog — choose “Save as PDF”"><IconPrinter size={11} /> PDF</button>
           <button className="bnl-x pp-noprint" onClick={onClose}>✕</button>
         </div>
 

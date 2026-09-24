@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -13,6 +13,7 @@ import { featuresAt, inFeature, type GeoFC } from '../../../../lib/slippy';
 import { fetchCustomAreas } from '../../../../lib/custom-areas';
 import ReferOut, { type ReferralResource } from '../../../../components/ReferOut';
 import { CopyId } from '../../analytics/shared';
+import { IconSearch, IconLink, IconMapPin, IconMap } from '../../../../components/icons';
 import PinMap from '../../../../components/PinMap';
 
 // District boundary files, fetched once per session (same-origin static).
@@ -516,7 +517,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
                 borderRadius: dupOpen ? '8px 8px 0 0' : 8, padding: '5px 11px' }}>
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {top
-                    ? <>🔎 Possible existing case: <b>#{top.p.id} {nm(top.p)}</b>
+                    ? <><IconSearch size={11} /> Possible existing case: <b>#{top.p.id} {nm(top.p)}</b>
                         <span className="bnl-sub"> · {top.via} · {top.p.status}
                         {openMatches.length > 1 ? ` · +${openMatches.length - 1} more` : ''}</span></>
                     : <>☎ Number called before <span className="bnl-sub">· {ctxN} earlier
@@ -638,7 +639,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
           <div style={{ background: 'var(--accent-light)', border: '1px solid var(--accent)',
             borderRadius: 8, padding: '10px 14px', marginTop: 10, fontSize: 12.5 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-              <b style={{ color: 'var(--strong)' }}>🔗 About this client — {linked.name || 'HMIS record'}</b>
+              <b style={{ color: 'var(--strong)' }}><IconLink size={12} /> About this client — {linked.name || 'HMIS record'}</b>
               <button type="button" className="tbtn" onClick={() => setLinked(null)}>✕ Unlink</button>
             </div>
             <div style={{ marginTop: 4, color: 'var(--text)' }}>
@@ -699,7 +700,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
                     {m.bnl.last_contact ? ` · seen ${m.bnl.last_contact}` : ''}</span>
                 )}
                 <span style={{ flex: 1 }} />
-                <button type="button" className="tbtn" onClick={() => setLinked(m)}>🔗 Link</button>
+                <button type="button" className="tbtn" onClick={() => setLinked(m)}><IconLink size={11} /> Link</button>
               </div>
             ))}
             {new Set(hmisCands.map((m) => `${(m.name || '').toLowerCase()}|${m.dob ?? ''}`)).size
@@ -728,11 +729,11 @@ export default function CallIntakeForm({ me }: { me: string }) {
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); geocode(); } }} />
           <button className="tbtn" type="button" disabled={geo === 'loading'} onClick={geocode}
             title="Look up coordinates (server-side); the pin sets the district and drives the team suggestion">
-            {geo === 'loading' ? 'Locating…' : '📍 Locate'}</button>
+            {geo === 'loading' ? 'Locating…' : <><IconMapPin size={11} /> Locate</>}</button>
           {!pin && !manualMap && (
             <button className="tbtn" type="button"
               title="No usable address? Open the map and click where the caller is"
-              onClick={() => setManualMap(true)}>🗺 Drop pin</button>
+              onClick={() => setManualMap(true)}><IconMap size={11} /> Drop pin</button>
           )}
         </div>
         {/* No area question (user directive 2026-08-20): the PIN decides — city
@@ -740,7 +741,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
             routing fallback. The operator just types what the caller says. */}
         {f.address.trim().length >= 4 && !pin && geo === null && (
           <div className="bnl-sub" style={{ marginTop: 4 }}>
-            Press Enter or 📍 Locate — the pin sets the district and the team suggestion.
+            Press Enter or Locate — the pin sets the district and the team suggestion.
           </div>
         )}
         {Array.isArray(geo) && geo.length === 0 && (
@@ -750,7 +751,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
           <div style={{ background: 'var(--accent-light)', border: '1px solid var(--accent)',
             borderRadius: 8, padding: '7px 12px', fontSize: 12.5, marginTop: 6,
             color: 'var(--strong)' }}>
-            📍 {distNote}
+            <IconMapPin size={11} /> {distNote}
           </div>
         )}
         {Array.isArray(geo) && geo.map((g) => (
@@ -767,8 +768,8 @@ export default function CallIntakeForm({ me }: { me: string }) {
           <div style={{ marginTop: 8 }}>
             <div className="bnl-sub" style={{ marginBottom: 4 }}>
               {pin
-                ? '🎯 Fine-tune: drag to pan · scroll to zoom · CLICK to move the pin ("south side of the park") — districts and the team suggestion update live.'
-                : '🎯 Click the map where the caller is — the pin sets the districts and routing.'}
+                ? 'Fine-tune: drag to pan · scroll to zoom · CLICK to move the pin ("south side of the park") — districts and the team suggestion update live.'
+                : 'Click the map where the caller is — the pin sets the districts and routing.'}
             </div>
             <PinMap lat={pin?.lat ?? null} lng={pin?.lng ?? null} focusKey={focusKey}
               onPick={movePin} />

@@ -1,6 +1,7 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
+import { IconPrinter, IconTarget } from '../../../components/icons';
 import {
   MILESTONES,
   type BnlClient, type BnlDetail, type BnlHist3, type BnlTimelineEvent,
@@ -94,7 +95,7 @@ export default function ClientDrawer({ row, asOf, isAdmin = false, onClose, focu
       <div className="bnl-modal" id="bnl-printable">
         <button className="btn pp-noprint" style={{ float: 'right', marginLeft: 8 }}
           onClick={() => window.print()}
-          title="Opens the print dialog — choose “Save as PDF”">🖨 PDF</button>
+          title="Opens the print dialog — choose “Save as PDF”"><IconPrinter size={11} /> PDF</button>
         {onToggleFocus && (
           <button className="btn pp-noprint"
             style={{ float: 'right', marginLeft: 8, color: focused ? 'var(--warn)' : undefined }}
@@ -119,7 +120,7 @@ export default function ClientDrawer({ row, asOf, isAdmin = false, onClose, focu
             fontSize: 12.5, padding: '7px 12px', background: 'var(--hair)', borderRadius: 8 }}>
             {risk.housing && row.status !== 'housed' && (
               <span title="Housing predictor (Analytics tab) — probability this active enrollment ends in permanent housing">
-                🎯 Housing probability{' '}
+                <IconTarget size={12} /> Housing probability{' '}
                 <b className="num" style={{ color: risk.housing.score >= 0.6 ? 'var(--accent)' : risk.housing.score >= 0.35 ? 'var(--warn)' : 'var(--danger)' }}>
                   {Math.round(risk.housing.score * 100)}%
                 </b>

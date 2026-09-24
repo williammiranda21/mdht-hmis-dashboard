@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -16,6 +16,7 @@ import { fetchCustomAreas } from '../../../lib/custom-areas';
 import ReferOut, { type ReferralResource } from '../../../components/ReferOut';
 import { CopyId } from '../analytics/shared';
 import QrShare from '../../../components/QrShare';
+import { IconPrinter, IconDownload, IconSmartphone, IconSearch, IconMapPin, IconHome } from '../../../components/icons';
 
 export interface HlCase {
   id: number;
@@ -808,7 +809,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                     <td><Trail events={events[c.id]} c={c} /></td>
                     {/* Two-line action cluster (user mock approval 2026-09-11,
                         "buttons smaller"): quiet utilities on top, color-coded
-                        outcomes below (same red ✗ / blue ✓ / green 🏠 language
+                        outcomes below (same red ✗ / blue ✓ / green house language
                         as the field app), Close demoted to a text link. Wraps
                         instead of forcing a horizontal scrollbar. */}
                     <td style={{ textAlign: 'right' }}>
@@ -818,7 +819,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                             <button className="tbtn" disabled={busy}
                               title="Search HMIS for this caller (DOB / SSN-4 / name) — a person confirms the match"
                               onClick={() => findMatches(c.id)}>
-                              {openId === c.id ? 'Refresh' : '🔎 HMIS match'}</button>
+                              {openId === c.id ? 'Refresh' : <><IconSearch size={11} /> HMIS match</>}</button>
                           ) : (
                             <Link className="tbtn"
                               href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}
@@ -830,10 +831,10 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                             <button className="tbtn"
                               title="Show where to find them — location details + map, right here"
                               onClick={() => setMapId(mapId === c.id ? null : c.id)}>
-                              {mapId === c.id ? 'Hide map' : '📍 Map'}</button>
+                              {mapId === c.id ? 'Hide map' : <><IconMapPin size={11} /> Map</>}</button>
                           )}
                           <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank"
-                            title="One-page dispatch sheet — print or save as PDF for the field team">🖨 Sheet</Link>
+                            title="One-page dispatch sheet — print or save as PDF for the field team"><IconPrinter size={11} /> Sheet</Link>
                         </div>
                         <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                           <button disabled={busy}
@@ -856,7 +857,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                               cursor: 'pointer', fontFamily: 'inherit' }}
                             title="Outreach verified this person is homeless — starts the enrollment-verification clock"
                             onClick={() => update(c.id, { status: 'confirmed', confirmed_at: new Date().toISOString().slice(0, 10) })}>
-                            🏠 Confirmed homeless</button>
+                            <IconHome size={12} /> Confirmed homeless</button>
                         </div>
                         <button disabled={busy}
                           style={{ background: 'none', border: 'none', color: 'var(--faint)',
@@ -901,7 +902,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                           {c.lat != null && c.lng != null
                             ? <CaseMap lat={c.lat} lng={c.lng} zoom={17} width={640} height={280} />
                             : <div className="bnl-sub">No coordinates on this case — the address above is
-                                all we have. Use 📍 Locate on intake to add a pin.</div>}
+                                all we have. Use Locate on intake to add a pin.</div>}
                         </div>
                       </td>
                     </tr>
@@ -1012,7 +1013,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                           not enrolled · {c.confirmed_at ? `${Math.floor((Date.now() - new Date(c.confirmed_at).getTime()) / 86_400_000)}d` : '?'}</span>}
                 </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank">🖨 Sheet</Link>
+                  <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank"><IconPrinter size={11} /> Sheet</Link>
                   {c.matched_pid && (
                     <Link className="tbtn" style={{ marginLeft: 6 }}
                       href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}>BNL →</Link>
@@ -1060,7 +1061,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
             <Link href="/field" className="tbtn"
               title="Mobile app for outreach workers — share this link with field staff">
-              📱 Field app — share with outreach staff</Link>
+              <IconSmartphone size={12} /> Field app — share with outreach staff</Link>
             <QrShare path="/field" label="QR code" />
           </div>
           <PriorityRulesAdmin me={me} rules={rules}
@@ -1411,7 +1412,7 @@ function Breakdown({ cases, teams, rules }: { cases: HlCase[]; teams: Team[]; ru
           onChange={(e) => setCol(e.target.value as BdCol)}>
           {BD_COLS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </select>
-        <button className="tbtn" style={{ marginLeft: 4 }} onClick={exportCsv}>⬇ CSV</button>
+        <button className="tbtn" style={{ marginLeft: 4 }} onClick={exportCsv}><IconDownload size={11} /> CSV</button>
       </span>
     }>
       <div className="scroll"><table className="bnl-table">
@@ -1547,7 +1548,7 @@ function ZipHeat({ cases, callsByCase }: {
           </table>
           {unpinned > 0 && (
             <div className="bnl-sub" style={{ marginTop: 6 }}>
-              {fmtInt(unpinned)} case{unpinned === 1 ? '' : 's'} without a map pin — use 📍 Locate
+              {fmtInt(unpinned)} case{unpinned === 1 ? '' : 's'} without a map pin — use Locate
               on intake so every call lands on the map.
             </div>
           )}
@@ -2114,14 +2115,14 @@ function Reporting({ cases: allCases, teams, events, callsByCase = {}, callLog =
                 onClick={(e) => e.currentTarget.showPicker?.()}
                 onChange={(e) => setTo(e.target.value)} />
               {(from || to) && (
-                <button type="button" className="dclr" title="Clear dates"
+                <button type="button" className="dclr" title="Clear dates" aria-label="Clear dates"
                   onClick={() => { setFrom(''); setTo(''); }}>✕</button>
               )}
             </span>
           )}
           <Link href="/dashboard/helpline/report" className="tbtn"
-            title="Board-ready monthly report — print or save as PDF">🖨 Monthly report</Link>
-          <button className="tbtn" onClick={downloadCsv}>⬇ CSV</button>
+            title="Board-ready monthly report — print or save as PDF"><IconPrinter size={11} /> Monthly report</Link>
+          <button className="tbtn" onClick={downloadCsv}><IconDownload size={11} /> CSV</button>
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
@@ -2770,7 +2771,7 @@ function CaseDrawer({ c, teamName, events, me, onClose }: {
           <span className="bnl-sub">called {stamp(c.created_at)}</span>
           {teamName && <span className="bnl-fp bnl-fp-par">{teamName}</span>}
           <span style={{ flex: 1 }} />
-          <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank">🖨 Sheet</Link>
+          <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank"><IconPrinter size={11} /> Sheet</Link>
           {c.matched_pid && (
             <Link className="tbtn" href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}>BNL →</Link>
           )}

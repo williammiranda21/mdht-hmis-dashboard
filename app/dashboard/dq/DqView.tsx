@@ -269,6 +269,14 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
   }
   const car = (k: SortKey) => <span className="car">{sortKey === k ? (sortDir < 0 ? '▼' : '▲') : '▼'}</span>;
   const th = (k: SortKey, num = false) => `sortable${num ? ' num' : ''}${sortKey === k ? ' sorted' : ''}`;
+  // Keyboard-operable sort header (a11y 2026-09-24): real <button> in the th
+  // + aria-sort. Plain render function, not a nested component.
+  const sTh = (k: SortKey, label: string, num = false, title?: string) => (
+    <th key={k} className={th(k, num)} title={title}
+      aria-sort={sortKey === k ? (sortDir === 1 ? 'ascending' : 'descending') : undefined}>
+      <button type="button" className="thb" onClick={() => toggleSort(k)}>{label} {car(k)}</button>
+    </th>
+  );
 
   return (
     <>
@@ -417,28 +425,28 @@ export default function DqView({ periods, granularity, period, rows, evaCounts, 
           <table>
             <thead>
               <tr>
-                <th className={th('name')} onClick={() => toggleSort('name')}>Project {car('name')}</th>
-                <th className={th('type_name')} onClick={() => toggleSort('type_name')}>Type {car('type_name')}</th>
-                <th className={th('DQ_Score', true)} onClick={() => toggleSort('DQ_Score')}>Overall {car('DQ_Score')}</th>
-                {vis('pii') && <th className={th('DQ_PII_Score', true)} onClick={() => toggleSort('DQ_PII_Score')}
-                  title="APR Q6a score = 100 − unique clients with any Name / SSN / DOB / Race issue ÷ clients served — the APR's own Overall Score row. Counts recorded don't-know/refused like the APR does; the fix-list omits those (a documented refusal has nothing to fix).">Q6a PII {car('DQ_PII_Score')}</th>}
-                {vis('univ') && <th className={th('DQ_Univ_Score', true)} onClick={() => toggleSort('DQ_Univ_Score')}>Q6b Universal {car('DQ_Univ_Score')}</th>}
-                {vis('inc') && <th className={th('DQ_Inc_Score', true)} onClick={() => toggleSort('DQ_Inc_Score')}
-                  title="APR Q6c score = 100 − pooled issue rate: total issues ÷ total records checked across Destination + Income at Start / Annual Assessment / Exit. Pooled by universe so a 5-person annual row can't outweigh a 500-person entry row — the Annual Income column keeps the row-level rate.">Q6c Income {car('DQ_Inc_Score')}</th>}
-                {vis('chronic') && <th className={th('DQ_Chronic_Score', true)} onClick={() => toggleSort('DQ_Chronic_Score')}>Q6d Chronic {car('DQ_Chronic_Score')}</th>}
-                {vis('movein') && <th className={th('DQ_MoveIn_pct', true)} onClick={() => toggleSort('DQ_MoveIn_pct')}
-                  title="LOCAL metric (no APR Q6 row) — PH stayers enrolled before the period still missing a valid move-in, plus out-of-range move-in dates">Move-In Missing % {car('DQ_MoveIn_pct')}</th>}
-                {vis('annual') && <th className={th('DQ_Annual_pct', true)} onClick={() => toggleSort('DQ_Annual_pct')}
-                  title="APR Q6c row 4 — income at the annual assessment missing/unknown/conflicting, of adult/HoH stayers due one (HoH anniversary ±30d)">Annual Income % {car('DQ_Annual_pct')}</th>}
-                {vis('integrity') && <th className={th('DQ_Integrity_Score', true)} onClick={() => toggleSort('DQ_Integrity_Score')}
-                  title="LOCAL category (no APR Q6 row), included in Overall — Eva-derived checks not counted anywhere else in the score: duplicate enrollments, future-dated exits, entered before born, homelessness start after entry, children-only households. Warnings 75 (entry after creation) and 143 (age >100) are worklist-only by design; household-head and overlapping-stay issues are already scored under Q6b. Unique clients failing any, per period.">Integrity {car('DQ_Integrity_Score')}</th>}
-                {vis('fixtime') && <th className={th('DQ_FixMedian', true)} onClick={() => toggleSort('DQ_FixMedian')}
-                  title="Provider responsiveness — median days from an error appearing on the fix-list to the record's actual DateUpdated clean date (last 180 days of fixes). Sub-line: fixes counted · units open 30+ days.">Fix time {car('DQ_FixMedian')}</th>}
+                {sTh('name', 'Project')}
+                {sTh('type_name', 'Type')}
+                {sTh('DQ_Score', 'Overall', true)}
+                {vis('pii') && sTh('DQ_PII_Score', 'Q6a PII', true,
+                  "APR Q6a score = 100 − unique clients with any Name / SSN / DOB / Race issue ÷ clients served — the APR's own Overall Score row. Counts recorded don't-know/refused like the APR does; the fix-list omits those (a documented refusal has nothing to fix).")}
+                {vis('univ') && sTh('DQ_Univ_Score', 'Q6b Universal', true)}
+                {vis('inc') && sTh('DQ_Inc_Score', 'Q6c Income', true,
+                  "APR Q6c score = 100 − pooled issue rate: total issues ÷ total records checked across Destination + Income at Start / Annual Assessment / Exit. Pooled by universe so a 5-person annual row can't outweigh a 500-person entry row — the Annual Income column keeps the row-level rate.")}
+                {vis('chronic') && sTh('DQ_Chronic_Score', 'Q6d Chronic', true)}
+                {vis('movein') && sTh('DQ_MoveIn_pct', 'Move-In Missing %', true,
+                  'LOCAL metric (no APR Q6 row) — PH stayers enrolled before the period still missing a valid move-in, plus out-of-range move-in dates')}
+                {vis('annual') && sTh('DQ_Annual_pct', 'Annual Income %', true,
+                  'APR Q6c row 4 — income at the annual assessment missing/unknown/conflicting, of adult/HoH stayers due one (HoH anniversary ±30d)')}
+                {vis('integrity') && sTh('DQ_Integrity_Score', 'Integrity', true,
+                  'LOCAL category (no APR Q6 row), included in Overall — Eva-derived checks not counted anywhere else in the score: duplicate enrollments, future-dated exits, entered before born, homelessness start after entry, children-only households. Warnings 75 (entry after creation) and 143 (age >100) are worklist-only by design; household-head and overlapping-stay issues are already scored under Q6b. Unique clients failing any, per period.')}
+                {vis('fixtime') && sTh('DQ_FixMedian', 'Fix time', true,
+                  'Provider responsiveness — median days from an error appearing on the fix-list to the record’s actual DateUpdated clean date (last 180 days of fixes). Sub-line: fixes counted · units open 30+ days.')}
                 {vis('household') && <th title={`Household checks — no/multiple head of household, missing relationship, children-only (clients flagged, by severity)${evaWhen}`}>Household</th>}
                 {vis('dates') && <th title={`Date checks — future exits, exit before entry, future entries, DOB conflicts, move-in outside the stay, homelessness start after entry (clients flagged, by severity)${evaWhen}`}>Dates</th>}
                 {vis('dupes') && <th title={`Duplicate enrollments — same client, project, and entry date (clients flagged)${evaWhen}`}>Duplicates</th>}
-                {vis('active') && <th className={th('DQ_ActiveTotal', true)} onClick={() => toggleSort('DQ_ActiveTotal')}>Active {car('DQ_ActiveTotal')}</th>}
-                {vis('exits') && <th className={th('DQ_ExitsTotal', true)} onClick={() => toggleSort('DQ_ExitsTotal')}>Exits {car('DQ_ExitsTotal')}</th>}
+                {vis('active') && sTh('DQ_ActiveTotal', 'Active', true)}
+                {vis('exits') && sTh('DQ_ExitsTotal', 'Exits', true)}
               </tr>
             </thead>
             <tbody>

@@ -192,6 +192,13 @@ export default function UtilizationView({ periods, granularity, period, util }: 
   }
   const car = (k: SortKey) => <span className="car">{sortKey === k ? (sortDir < 0 ? '▼' : '▲') : '▼'}</span>;
   const th = (k: SortKey, num = true) => `sortable${num ? ' num' : ''}${sortKey === k ? ' sorted' : ''}`;
+  // Keyboard-operable sort header (a11y 2026-09-24): real <button> + aria-sort.
+  const sTh = (k: SortKey, label: string, num = true) => (
+    <th key={k} className={th(k, num)}
+      aria-sort={sortKey === k ? (sortDir === 1 ? 'ascending' : 'descending') : undefined}>
+      <button type="button" className="thb" onClick={() => toggleSort(k)}>{label} {car(k)}</button>
+    </th>
+  );
 
   const statusPill = (u: number) =>
     u === 0 ? <span className="pill bad">no occupancy ⚠</span>
@@ -264,10 +271,10 @@ export default function UtilizationView({ periods, granularity, period, util }: 
           <table>
             <thead>
               <tr>
-                <th className={th('name', false)} onClick={() => toggleSort('name')}>Project {car('name')}</th>
-                <th className={th('cap')} onClick={() => toggleSort('cap')}>Inventory {car('cap')}</th>
-                <th className={th('occ')} onClick={() => toggleSort('occ')}>Occupancy {car('occ')}</th>
-                <th className={th('util')} onClick={() => toggleSort('util')}>Utilization {car('util')}</th>
+                {sTh('name', 'Project', false)}
+                {sTh('cap', 'Inventory')}
+                {sTh('occ', 'Occupancy')}
+                {sTh('util', 'Utilization')}
                 <th>Status</th>
               </tr>
             </thead>

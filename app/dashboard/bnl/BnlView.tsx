@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type TdHTMLAttributes } from 'react';
 import {
@@ -6,6 +6,7 @@ import {
   type BnlAgg, type BnlClient, type BnlPopAgg, type CeMilestonesAgg, type PopKey,
 } from './types';
 import JourneyBar from '../../../components/JourneyBar';
+import { IconDownload } from '../../../components/icons';
 import ProjectPicker from '../../../components/ProjectPicker';
 import ClientDrawer, { Flags } from './ClientDrawer';
 import { canWriteClient } from '../../../lib/bnl-query';
@@ -396,7 +397,7 @@ export default function BnlView({
     <>
       <div className="bnl-banner bnl-wide">
         🔒 Confidential — contains client names. Data as of <b>{agg.as_of}</b>.
-        <a className="btn" href={exportHref} style={{ marginLeft: 'auto' }}>⬇ CSV</a>
+        <a className="btn" href={exportHref} style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}><IconDownload size={12} /> CSV</a>
       </div>
 
       {deepMiss && (

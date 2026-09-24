@@ -1,10 +1,11 @@
-'use client';
+﻿'use client';
 
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Granularity, ProjectMetric } from '../../lib/types';
 import { HOUSEHOLD_OPTIONS, SUBPOPULATION_OPTIONS } from '../../lib/types';
 import { periodLabel, fmtInt, typeAbbr, typeFull } from '../../lib/format';
+import { IconDownload, IconSliders } from '../../components/icons';
 import { fmtTarget } from '../../lib/target-metrics';
 import type { TargetMiss } from '../../lib/target-flags';
 import ProjectPanel from './ProjectPanel';
@@ -223,6 +224,18 @@ export default function DashboardView({
     }
   }
 
+  // Keyboard-operable sort header (a11y 2026-09-24): a real <button> inside
+  // the th + aria-sort. Plain render function, NOT a nested component (the
+  // AdminUsers remount lesson).
+  const sortableTh = (k: SortKey, label: React.ReactNode,
+    opts?: { num?: boolean; title?: string; extra?: string }) => (
+    <th key={String(k)} className={`${thCls(k, opts?.num)}${opts?.extra ? ` ${opts.extra}` : ''}`}
+      title={opts?.title}
+      aria-sort={sortKey === k ? (sortDir === 1 ? 'ascending' : 'descending') : undefined}>
+      <button type="button" className="thb" onClick={() => toggleSort(k)}>{label} {sortCar(k)}</button>
+    </th>
+  );
+
   function exportCsv() {
     const headers = ['Project', 'Type', 'Clients', 'Leavers', 'ExitsToPH', 'PHExitRate', `${POP_LABEL[granularity] ?? 'MoM'}_pp`, 'ExitsToUnsub', 'UnsubRate', 'AvgLOS',
       ...extraCols];
@@ -325,13 +338,13 @@ export default function DashboardView({
             </div>
           </div>
           <div className="tools">
-            <button className="tbtn" onClick={exportCsv}>⬇ CSV</button>
+            <button className="tbtn" onClick={exportCsv}><IconDownload size={11} /> CSV</button>
             <div className="colpick">
               <button className="tbtn" onClick={(e) => {
                 if (colMenu) { setColMenu(null); return; }
                 const rect = e.currentTarget.getBoundingClientRect();
                 setColMenu({ x: rect.right, y: rect.bottom });
-              }}>⚙ Columns</button>
+              }}><IconSliders size={11} /> Columns</button>
               {colMenu && (
                 <>
                   <div style={{ position: 'fixed', inset: 0, zIndex: 29 }} onClick={() => setColMenu(null)} />
@@ -364,23 +377,21 @@ export default function DashboardView({
           <table className="perf-table">
             <thead>
               <tr>
-                <th className={thCls('name')} onClick={() => toggleSort('name')}>Project {sortCar('name')}</th>
-                <th className={thCls('type_name')} onClick={() => toggleSort('type_name')}>Type {sortCar('type_name')}</th>
-                <th className={thCls('clients_served', true)} onClick={() => toggleSort('clients_served')}>Clients {sortCar('clients_served')}</th>
-                <th className={thCls('leavers', true)} onClick={() => toggleSort('leavers')}>Leavers {sortCar('leavers')}</th>
-                <th className={thCls('exits_ph', true)} onClick={() => toggleSort('exits_ph')}>→ PH {sortCar('exits_ph')}</th>
-                <th className={thCls('ph_exit_rate', true)} onClick={() => toggleSort('ph_exit_rate')}
-                  title={`Period-over-period change (${POP_LABEL[granularity] ?? 'MoM'}) shown under each rate`}>PH Rate {sortCar('ph_exit_rate')}</th>
-                <th className={thCls('exits_unsub', true)} onClick={() => toggleSort('exits_unsub')}
-                  title="Exits to unsubsidized permanent housing (own lease, destinations 410/411) — the count behind Unsub %">Unsub {sortCar('exits_unsub')}</th>
-                <th className={thCls('unsub_rate', true)} onClick={() => toggleSort('unsub_rate')}
-                  title="Unsubsidized rate — share of PH exits going to own lease (410/411)">Unsub % {sortCar('unsub_rate')}</th>
-                <th className={thCls('avg_los', true)} onClick={() => toggleSort('avg_los')}>Avg LOS {sortCar('avg_los')}</th>
+                {sortableTh('name', 'Project')}
+                {sortableTh('type_name', 'Type')}
+                {sortableTh('clients_served', 'Clients', { num: true })}
+                {sortableTh('leavers', 'Leavers', { num: true })}
+                {sortableTh('exits_ph', '→ PH', { num: true })}
+                {sortableTh('ph_exit_rate', 'PH Rate', { num: true,
+                  title: `Period-over-period change (${POP_LABEL[granularity] ?? 'MoM'}) shown under each rate` })}
+                {sortableTh('exits_unsub', 'Unsub', { num: true,
+                  title: 'Exits to unsubsidized permanent housing (own lease, destinations 410/411) — the count behind Unsub %' })}
+                {sortableTh('unsub_rate', 'Unsub %', { num: true,
+                  title: 'Unsubsidized rate — share of PH exits going to own lease (410/411)' })}
+                {sortableTh('avg_los', 'Avg LOS', { num: true })}
                 {extraCols.map((k) => {
                   const c = EXTRA_COLUMNS.find((x) => x.key === k)!;
-                  return (
-                    <th key={k} className={`${thCls(k, true)} xcol`} onClick={() => toggleSort(k)}>{c.label} {sortCar(k)}</th>
-                  );
+                  return sortableTh(k, c.label, { num: true, extra: 'xcol' });
                 })}
               </tr>
             </thead>

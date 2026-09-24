@@ -1,7 +1,9 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { DEST_LABELS, SUBSIDY_LABELS, fmtInt, typeAbbr } from '../../../lib/format';
+import { IconTrendUp, IconAlertTriangle, IconClock, IconHome, IconInflow, IconShuffle,
+  IconFunnel, IconTarget, IconSliders, IconDownload } from '../../../components/icons';
 import type { AnalyticsInsights, PathwayIntel, SystemForecast, TrendSeries } from '../../../lib/queries';
 import { CopyId, fmt, pct1 } from './shared';
 import { PathwaysSection, BottleneckSection, PredictorSection, SimulatorSection } from './PathwaySections';
@@ -21,16 +23,23 @@ import { PathwaysSection, BottleneckSection, PredictorSection, SimulatorSection 
 type Tab = 'trends' | 'risk' | 'survival' | 'capacity' | 'inflow'
   | 'pathways' | 'bottleneck' | 'predictor' | 'simulator';
 const TABS: [Tab, string][] = [
-  ['trends', '📈 Trend Projection'],
-  ['risk', '⚠️ Return Risk'],
-  ['survival', '⏱️ Survival'],
-  ['capacity', '🏠 Capacity'],
-  ['inflow', '🔮 Inflow'],
-  ['pathways', '🔀 Pathways'],
-  ['bottleneck', '🚧 Bottlenecks'],
-  ['predictor', '🎯 Predictor'],
-  ['simulator', '⚙️ Simulator'],
+  ['trends', 'Trend Projection'],
+  ['risk', 'Return Risk'],
+  ['survival', 'Survival'],
+  ['capacity', 'Capacity'],
+  ['inflow', 'Inflow'],
+  ['pathways', 'Pathways'],
+  ['bottleneck', 'Bottlenecks'],
+  ['predictor', 'Predictor'],
+  ['simulator', 'Simulator'],
 ];
+// Stroke icons replace the emoji tab glyphs (2026-09-24 sweep) — same visual
+// on county Windows and phones, colored by the tab's own state.
+const TAB_ICONS: Record<Tab, React.ReactNode> = {
+  trends: <IconTrendUp />, risk: <IconAlertTriangle />, survival: <IconClock />,
+  capacity: <IconHome />, inflow: <IconInflow />, pathways: <IconShuffle />,
+  bottleneck: <IconFunnel />, predictor: <IconTarget />, simulator: <IconSliders />,
+};
 const TAB_KEY = 'an-tab';
 
 /* ══════════════ chart primitives ══════════════ */
@@ -349,7 +358,7 @@ export default function AnalyticsView({ a, forecast, pi }: {
         <div className="seg" role="tablist" aria-label="Analytics sections" style={{ flexWrap: 'wrap' }}>
           {TABS.map(([k, lbl]) => (
             <button key={k} type="button" role="tab" aria-selected={tab === k}
-              className={tab === k ? 'on' : undefined} onClick={() => setTab(k)}>{lbl}</button>
+              className={tab === k ? 'on' : undefined} onClick={() => setTab(k)}>{TAB_ICONS[k]}{lbl}</button>
           ))}
         </div>
       </div>
@@ -963,7 +972,7 @@ function RiskSection({ a, initialPid = null }: { a: AnalyticsInsights; initialPi
               show already-returned ({fmt(retCount)})
             </label>
           )}
-          <a className="btn" href="/api/analytics/risk?format=csv">⬇ Export CSV</a>
+          <a className="btn" href="/api/analytics/risk?format=csv"><IconDownload size={12} /> Export CSV</a>
         </div>
         {clErr && <p className="bnl-sub">Couldn&rsquo;t load the client list ({clErr}).</p>}
         {!clients && !clErr && <p className="bnl-sub">Loading…</p>}
@@ -1182,7 +1191,7 @@ function SurvivalSection({ a }: { a: AnalyticsInsights }) {
             <option value="">All types</option>
             {outTypes.map((t) => <option key={t} value={t}>{typeAbbr(t)}</option>)}
           </select>
-          <a className="btn" href="/api/analytics/outliers?format=csv">⬇ Export CSV</a>
+          <a className="btn" href="/api/analytics/outliers?format=csv"><IconDownload size={12} /> Export CSV</a>
         </div>
         {outErr && <p className="bnl-sub">Couldn&rsquo;t load the outlier list ({outErr}).</p>}
         {!outliers && !outErr && <p className="bnl-sub">Loading…</p>}

@@ -1,7 +1,8 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { periodLabel, fmtInt } from '../../../lib/format';
+import { IconDownload } from '../../../components/icons';
 import { EVA_BY_ID, EVA_SEVERITY_META, type EvaCheck } from '../../../lib/evaChecks';
 import CopyId from '../../../components/CopyId';
 
@@ -556,7 +557,7 @@ export default function DqFixList({
             <>
               <div className="dr-head" style={{ marginTop: 12 }}>
                 <span><b>{fmtInt(totalToFix + evaRecords)}</b> record{totalToFix + evaRecords === 1 ? '' : 's'} to fix across {shown.length + evaSorted.length} categor{shown.length + evaSorted.length === 1 ? 'y' : 'ies'}</span>
-                <button className="btn" onClick={exportCsv}>⬇ Export CSV</button>
+                <button className="btn" onClick={exportCsv}><IconDownload size={12} /> Export CSV</button>
               </div>
               {refusedNote}
 

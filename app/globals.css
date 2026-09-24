@@ -399,6 +399,9 @@ table.hm{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
 .ann-new{font-size:10px;font-weight:800;letter-spacing:.06em;color:#fff;background:var(--accent);border-radius:999px;padding:1px 8px;white-space:nowrap;animation:annpulse 1.5s ease-in-out infinite}
 @keyframes annpulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.1);opacity:.7}}
 @media(prefers-reduced-motion:reduce){.ann-new{animation:none}}
+/* global guard (a11y pass 2026-09-24): collapse every transition/animation
+   when the OS asks for reduced motion — states still change, instantly */
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.01ms !important;animation-duration:.01ms !important;animation-iteration-count:1 !important;scroll-behavior:auto !important}}
 .dq-kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-bottom:18px}
 @media(max-width:1100px){.dq-kpi-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:780px){.dq-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -457,6 +460,10 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .bnl-lg-new::before{background:var(--warn)} .bnl-lg-housed::before{background:var(--accent)} .bnl-lg-inact::before{background:var(--faint)}
 .bnl-table{width:100%;border-collapse:collapse;font-size:13px}
 .bnl-table th{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);text-align:left;padding:9px 12px;border-bottom:2px solid var(--border-strong);cursor:pointer;user-select:none;white-space:nowrap;background:var(--thbg)}
+/* real <button> inside a sortable th — keyboard-operable, visually identical
+   to the bare th text it replaces (a11y pass 2026-09-24) */
+.thb{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:3px;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit}
+.thb:focus-visible{outline:none;box-shadow:0 0 0 2px var(--primary-light);border-radius:4px}
 .bnl-table th.sorted{color:var(--secondary)}
 .bnl-table td{padding:9px 12px;border-bottom:1px solid var(--hair);vertical-align:middle}
 .bnl-table tbody tr{cursor:pointer} .bnl-table tbody tr:hover{background:var(--rowhover)}

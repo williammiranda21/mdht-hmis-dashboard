@@ -1,7 +1,8 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
+import { IconQr } from './icons';
 
 /**
  * Share-by-QR for app links (2026-09-22, built for /field). The code is
@@ -52,7 +53,7 @@ export default function QrShare({ path, label = 'QR code', title = 'Scan to open
   return (
     <>
       <button type="button" className="tbtn" onClick={() => setOpen(true)}
-        title="Show a QR code others can scan to open this link">▦ {label}</button>
+        title="Show a QR code others can scan to open this link"><IconQr size={12} /> {label}</button>
       {open && (
         <div className="bnl-ov" onClick={() => setOpen(false)}>
           <div className="bnl-modal" onClick={(e) => e.stopPropagation()} role="dialog"

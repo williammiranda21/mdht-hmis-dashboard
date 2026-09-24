@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { tilesFor, frameFor, toPx, unproject, project, inFeature, TILE, type GeoFC } from '../../../lib/slippy';
@@ -6,6 +6,7 @@ import { muniArea } from '../../../lib/helpline-options';
 import { fetchCustomAreas, invalidateCustomAreas, type CustomArea } from '../../../lib/custom-areas';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
 import TileImg from '../../../components/TileImg';
+import { IconPencil, IconTrash } from '../../../components/icons';
 import type { HlCase, Team } from './HelplineView';
 
 /**
@@ -346,7 +347,7 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
               onClick={(e) => e.currentTarget.showPicker?.()}
               onChange={(e) => setTo(e.target.value)} aria-label="To date" />
             {(from || to) && (
-              <button type="button" className="dclr" title="Clear dates"
+              <button type="button" className="dclr" title="Clear dates" aria-label="Clear dates"
                 onClick={() => { setFrom(''); setTo(''); }}>✕</button>
             )}
           </span>
@@ -410,7 +411,7 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
           padding: '0 18px 10px' }}>
           <span style={{ fontSize: 12.5, color: 'var(--strong)', fontWeight: 600 }}>
-            ✏ {draw.length < 3
+            <IconPencil size={12} /> {draw.length < 3
               ? `Click the map to drop corners — ${draw.length} of at least 3`
               : `${draw.length} corners — keep clicking, or name it and save`}
           </span>
@@ -579,7 +580,7 @@ export default function ReportMap({ cases, teams = [], isAdmin = false, onOpen }
               })()}
               {selCustom && isAdmin && (
                 <button className="tbtn" style={{ marginTop: 8 }}
-                  onClick={() => deleteArea(selCustom)}>🗑 Delete area</button>
+                  onClick={() => deleteArea(selCustom)}><IconTrash size={11} /> Delete area</button>
               )}
             </div>
           )}
