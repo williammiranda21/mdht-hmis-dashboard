@@ -750,6 +750,62 @@ tr:hover .bnl-drillname::after{opacity:.9}
 .ctip-row .ctip-v{margin-left:auto;padding-left:12px}
 .ctip-total{border-top:1px solid var(--hair);margin-top:2px;padding-top:4px;font-weight:600;color:var(--strong)}
 
+/* ── Helpline team pickers + board (2026-09-25 redesign, user-approved mock) ──
+   Custom popovers replace native <select> option lists (unstylable). */
+.tmenu{position:fixed;z-index:60;width:300px;max-width:calc(100vw - 24px);display:flex;flex-direction:column;overflow:hidden;background:var(--card);border:1px solid var(--border-strong);
+  border-radius:12px;box-shadow:0 8px 24px rgba(10,14,22,.28);padding:6px;text-align:left}
+.tmenu-h{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);padding:4px 8px}
+.tmenu-q{width:100%;font:inherit;font-size:12.5px;color:var(--text);background:var(--bg);border:1px solid var(--border-strong);
+  border-radius:8px;padding:7px 10px;margin:2px 0 6px}
+.tmenu-q:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
+.tmenu-list{flex:1 1 auto;min-height:0;overflow-y:auto}
+.tmenu-item{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;font:inherit;color:var(--text);
+  text-align:left;padding:7px 8px;border-radius:8px;cursor:pointer}
+.tmenu-item:hover,.tmenu-item.hi{background:var(--rowhover)}
+.tmenu-item.sug{background:var(--primary-soft)}
+.tmenu-item:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--primary)}
+.tmenu-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.tmenu-nm{font-size:12.5px;font-weight:600;color:var(--strong);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tmenu-sub{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tmenu-cnt{flex:none;font-size:10.5px;font-weight:700;color:var(--muted);background:var(--track);border-radius:999px;padding:2px 7px;font-variant-numeric:tabular-nums}
+.tmenu-sugtag{flex:none;font-size:10.5px;font-weight:700;color:var(--secondary)}
+.tmenu-check input{accent-color:var(--primary);flex:none;width:14px;height:14px}
+.tmenu-all{border-bottom:1px solid var(--hair);border-radius:8px 8px 0 0;margin-bottom:4px}
+.tmenu-empty{font-size:12px;color:var(--muted);padding:10px 8px}
+.tmenu-f{border-top:1px solid var(--hair);margin-top:4px;padding:6px 8px 2px;font-size:11px;color:var(--faint)}
+.tmenu-link{border:0;background:none;font:inherit;font-size:11px;font-weight:600;color:var(--secondary);cursor:pointer;
+  text-decoration:underline;text-underline-offset:3px;padding:0}
+/* filter trigger: label + value pill */
+.tsel{display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:12.5px;color:var(--text);background:var(--card);
+  border:1px solid var(--border-strong);border-radius:999px;padding:6px 12px;cursor:pointer;max-width:320px}
+.tsel:hover{border-color:var(--primary)}
+.tsel:focus-visible{outline:none;box-shadow:0 0 0 3px var(--primary-light)}
+.tsel.on{background:var(--primary-soft);border-color:rgba(126,103,254,.55)}
+.tsel-l{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.tsel-v{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:root[data-theme="dark"] .tsel.on .tsel-v{color:var(--secondary)}
+/* board: ONE table, team bands as rows → every team shares the same columns */
+.hl-board{table-layout:fixed}
+.hl-board tr.hl-grp td{background:var(--thbg);border-top:1px solid var(--border-strong);border-bottom:1px solid var(--border);
+  padding:9px 12px;cursor:default}
+.hl-grp-nm{font-size:13.5px;font-weight:700;color:var(--strong);margin-right:8px}
+.hl-tag{display:inline-block;font-size:10.5px;font-weight:600;color:var(--muted);border:1px solid var(--border);border-radius:6px;
+  padding:1px 7px;margin:2px 5px 2px 0;white-space:nowrap}
+/* outcome pills: equal width, tinted (red ✗ / blue ✓ / green house) */
+.opill{display:inline-flex;align-items:center;justify-content:center;gap:5px;width:118px;font:inherit;font-size:12px;font-weight:700;
+  border:1px solid transparent;border-radius:999px;padding:6px 0;cursor:pointer;transition:filter .15s}
+.opill:hover{filter:brightness(1.15)}
+.opill:focus-visible{outline:none;box-shadow:0 0 0 3px var(--primary-light)}
+.opill:disabled{opacity:.55;cursor:default}
+.opill.no{color:var(--danger);background:var(--danger-light);border-color:rgba(239,95,95,.35)}
+.opill.yes{color:var(--info);background:var(--info-light);border-color:rgba(91,141,245,.35)}
+.opill.home{color:var(--accent);background:var(--accent-light);border-color:rgba(34,197,94,.35)}
+.linkbtn{border:0;background:none;font:inherit;font-size:11.5px;color:var(--muted);cursor:pointer;padding:0;
+  text-decoration:underline;text-underline-offset:3px}
+.linkbtn:hover{color:var(--danger)}
+/* HMIS "possibly housed" glance as a tinted note inside the Case column */
+.hl-note{margin-top:5px;padding:5px 9px;border-radius:8px;background:var(--warn-light);color:var(--warn);font-size:11.5px;line-height:1.5}
+
 /* ── Deep Dive Phase 3: forecast ── */
 .fc-chart{width:100%;height:260px;display:block;margin-top:10px}
 

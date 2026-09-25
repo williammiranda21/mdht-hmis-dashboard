@@ -1,4 +1,4 @@
-import { getAnalyticsInsights, getPathwayIntel, getSystemForecast } from '../../../lib/queries';
+import { getAnalyticsInsights, getInterventionIntel, getPathwayIntel, getSystemForecast } from '../../../lib/queries';
 import AnalyticsView from './AnalyticsView';
 
 export const dynamic = 'force-dynamic';
@@ -16,8 +16,9 @@ export const dynamic = 'force-dynamic';
  * scoped by RLS, hashed IDs only.
  */
 export default async function AnalyticsPage() {
-  const [a, forecast, pi] = await Promise.all([
+  const [a, forecast, pi, iv] = await Promise.all([
     getAnalyticsInsights(), getSystemForecast(), getPathwayIntel(),
+    getInterventionIntel().catch(() => null),
   ]);
   if (!a?.risk?.model) {
     return (
@@ -30,5 +31,5 @@ export default async function AnalyticsPage() {
       </div>
     );
   }
-  return <AnalyticsView a={a} forecast={forecast} pi={pi} />;
+  return <AnalyticsView a={a} forecast={forecast} pi={pi} iv={iv} />;
 }

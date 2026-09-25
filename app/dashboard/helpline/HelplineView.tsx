@@ -16,6 +16,7 @@ import { fetchCustomAreas } from '../../../lib/custom-areas';
 import ReferOut, { type ReferralResource } from '../../../components/ReferOut';
 import { CopyId } from '../analytics/shared';
 import QrShare from '../../../components/QrShare';
+import { TeamMenu, TeamMultiSelect, type TeamOpt } from '../../../components/TeamMenu';
 import { IconPrinter, IconDownload, IconSmartphone, IconSearch, IconMapPin, IconHome } from '../../../components/icons';
 
 export interface HlCase {
@@ -268,6 +269,24 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
     return m;
   }, [cases]);
 
+  // styled team pickers (2026-09-25): options for both menus + board filter
+  const teamOpts: TeamOpt[] = useMemo(() => teams.filter((x) => x.active).map((x) => ({
+    id: x.id, name: x.name, zones: x.zones ?? [], open: openByTeam.get(x.id) ?? 0,
+  })), [teams, openByTeam]);
+  const [assignFor, setAssignFor] = useState<number | null>(null);
+  const [boardTeams, setBoardTeamsState] = useState<Set<number> | null>(null);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('hl-board-teams');
+      if (raw) { const ids = JSON.parse(raw) as number[]; if (ids.length) setBoardTeamsState(new Set(ids)); }
+    } catch { /* private mode */ }
+  }, []);
+  const setBoardTeams = (v: Set<number> | null) => {
+    setBoardTeamsState(v);
+    try { if (v) localStorage.setItem('hl-board-teams', JSON.stringify([...v])); else localStorage.removeItem('hl-board-teams'); }
+    catch { /* ignore */ }
+  };
+
   async function run(fn: () => Promise<{ error: unknown }>) {
     setBusy(true); setError(null);
     const { error: e } = await fn();
@@ -518,8 +537,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
           const g = hmis[c.matched_pid!];
           const housed = (g.status ?? '').toLowerCase().includes('housed');
           return (
-            <div className="bnl-sub" style={{ lineHeight: 1.6,
-              ...(housed ? { color: 'var(--warn)' } : {}) }}
+            <div className={housed ? 'hl-note' : 'bnl-sub'} style={housed ? undefined : { lineHeight: 1.6 }}
               title="HMIS at a glance — from the By-Name List roster for the linked record">
               {/* "possibly housed" on purpose (user 2026-09-11): an HMIS
                   record — even an active enrollment — is a claim, not a
@@ -592,40 +610,36 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
       const s = (parts[parts.length - 1] ?? '').trim() || base.trim() || name.trim();
       return s.length > 18 ? `${s.slice(0, 16)}…` : s;
     };
-    const teamOptions = (
-      <>
-        <option value="" disabled>{sug ? 'Other team…' : 'Assign team…'}</option>
-        {teams.filter((x) => x.active).map((x) => (
-          <option key={x.id} value={x.id}>{x.name} ({openByTeam.get(x.id) ?? 0} open)</option>
-        ))}
-      </>
-    );
-    const pickTeam = (e: React.ChangeEvent<HTMLSelectElement>) => {
-      if (e.target.value) assign(c, Number(e.target.value));
-    };
+    const menuOpen = assignFor === c.id;
+    const pick = (id: number) => { setAssignFor(null); assign(c, id); };
     return (
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
-        {sug ? (
-          <span className="split"
-            title={`Suggested: ${sug.why} — ${openByTeam.get(sug.team.id) ?? 0} open cases · full name: ${sug.team.name}`}>
-            <button type="button" className="smain" disabled={busy} onClick={() => assign(c, sug.team.id)}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-              Assign <em>{shortTeam(sug.team.name)}</em>
-            </button>
-            <span className="scaret">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-              <select aria-label="Assign a different team" defaultValue="" disabled={busy} onChange={pickTeam}>
-                {teamOptions}
-              </select>
+        <span style={{ position: 'relative', display: 'inline-flex' }}>
+          {sug ? (
+            <span className="split"
+              title={`Suggested: ${sug.why} — ${openByTeam.get(sug.team.id) ?? 0} open cases · full name: ${sug.team.name}`}>
+              <button type="button" className="smain" disabled={busy} onClick={() => assign(c, sug.team.id)}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                Assign <em>{shortTeam(sug.team.name)}</em>
+              </button>
+              <button type="button" className="scaret" disabled={busy} aria-haspopup="dialog" aria-expanded={menuOpen}
+                aria-label="Assign a different team" onClick={() => setAssignFor(menuOpen ? null : c.id)}
+                style={{ border: 0, background: 'transparent', cursor: 'pointer', font: 'inherit' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
             </span>
-          </span>
-        ) : (
-          <select className="fselect" aria-label="Assign to team" defaultValue="" disabled={busy}
-            style={{ padding: '5px 22px 5px 12px', fontSize: 12, borderRadius: 999 }}
-            onChange={pickTeam}>
-            {teamOptions}
-          </select>
-        )}
+          ) : (
+            <button type="button" className="tsel" disabled={busy} aria-haspopup="dialog" aria-expanded={menuOpen}
+              onClick={() => setAssignFor(menuOpen ? null : c.id)} style={{ padding: '5px 12px' }}>
+              <span className="tsel-v">Assign team</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+          )}
+          {menuOpen && (
+            <TeamMenu teams={teamOpts} suggestedId={sug?.team.id ?? null} onPick={pick}
+              onClose={() => setAssignFor(null)} />
+          )}
+        </span>
         <button className="tbtn" disabled={busy} style={{ flexShrink: 0 }}
           title="SOP refer-out (prevention · veterans · DV · youth · other-provider areas) — shows the script first"
           onClick={() => setReferFor(c)}>
@@ -784,23 +798,29 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
             <h3>Team board</h3>
             <div className="meta">Open cases by outreach team · log attempts, record the outcome, print the dispatch sheet</div>
           </div>
+          <TeamMultiSelect teams={teamOpts} value={boardTeams} onChange={setBoardTeams} />
         </div>
-        {teams.filter((x) => (openByTeam.get(x.id) ?? 0) > 0).map((team) => (
-          <div key={team.id} style={{ padding: '0 12px 8px' }}>
-            <div style={{ fontWeight: 700, color: 'var(--strong)', padding: '8px 6px 4px', fontSize: 13.5 }}>
-              {team.name} <span className="bnl-sub">· {fmtInt(openByTeam.get(team.id) ?? 0)} open
-              {team.zones.length ? ` · covers ${team.zones.join(', ')}` : ' · no zones set'}
+        {/* ONE table for every team (2026-09-25 redesign): a single header and
+            fixed column widths so every team's rows line up; teams are band rows. */}
+        {working.length > 0 && (
+        <div className="scroll"><table className="bnl-table hl-rows hl-board">
+          <colgroup><col /><col style={{ width: 140 }} /><col style={{ width: 170 }} /><col style={{ width: 400 }} /></colgroup>
+          <thead><tr><th>Case</th><th>Status</th><th>Outreach trail</th>
+            <th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+          <tbody>
+        {teams.filter((x) => (openByTeam.get(x.id) ?? 0) > 0 && (boardTeams == null || boardTeams.has(x.id))).map((team) => (
+          <Fragment key={team.id}>
+            <tr className="hl-grp"><td colSpan={4}>
+              <span className="hl-grp-nm">{team.name}</span>
+              <span className="hl-tag">{fmtInt(openByTeam.get(team.id) ?? 0)} open</span>
+              <span className="hl-tag">{team.zones.length ? team.zones.join(', ') : 'no zones set'}</span>
               {(() => {
                 const staff = [...(team.member_accounts ?? []).map((a) => a.name),
                   team.members ?? ''].filter(Boolean).join(', ');
-                return staff ? ` · ${staff}` : '';
+                return staff ? <span className="hl-tag" title="Assigned staff">{staff}</span> : null;
               })()}
-              {team.dispatch ? ` · dispatch: ${team.dispatch}` : ''}</span>
-            </div>
-            <div className="scroll"><table className="bnl-table hl-rows">
-              <thead><tr><th>Case</th><th>Status</th><th>Outreach trail</th>
-                <th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
-              <tbody>
+              {team.dispatch ? <span className="hl-tag" title="Dispatch contact">dispatch: {team.dispatch}</span> : null}
+            </td></tr>
                 {working.filter((c) => c.team_id === team.id).map((c) => (
                   <FragmentZoneRow key={c.id}>
                   <tr style={{ cursor: 'default' }}>
@@ -837,32 +857,19 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                             title="One-page dispatch sheet — print or save as PDF for the field team"><IconPrinter size={11} /> Sheet</Link>
                         </div>
                         <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                          <button disabled={busy}
-                            style={{ background: 'var(--danger-light)', color: 'var(--danger)',
-                              border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: 12.5,
-                              fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}
+                          <button className="opill no" disabled={busy}
                             title={`Went out, couldn't reach them — bumps the tried counter. ${MAX_FAILED_ATTEMPTS} failed tries with no successful contact auto-closes the case as could-not-locate.`}
                             onClick={() => logAttempt(c)}>
-                            ✗ Couldn&rsquo;t contact{(c.contacts ?? 0) === 0 && c.attempts === MAX_FAILED_ATTEMPTS - 1 ? ' (final)' : ''}</button>
-                          <button disabled={busy}
-                            style={{ background: 'var(--info-light, var(--accent-light))',
-                              color: 'var(--info, var(--accent))', border: 'none', borderRadius: 8,
-                              padding: '6px 12px', fontSize: 12.5, fontWeight: 800,
-                              cursor: 'pointer', fontFamily: 'inherit' }}
+                            ✗ No contact{(c.contacts ?? 0) === 0 && c.attempts === MAX_FAILED_ATTEMPTS - 1 ? ' (final)' : ''}</button>
+                          <button className="opill yes" disabled={busy}
                             title="Reached them — bumps the contacted counter; failed tries never erase this"
                             onClick={() => logContact(c)}>✓ Contacted</button>
-                          <button disabled={busy}
-                            style={{ background: '#0e8a5f', color: '#fff', border: 'none',
-                              borderRadius: 8, padding: '6px 13px', fontSize: 12.5, fontWeight: 800,
-                              cursor: 'pointer', fontFamily: 'inherit' }}
+                          <button className="opill home" disabled={busy}
                             title="Outreach verified this person is homeless — starts the enrollment-verification clock"
                             onClick={() => update(c.id, { status: 'confirmed', confirmed_at: new Date().toISOString().slice(0, 10) })}>
-                            <IconHome size={12} /> Confirmed homeless</button>
+                            <IconHome size={12} /> Confirmed</button>
                         </div>
-                        <button disabled={busy}
-                          style={{ background: 'none', border: 'none', color: 'var(--faint)',
-                            fontSize: 11.5, cursor: 'pointer', padding: 0, fontFamily: 'inherit',
-                            textDecoration: 'underline dotted', textUnderlineOffset: 3 }}
+                        <button className="linkbtn" disabled={busy}
                           title="FINAL — closes the case and removes it from this board. “Couldn't find them today” is Log attempt, not this."
                           onClick={() => {
                             const warn = c.attempts === 0
@@ -871,7 +878,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                             if (confirm(`${warn}Close this case as COULD NOT LOCATE? It leaves the team board (it can be reopened from All cases).`)) {
                               closeNoLocate(c);
                             }
-                          }}>Close case · could not locate (final)</button>
+                          }}>Close as could not locate</button>
                       </div>
                     </td>
                   </tr>
@@ -909,11 +916,15 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                   ) : null}
                   </FragmentZoneRow>
                 ))}
-              </tbody>
-            </table></div>
-          </div>
+          </Fragment>
         ))}
+          </tbody>
+        </table></div>
+        )}
         {!working.length && <div className="empty" style={{ padding: '10px 18px 16px' }}>No assigned cases yet.</div>}
+        {working.length > 0 && boardTeams != null && !teams.some((x) => boardTeams.has(x.id) && (openByTeam.get(x.id) ?? 0) > 0) && (
+          <div className="empty" style={{ padding: '10px 18px 16px' }}>The selected teams have no open cases.</div>
+        )}
       </div>
       )}
 

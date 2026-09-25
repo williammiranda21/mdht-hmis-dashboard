@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DEST_LABELS, SUBSIDY_LABELS, fmtInt, typeAbbr } from '../../../lib/format';
 import { IconTrendUp, IconAlertTriangle, IconClock, IconHome, IconInflow, IconShuffle,
-  IconFunnel, IconTarget, IconSliders, IconDownload } from '../../../components/icons';
-import type { AnalyticsInsights, PathwayIntel, SystemForecast, TrendSeries } from '../../../lib/queries';
+  IconFunnel, IconTarget, IconSliders, IconDownload, IconCompass } from '../../../components/icons';
+import type { AnalyticsInsights, InterventionIntel, PathwayIntel, SystemForecast, TrendSeries } from '../../../lib/queries';
 import { CopyId, fmt, pct1 } from './shared';
 import { PathwaysSection, BottleneckSection, PredictorSection, SimulatorSection } from './PathwaySections';
+import { InterventionSection } from './InterventionSection';
 
 /**
  * Analytics — the full port of the old static analytics page (user 2026-09-18:
@@ -21,7 +22,7 @@ import { PathwaysSection, BottleneckSection, PredictorSection, SimulatorSection 
  */
 
 type Tab = 'trends' | 'risk' | 'survival' | 'capacity' | 'inflow'
-  | 'pathways' | 'bottleneck' | 'predictor' | 'simulator';
+  | 'pathways' | 'bottleneck' | 'predictor' | 'simulator' | 'guide';
 const TABS: [Tab, string][] = [
   ['trends', 'Trend Projection'],
   ['risk', 'Return Risk'],
@@ -32,6 +33,7 @@ const TABS: [Tab, string][] = [
   ['bottleneck', 'Bottlenecks'],
   ['predictor', 'Predictor'],
   ['simulator', 'Simulator'],
+  ['guide', 'Intervention Guide'],
 ];
 // Stroke icons replace the emoji tab glyphs (2026-09-24 sweep) — same visual
 // on county Windows and phones, colored by the tab's own state.
@@ -39,6 +41,7 @@ const TAB_ICONS: Record<Tab, React.ReactNode> = {
   trends: <IconTrendUp />, risk: <IconAlertTriangle />, survival: <IconClock />,
   capacity: <IconHome />, inflow: <IconInflow />, pathways: <IconShuffle />,
   bottleneck: <IconFunnel />, predictor: <IconTarget />, simulator: <IconSliders />,
+  guide: <IconCompass />,
 };
 const TAB_KEY = 'an-tab';
 
@@ -514,8 +517,8 @@ function CapSpark({ row }: { row: CapRow }) {
 
 /* ══════════════ the view ══════════════ */
 
-export default function AnalyticsView({ a, forecast, pi }: {
-  a: AnalyticsInsights; forecast: SystemForecast; pi: PathwayIntel | null;
+export default function AnalyticsView({ a, forecast, pi, iv = null }: {
+  a: AnalyticsInsights; forecast: SystemForecast; pi: PathwayIntel | null; iv?: InterventionIntel | null;
 }) {
   const [tab, setTabState] = useState<Tab>('trends');
   // ?section=…&pid=… deep link (BNL drawer's "open in Analytics") wins over
@@ -576,6 +579,9 @@ export default function AnalyticsView({ a, forecast, pi }: {
       {tab === 'bottleneck' && (pi ? <BottleneckSection pi={pi} /> : <PiEmpty />)}
       {tab === 'predictor' && (pi ? <PredictorSection pi={pi} initialPid={linkPid} /> : <PiEmpty />)}
       {tab === 'simulator' && (pi ? <SimulatorSection pi={pi} /> : <PiEmpty />)}
+      {tab === 'guide' && (iv ? <InterventionSection iv={iv} initialPid={linkPid} /> : (
+        <div className="panel" style={{ padding: 24 }}><p className="bnl-sub">The Intervention Guide hasn&rsquo;t been loaded yet — run generate_intervention.py and pipeline/load_intervention.py.</p></div>
+      ))}
     </>
   );
 }
@@ -926,6 +932,11 @@ function RiskSection({ a, initialPid = null }: { a: AnalyticsInsights; initialPi
   const [tier, setTier] = useState('');
   const [dossier, setDossier] = useState<RiskDossierClient | null>(null);
   const [dossierBusy, setDossierBusy] = useState<string | null>(null);
+  // View deep in the list → bring the dossier (above the table) into view
+  const dossierRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (dossier) dossierRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [dossier]);
   const openDossier = (pid: string) => {
     setDossierBusy(pid);
     fetch(`/api/analytics/risk?pid=${encodeURIComponent(pid)}`)
@@ -1155,7 +1166,9 @@ function RiskSection({ a, initialPid = null }: { a: AnalyticsInsights; initialPi
       </div>
 
       <div className="grouplabel" style={{ marginTop: 18 }}>Client risk list</div>
-      {dossier && <RiskDossier client={dossier} m={m} onClose={() => setDossier(null)} />}
+      <div ref={dossierRef} style={{ scrollMarginTop: 72 }}>
+        {dossier && <RiskDossier client={dossier} m={m} onClose={() => setDossier(null)} />}
+      </div>
       <div className="panel" style={{ padding: '14px 18px' }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
           <div className="bnl-sub" style={{ flex: 1, minWidth: 260 }}>

@@ -198,6 +198,9 @@ export interface PathwayIntel {
     accuracy: number; n_trained: number; model_label: string;
     profile_buckets: Record<string, { n: number; ph_rate: number; median_los_housed: number }>;
     n_active: number;
+    /** v2 all-factors model (2026-09-25): labels/tips for inputs past the original 14 */
+    version?: number; feature_labels?: Record<string, string>; feature_tips?: Record<string, string>;
+    holdout?: { split: string; n_test: number; auc_original: number; auc_original_newton: number; auc_all_factors: number } | null;
   } | null;
   markov: {
     states: string[]; colors: string[]; labels: string[];
@@ -216,6 +219,55 @@ export async function getPathwayIntel(): Promise<PathwayIntel | null> {
     .from('meta').select('value').eq('key', 'pathway_intel').maybeSingle();
   if (error) throw error;
   return (data?.value as PathwayIntel | undefined) ?? null;
+}
+
+/** Intervention Guide (meta.intervention_intel, 2026-09-25) — AGGREGATE-ONLY:
+ *  model card, backtest, equity audit, pathway table. Per-client estimates are
+ *  drill_clients `an:ivx` (agency-scoped) served by /api/analytics/intervention. */
+export interface IvxDriver { feat: string; label: string; w: number }
+export interface IvxPathway {
+  path: string; n: number; steps: number; success: number; expected: number; adjusted: number;
+  adj_ci: [number, number]; housed: number; returned_of_housed: number | null;
+  median_days_to_housed: number | null; family_share: number; ends_in: string;
+}
+export interface InterventionIntel {
+  generated: string; as_of: string;
+  summary: { n_active: number; verdicts: Record<string, number>; best_mix: Record<string, number>; mean_p: number | null };
+  model: {
+    version: number; generated: string; data_through: string; train_from: string; train_to: string; n_train: number;
+    arms: string[]; programs: string[]; arm_labels: Record<string, string>;
+    features: string[]; feature_labels: Record<string, string>; overlap: number;
+    definitions: Record<string, number>;
+    arm_stats: Record<string, { n: number; success: number; housed: number; returned_of_housed: number; median_days_to_housed: number | null }>;
+    effects: { a: string; b: string; effect: number; ci: [number, number]; n_overlap: number }[];
+    backtest: {
+      split: string; n_train: number; n_test: number; n_test_programs: number;
+      auc: Record<string, { success: number; housed: number; stable: number; n: number }>;
+      propensity_auc: Record<string, number>;
+      calibration: Record<string, { pred: number; obs: number; n: number }[]>;
+      observed_success: number; policy_value: number; lift: number; lift_ci: [number, number];
+      reassigned_share: number; mix: Record<string, number>;
+      rrh_psh_only?: { n: number; observed: number; policy_value: number; lift: number; lift_ci: [number, number]; reassigned_share: number };
+      spdat_eval?: {
+        n_train_with_spdat: number; n_test_with_spdat: number; share_all_with_spdat: number;
+        auc_with: number | null; auc_without: number | null; auc_all_with: number; auc_all_without: number;
+        cv?: { era_from: string; n_era: number; n_with_spdat: number; success_auc_with: number; success_auc_without: number;
+          psh_assign_auc_with: number; psh_assign_auc_without: number; n_program_with_spdat: number };
+      };
+    };
+    equity: { group: string; n: number; observed: number; predicted: number; auc: number; n_programs: number;
+      psh_share_actual: number | null; psh_share_model: number | null; lift: number | null }[];
+    drivers: Record<string, IvxDriver[]>;
+    modifiers: Record<string, IvxDriver[]>;
+    pathways: IvxPathway[];
+    fmr: Record<string, number[]>; fmr_note: Record<string, string>;
+  };
+}
+export async function getInterventionIntel(): Promise<InterventionIntel | null> {
+  const { data, error } = await supabaseServer()
+    .from('meta').select('value').eq('key', 'intervention_intel').maybeSingle();
+  if (error) throw error;
+  return (data?.value as InterventionIntel | undefined) ?? null;
 }
 
 /** Periods that actually have Data Quality data, newest first (from meta.dq_periods). */

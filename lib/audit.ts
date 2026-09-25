@@ -30,7 +30,8 @@ export type AuditAction =
   | 'fixlist_view' | 'fixlist_export'
   | 'outliers_view' | 'outliers_export'
   | 'risklist_view' | 'risklist_export'
-  | 'predict_view' | 'predict_export';
+  | 'predict_view' | 'predict_export'
+  | 'ivx_view' | 'ivx_export';
 
 export async function audit(
   action: AuditAction,

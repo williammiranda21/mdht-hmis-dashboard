@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PathwayIntel, SankeyData, SankeyLink } from '../../../lib/queries';
 import { CopyId, fmt, pct1 } from './shared';
 import { IconClock, IconDownload } from '../../../components/icons';
@@ -515,6 +515,14 @@ const FEAT_TIPS = [
   'HUD 3.08 disabling condition — lowers the probability; PSH prioritization exists for exactly this population.',
   'Veteran status — VA housing resources raise the odds.',
 ];
+/** Labels/tips for EVERY model input: the original 14 by position, v2 inputs
+ *  (income, health, rent gap, history, provider, SPDAT — 2026-09-25) by name
+ *  from the model file carried in meta. */
+type Pm = NonNullable<PathwayIntel['predictor_ml']>;
+const featLabels = (pm: Pm) => pm.feature_names.slice(0, -1)
+  .map((n, i) => (i < FEAT_LABELS.length ? FEAT_LABELS[i] : pm.feature_labels?.[n] ?? n));
+const featTips = (pm: Pm) => pm.feature_names.slice(0, -1)
+  .map((n, i) => (i < FEAT_TIPS.length ? FEAT_TIPS[i] : pm.feature_tips?.[n]));
 const STATE_FULL: Record<string, string> = {
   SO: 'Street Outreach', ES: 'Emergency Shelter', SH: 'Safe Haven',
   TH: 'Transitional Housing', RRH: 'Rapid Rehousing', PSH: 'Perm. Supportive Housing',
@@ -582,6 +590,11 @@ export function PredictorSection({ pi, initialPid = null }: { pi: PathwayIntel; 
         : sortCol === 'eps' && sortDir === -1 ? 'prior_desc' : '';
   const [dossier, setDossier] = useState<PredDetail | null>(null);
   const [dossierBusy, setDossierBusy] = useState<string | null>(null);
+  // View deep in the list → bring the dossier (above the table) into view
+  const dossierRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (dossier) dossierRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [dossier]);
 
   useEffect(() => {
     let dead = false;
@@ -653,8 +666,9 @@ export function PredictorSection({ pi, initialPid = null }: { pi: PathwayIntel; 
             Program-type factors are relative to Street Outreach.
           </div>
           {(() => {
-            const ws = pm.weights.slice(0, FEAT_LABELS.length)
-              .map((w, i) => ({ label: FEAT_LABELS[i] ?? `f${i}`, tip: FEAT_TIPS[i], w }))
+            const L = featLabels(pm); const T = featTips(pm);
+            const ws = pm.weights.slice(0, L.length)
+              .map((w, i) => ({ label: L[i] ?? `f${i}`, tip: T[i], w }))
               .sort((a, b) => Math.abs(b.w) - Math.abs(a.w));
             const max = Math.max(...ws.map((x) => Math.abs(x.w)), 1e-9);
             return ws.map(({ label, tip, w }) => (
@@ -718,9 +732,11 @@ export function PredictorSection({ pi, initialPid = null }: { pi: PathwayIntel; 
         )}
       </div>
 
-      {dossier && pm && (
-        <DossierPanel client={dossier} pm={pm} onClose={() => setDossier(null)} />
-      )}
+      <div ref={dossierRef} style={{ scrollMarginTop: 72 }}>
+        {dossier && pm && (
+          <DossierPanel client={dossier} pm={pm} onClose={() => setDossier(null)} />
+        )}
+      </div>
 
       <div className="panel" style={{ padding: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: 6 }}>
@@ -789,7 +805,8 @@ function DossierPanel({ client, pm, onClose }: {
   const w = pm.weights;
   const pct = Math.round(client.score * 100);
   const color = scoreColor(client.score);
-  const contrib = client.feat.map((v, i) => ({ label: FEAT_LABELS[i] ?? `f${i}`, tip: FEAT_TIPS[i], val: w[i] * v }));
+  const L = featLabels(pm); const T = featTips(pm);
+  const contrib = client.feat.map((v, i) => ({ label: L[i] ?? `f${i}`, tip: T[i], val: w[i] * v }));
   const helping = contrib.filter((x) => x.val > 0).sort((a, b) => b.val - a.val).slice(0, 3);
   const hurting = contrib.filter((x) => x.val < 0).sort((a, b) => a.val - b.val).slice(0, 3);
   const losB = client.los < 30 ? 0 : client.los < 90 ? 1 : client.los < 180 ? 2 : client.los < 365 ? 3 : 4;
@@ -805,6 +822,9 @@ function DossierPanel({ client, pm, onClose }: {
             <span style={{ padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700, color: '#fff',
               background: 'var(--primary)' }}>{client.state}</span>
             {client.src && <span className="bnl-sub">from {client.src}</span>}
+            {/* additive link (2026-09-25): same client in the Intervention Guide */}
+            <a className="tbtn" href={`/dashboard/analytics?section=guide&pid=${encodeURIComponent(client.pid)}`}
+              title="Chance of success under each option, similar clients and pathways">Intervention guide →</a>
           </div>
           <div className="bnl-sub">
             {client.project || '—'} · Entry {client.entry ?? '—'} · {fmt(client.los)} days enrolled · {client.minor ? 'Family' : 'Adult only'}

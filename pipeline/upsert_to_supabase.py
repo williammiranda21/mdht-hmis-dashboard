@@ -615,7 +615,8 @@ def build_meta(data: dict, qf: dict, dq: dict, bnl: dict | None = None,
         _pi["predictor_ml"] = {k: _pm.get(k) for k in
                                ("weights", "feature_names", "n_features",
                                 "accuracy", "n_trained", "model_label",
-                                "profile_buckets", "n_active")}
+                                "profile_buckets", "n_active", "version",
+                                "feature_labels", "feature_tips", "holdout")}
         rows.append({"key": "pathway_intel", "value": _pi})
     return rows
 
@@ -870,6 +871,51 @@ def build_predictor_drills(ps: dict | None) -> list[dict]:
     } for projid, items in by_proj.items()]
 
 
+def load_intervention() -> dict | None:
+    """Intervention Guide payload (generate_intervention.py, 2026-09-25)."""
+    p = NETLIFY / "intervention.json"
+    if not p.exists():
+        print("  intervention.json not found — run generate_intervention.py; "
+              "skipping intervention_intel + an:ivx", flush=True)
+        return None
+    print(f"  reading {p.name} ({p.stat().st_size / 1e6:.1f} MB) …", flush=True)
+    with p.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_intervention_drills(iv: dict | None) -> list[dict]:
+    """Intervention Guide per-client estimates → drill_clients `an:ivx`, one row
+    per project the client is currently enrolled in. ADDITIVE to an:predict
+    (housing predictor) — separate metric, same RLS ride: agencies see their
+    own projects, admins see all; hashed IDs only."""
+    if not iv or not iv.get("clients"):
+        return []
+    period = (iv.get("as_of") or "")[:7]
+    if not _MONTHLY_RE.match(period):
+        return []
+    by_proj: dict[int, list[dict]] = {}
+    for c in iv["clients"]:
+        if c.get("proj") is None:
+            continue
+        by_proj.setdefault(int(c["proj"]), []).append(c)
+    return [{
+        "period": period,
+        "project_id": projid,
+        "metric": "an:ivx",
+        "personal_ids": [c["pid"] for c in items],
+        "detail": [{k: v for k, v in c.items() if k != "proj"} for c in items],
+    } for projid, items in by_proj.items()]
+
+
+def build_intervention_meta(iv: dict | None) -> list[dict]:
+    """Aggregate-only meta key: model card, backtest, equity audit, summary.
+    Omitted when the payload is absent so `--only meta` can't blank it."""
+    if not iv or not iv.get("model"):
+        return []
+    return [{"key": "intervention_intel",
+             "value": {k: iv.get(k) for k in ("generated", "as_of", "summary", "model")}}]
+
+
 def build_project_pathways(pp: dict | None) -> list[dict]:
     """One row per project — the whole pathway payload lives in `data` jsonb.
 
@@ -973,6 +1019,16 @@ def build_all(dry: bool):
             pathways_loaded = True
         return pathways
 
+    intervention: dict | None = None
+    intervention_loaded = False
+
+    def get_intervention():
+        nonlocal intervention, intervention_loaded
+        if not intervention_loaded:
+            intervention = load_intervention()
+            intervention_loaded = True
+        return intervention
+
     pathway_sys: dict | None = None
     pathway_sys_loaded = False
 
@@ -1016,12 +1072,14 @@ def build_all(dry: bool):
             lambda: build_drill_clients(get_drill())
             + build_outlier_drills(get_analytics())
             + build_risk_drills(get_analytics())
-            + build_predictor_drills(get_pathway_sys()),
+            + build_predictor_drills(get_pathway_sys())
+            + build_intervention_drills(get_intervention()),
             "period,project_id,metric",
         ),
         "meta": (
             lambda: build_meta(data, qf, dq, get_bnl(), get_analytics(),
-                               get_pathway_sys()),
+                               get_pathway_sys())
+            + build_intervention_meta(get_intervention()),
             "key",
         ),
         "bnl_clients": (
