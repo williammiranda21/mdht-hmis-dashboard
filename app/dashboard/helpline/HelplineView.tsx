@@ -160,6 +160,18 @@ function ChipDated({ c }: { c: HlCase }) {
 
 const OPEN_STATUSES: CaseStatus[] = ['assigned', 'attempted', 'contacted'];
 
+/** Contact-attempt target (user 2026-09-25): the SLA clock runs from the CALL
+ *  to the FIRST outreach attempt or contact — not to assignment. A case is
+ *  "past target" while it is still live (in triage or with a team) and no one
+ *  has tried to reach the person yet. Events are attempt/contact rows, oldest
+ *  first (page.tsx), so events[0] is the first try. */
+type Ev = { at: string; kind: string };
+function firstTryAt(evs?: Ev[]): string | null { return evs?.[0]?.at ?? null; }
+function untried(c: HlCase, evs?: Ev[]): boolean {
+  return !evs?.length && (c.attempts ?? 0) === 0 && (c.contacts ?? 0) === 0;
+}
+function isLive(c: HlCase): boolean { return c.status === 'new' || OPEN_STATUSES.includes(c.status); }
+
 /** Page sections as tabs (user-approved mockup 2026-08-20): operators live in
  *  the queue, dispatchers in the board, supervisors in map+reporting — each
  *  gets a focused screen. KPI cards stay above the tabs, counts ride on the
@@ -476,6 +488,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
   }, [cases, statPeriod]);
   const sTriage = statCases.filter((c) => c.status === 'new');
   const sWorking = statCases.filter((c) => OPEN_STATUSES.includes(c.status));
+  const pastTarget = (c: HlCase) => rules.slaHours != null && isLive(c) && untried(c, events[c.id])
+    && hoursSince(c.created_at) >= (rules.slaHours as number);
   const sConfirmed = statCases.filter((c) => c.status === 'confirmed');
   const sDone = statCases.filter((c) => ['declined', 'no_locate', 'closed', 'referred_out'].includes(c.status));
   const sReferred = statCases.filter((c) => c.status === 'referred_out');
@@ -672,9 +686,12 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
         {kpi('Awaiting triage', sTriage.length,
           (sTriage.length ? `oldest ${fmtHours(Math.max(...sTriage.map((c) => hoursSince(c.created_at))))} ago` : 'queue is clear') + scopeNote,
           'var(--danger)', 'queue')}
-        {rules.slaHours != null && kpi('Past target',
-          sTriage.filter((c) => hoursSince(c.created_at) >= (rules.slaHours as number)).length,
-          `awaiting triage past the ${rules.slaHours}h response target${scopeNote}`, 'var(--danger)', 'queue')}
+        {rules.slaHours != null && (() => {
+          const q = sTriage.filter(pastTarget).length; const b = sWorking.filter(pastTarget).length;
+          return kpi('Past target', q + b,
+            `no contact attempt within the ${rules.slaHours}h target — ${fmtInt(q)} unassigned · ${fmtInt(b)} with a team${scopeNote}`,
+            'var(--danger)', q >= b ? 'queue' : 'board');
+        })()}
         {kpi('With outreach', sWorking.length, 'assigned · attempted · contacted' + scopeNote, 'var(--info)', 'board')}
         {kpi('Confirmed homeless', sConfirmed.length,
           `${fmtInt(sVerified.length)} verified enrolled · ${fmtInt(sUnverified.length)} pending${scopeNote}`, 'var(--accent)', 'cases')}
@@ -736,11 +753,11 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
           </div>
         )}
         {(() => {
-          const n = rules.slaHours == null ? 0
-            : triage.filter((c) => hoursSince(c.created_at) >= (rules.slaHours as number)).length;
+          const n = triage.filter(pastTarget).length;
           return n > 0 ? (
-            <div className="bnl-sub" style={{ padding: '0 18px 8px', color: 'var(--danger)', fontWeight: 700 }}>
-              ⚑ {fmtInt(n)} call{n === 1 ? '' : 's'} past the {rules.slaHours}h response target
+            <div className="bnl-sub" style={{ padding: '0 18px 8px', color: 'var(--danger)', fontWeight: 700 }}
+              title="The target is a first outreach contact attempt within this many hours of the call. These callers aren't assigned yet, so no team can try.">
+              ⚑ {fmtInt(n)} call{n === 1 ? '' : 's'} past the {rules.slaHours}h contact-attempt target — not assigned yet
             </div>
           ) : null;
         })()}
@@ -758,10 +775,11 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                 })
                 .map(({ c, e }) => {
                 const hrs = hoursSince(c.created_at);
-                const late = rules.slaHours != null && hrs >= (rules.slaHours as number);
+                const late = pastTarget(c);
                 return (
                 <FragmentRow key={c.id} left={<>{when(c.created_at)}
-                  <div className="bnl-sub" style={late ? { color: 'var(--danger)', fontWeight: 700 } : undefined}>
+                  <div className="bnl-sub" style={late ? { color: 'var(--danger)', fontWeight: 700 } : undefined}
+                    title={late ? `No contact attempt yet — past the ${rules.slaHours}h target` : undefined}>
                     {fmtHours(hrs)} ago{late ? ' ⚠' : ''}</div></>}>
                   <CaseCell c={c} e={e} />
                   <td style={{ whiteSpace: 'nowrap' }}>
@@ -800,6 +818,14 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
           </div>
           <TeamMultiSelect teams={teamOpts} value={boardTeams} onChange={setBoardTeams} />
         </div>
+        {(() => {
+          const n = working.filter((c) => pastTarget(c) && (boardTeams == null || boardTeams.has(c.team_id ?? -1))).length;
+          return n > 0 ? (
+            <div className="bnl-sub" style={{ padding: '0 18px 8px', color: 'var(--danger)', fontWeight: 700 }}>
+              ⚑ {fmtInt(n)} assigned case{n === 1 ? '' : 's'} with no contact attempt past the {rules.slaHours}h target
+            </div>
+          ) : null;
+        })()}
         {/* ONE table for every team (2026-09-25 redesign): a single header and
             fixed column widths so every team's rows line up; teams are band rows. */}
         {working.length > 0 && (
@@ -825,7 +851,12 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                   <FragmentZoneRow key={c.id}>
                   <tr style={{ cursor: 'default' }}>
                     <CaseCell c={c} />
-                    <td style={{ whiteSpace: 'nowrap' }}><ChipDated c={c} /></td>
+                    <td style={{ whiteSpace: 'nowrap' }}><ChipDated c={c} />
+                      {pastTarget(c) && (
+                        <div style={{ marginTop: 3, fontSize: 11, fontWeight: 700, color: 'var(--danger)' }}
+                          title={`Called ${fmtHours(hoursSince(c.created_at))} ago — no outreach attempt logged yet`}>
+                          ⚑ no attempt · past {rules.slaHours}h</div>
+                      )}</td>
                     <td><Trail events={events[c.id]} c={c} /></td>
                     {/* Two-line action cluster (user mock approval 2026-09-11,
                         "buttons smaller"): quiet utilities on top, color-coded
@@ -1807,45 +1838,71 @@ function FamilyStats({ cases }: { cases: HlCase[] }) {
   );
 }
 
-/** SLA attainment — % of calls assigned within the response target + weekly
- *  trend. The target itself is admin-set (Settings → Priority rules). */
-function SlaCard({ cases, rules }: { cases: HlCase[]; rules: PriorityRules }) {
+/** Contact-attempt target (user 2026-09-25): % of calls whose FIRST outreach
+ *  attempt/contact came within the admin-set hours + weekly trend. Time to
+ *  assignment is shown alongside as information only (no target). */
+function SlaCard({ cases, rules, events }: {
+  cases: HlCase[]; rules: PriorityRules; events: Record<number, Ev[]>;
+}) {
+  const med = (xs: number[]) => {
+    if (!xs.length) return null;
+    const v = [...xs].sort((x, y) => x - y); const m = Math.floor(v.length / 2);
+    return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+  };
+  const p75 = (xs: number[]) => (xs.length ? [...xs].sort((x, y) => x - y)[Math.floor(xs.length * 0.75)] : null);
+  const fmtH = (h: number | null) => (h == null ? '—' : h < 1 ? `${Math.round(h * 60)}m` : h < 48 ? `${h.toFixed(1)}h` : `${(h / 24).toFixed(1)}d`);
+  const asgHrs = cases.filter((c) => c.assigned_at)
+    .map((c) => (new Date(c.assigned_at!).getTime() - new Date(c.created_at).getTime()) / 3_600_000)
+    .filter((h) => h >= 0);
+  const assignBlock = asgHrs.length > 0 && (
+    <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 12.5, margin: '10px 0 2px',
+      paddingTop: 10, borderTop: '1px solid var(--hair)' }}>
+      <span className="bnl-sub" style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>Time to assignment</span>
+      <span>median <b>{fmtH(med(asgHrs))}</b></span>
+      <span>75% within <b>{fmtH(p75(asgHrs))}</b></span>
+      <span className="bnl-sub">{fmtInt(asgHrs.length)} calls assigned · information only, no target</span>
+    </div>
+  );
   if (rules.slaHours == null) {
     return (
-      <ReportCard title="Response target — assignment SLA">
-        <div className="bnl-sub">No response target set — an admin can set SLA hours under
+      <ReportCard title="Contact-attempt target">
+        <div className="bnl-sub">No target set — an admin can set the contact-attempt hours under
           Settings → Priority rules, and this card will score every call against it.</div>
+        {assignBlock}
       </ReportCard>
     );
   }
   const sla = rules.slaHours as number;
-  const hrs = (c: HlCase) =>
-    (new Date(c.assigned_at!).getTime() - new Date(c.created_at).getTime()) / 3_600_000;
-  const assigned = cases.filter((c) => c.assigned_at && hrs(c) >= 0);
-  const within = assigned.filter((c) => hrs(c) <= sla);
-  const breaching = cases.filter((c) => c.status === 'new' && hoursSince(c.created_at) >= sla);
-  if (!assigned.length && !breaching.length) return null;
+  const tryHrs = (c: HlCase) => {
+    const t = firstTryAt(events[c.id]);
+    return t == null ? null : (new Date(t).getTime() - new Date(c.created_at).getTime()) / 3_600_000;
+  };
+  const tried = cases.map((c) => ({ c, h: tryHrs(c) })).filter((x): x is { c: HlCase; h: number } => x.h != null && x.h >= 0);
+  const within = tried.filter((x) => x.h <= sla);
+  const breaching = cases.filter((c) => isLive(c) && untried(c, events[c.id]) && hoursSince(c.created_at) >= sla);
+  if (!tried.length && !breaching.length && !asgHrs.length) return null;
   const by = new Map<number, { n: number; ok: number }>();
-  for (const c of assigned) {
+  for (const { c, h } of tried) {
     const d = new Date(c.created_at);
     const k = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)).getTime();
     const e = by.get(k) ?? { n: 0, ok: 0 };
     e.n += 1;
-    if (hrs(c) <= sla) e.ok += 1;
+    if (h <= sla) e.ok += 1;
     by.set(k, e);
   }
-  const weeks = [...by.entries()].sort((a, b) => a[0] - b[0]).slice(-8);
-  const rate = assigned.length ? within.length / assigned.length : 0;
+  const weeks = [...by.entries()].sort((x, y) => x[0] - y[0]).slice(-8);
+  const rate = tried.length ? within.length / tried.length : 0;
   return (
-    <ReportCard title={`Response target — assigned within ${sla}h`}>
+    <ReportCard title={`Contact attempted within ${sla}h`}>
       <div style={{ display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 8 }}>
         <span style={{ fontSize: 24, fontWeight: 800,
           color: rate >= 0.8 ? 'var(--accent)' : rate >= 0.5 ? 'var(--warn)' : 'var(--danger)' }}>
-          {pctOf(within.length, assigned.length)}</span>
-        <span className="bnl-sub">{fmtInt(within.length)} of {fmtInt(assigned.length)} assigned within target</span>
+          {pctOf(within.length, tried.length)}</span>
+        <span className="bnl-sub">{fmtInt(within.length)} of {fmtInt(tried.length)} calls had a first outreach attempt within target
+          {tried.length ? ` · median ${fmtH(med(tried.map((x) => x.h)))}` : ''}</span>
         {breaching.length > 0 && (
           <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>
-            ⚑ {fmtInt(breaching.length)} in the queue past it right now</span>
+            ⚑ {fmtInt(breaching.length)} open past it right now with no attempt</span>
         )}
       </div>
       {weeks.length >= 2 && (
@@ -1865,8 +1922,10 @@ function SlaCard({ cases, rules }: { cases: HlCase[]; rules: PriorityRules }) {
         </div>
       )}
       <div className="bnl-sub" style={{ marginTop: 5 }}>
-        Counted call received → team assignment; calls never assigned aren&rsquo;t scored until they are.
+        Counted call received → first outreach attempt or contact (✗ or ✓ on the board); calls not yet tried
+        aren&rsquo;t scored until they are, and show above if they&rsquo;re past target.
       </div>
+      {assignBlock}
     </ReportCard>
   );
 }
@@ -2149,7 +2208,7 @@ function Reporting({ cases: allCases, teams, events, callsByCase = {}, callLog =
         gap: 14, padding: '4px 18px 16px' }}>
       <Funnel cases={cases} callsN={callsN} />
       <WeeklyTrend cases={cases} />
-      <SlaCard cases={cases} rules={rules} />
+      <SlaCard cases={cases} rules={rules} events={events} />
       <BandQa cases={cases} rules={rules} />
       <DemandHeat calls={calls} />
       <ZipHeat cases={cases} callsByCase={callsByCase} />
@@ -2310,7 +2369,7 @@ function PriorityRulesAdmin({ me, rules, onSaved }: {
       <div className="panel-h">
         <div>
           <h3>Priority rules (admin)</h3>
-          <div className="meta">Point weights, waiting-time escalation, boosts, response target,
+          <div className="meta">Point weights, waiting-time escalation, boosts, contact-attempt target,
             emergency mode · changes re-rank the queue instantly · every save is logged</div>
         </div>
         <button className="tbtn" onClick={() => { setOpen(!open); setSaved(false); }}>
@@ -2344,7 +2403,7 @@ function PriorityRulesAdmin({ me, rules, onSaved }: {
             <span title="Confirmed HMIS match who is chronic on the By-Name List">HMIS chronic +{num(w.hmisChronic, (n) => setW({ ...w, hmisChronic: n }), 44)}</span>
           </div>
           <div className="bnl-sub" style={{ fontWeight: 700, textTransform: 'uppercase',
-            letterSpacing: '.05em', margin: '14px 0 6px' }}>Bands &amp; response target</div>
+            letterSpacing: '.05em', margin: '14px 0 6px' }}>Bands &amp; contact-attempt target</div>
           <div style={{ display: 'flex', gap: '8px 26px', flexWrap: 'wrap', fontSize: 12.5,
             alignItems: 'center', color: 'var(--muted)' }}>
             <span>HIGH at {num(w.bands.high, (n) => setW({ ...w, bands: { ...w.bands, high: n } }), 44)} pts</span>
@@ -2353,7 +2412,7 @@ function PriorityRulesAdmin({ me, rules, onSaved }: {
               <label style={{ cursor: 'pointer' }}>
                 <input type="checkbox" checked={w.slaHours != null}
                   onChange={(e2) => setW({ ...w, slaHours: e2.target.checked ? 24 : null })} />
-                {' '}Response target
+                {' '}Contact-attempt target
               </label>
               {w.slaHours != null && <> {num(w.slaHours, (n) => setW({ ...w, slaHours: Math.max(1, n) }), 44)} hours</>}
             </span>

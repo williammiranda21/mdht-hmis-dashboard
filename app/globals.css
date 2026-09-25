@@ -5,6 +5,8 @@
   /* Text ramp tuned for WCAG AA on white: 14.2 / 9.0 / 5.6 / 4.7 : 1.
      The old --muted (3.2:1) and --faint (2.1:1) failed for small label text. */
   --text:#3D4757; --strong:#232B3A; --muted:#5C6A7D; --faint:#69768A;
+  /* input hints — deliberately quieter than --faint so they never read as typed text */
+  --placeholder:#A7B0BD;
   --border:#E4E8EF; --border-strong:#D8DEE8; --hair:#EDF0F5; --track:#E8ECF2; --rowhover:#F7F9FC; --thbg:#F4F6FA;
   --primary:#7E67FE; --secondary:#6A50F0; --primary-soft:rgba(126,103,254,.10); --primary-light:rgba(126,103,254,.18);
   --accent:#1CA75A; --accent-light:rgba(28,167,90,.11); --warn:#DD9A26; --warn-light:rgba(221,154,38,.12); --danger:#E04F4F; --danger-light:rgba(224,79,79,.10); --mid:#CA8A04; --info:#2F6FED; --info-light:rgba(47,111,237,.10);
@@ -19,6 +21,7 @@
   /* Text ramp tuned for WCAG AA on the #1E2430 card: 14.3 / 9.9 / 6.2 / 4.7 : 1.
      The old --faint (#4E5A6E) was 2.2:1 — effectively unreadable. */
   --text:#C3CCDA; --strong:#F1F5F9; --muted:#94A3B8; --faint:#828FA1;
+  --placeholder:#5D687B;
   --border:#2A3242; --border-strong:#333D4F; --hair:#242C3A; --track:#2A3242; --rowhover:#222A38; --thbg:#202733;
   --primary:#7E67FE; --secondary:#9C8CFF; --primary-soft:rgba(126,103,254,.14); --primary-light:rgba(126,103,254,.26);
   --accent:#22C55E; --accent-light:rgba(34,197,94,.13); --warn:#F5B849; --warn-light:rgba(245,184,73,.13); --danger:#EF5F5F; --danger-light:rgba(239,95,95,.13); --mid:#E8C468; --info:#5B8DF5; --info-light:rgba(91,141,245,.14);
@@ -218,12 +221,14 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
 .finput{font:inherit;font-size:13px;color:var(--text);background:var(--card);border:1px solid var(--border-strong);border-radius:10px;padding:9px 12px 9px 32px;min-width:170px;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2392A0B8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><path d='M21 21l-4-4'/></svg>");background-repeat:no-repeat;background-position:left 11px center}
 .finput:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
-.finput::placeholder{color:var(--faint)}
+.finput::placeholder{color:var(--placeholder)}
 /* Plain data-entry input — .finput is the SEARCH box (magnifier icon +
    170px min-width) and overflows tight form rows when misused for fields. */
 .tinput{font:inherit;font-size:13.5px;color:var(--text);background:var(--card);border:1px solid var(--border-strong);border-radius:10px;padding:9px 12px;width:100%;min-width:0}
 .tinput:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
-.tinput::placeholder{color:var(--faint)}
+.tinput::placeholder{color:var(--placeholder);opacity:1}
+/* empty date fields show mm/dd/yyyy as real text — quiet it until focused */
+.tinput.is-empty:not(:focus){color:var(--placeholder)}
 .switch{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text);padding-bottom:9px;user-select:none}
 .switch .tk{width:38px;height:22px;border-radius:999px;background:var(--primary);position:relative;transition:background .15s;flex:none}
 .switch .tk::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .18s;box-shadow:0 1px 2px rgba(0,0,0,.3)}
@@ -555,13 +560,17 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
 .hc-none{text-align:center;font-size:12px;color:var(--muted);padding:10px 0}
 /* ── Deep Dive (project picker + worklists) ── */
 .dd-pick{margin-top:0}
-.dd-opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px;
-  padding:12px 18px;max-height:300px;overflow-y:auto;border-top:1px solid var(--hair);margin-top:12px}
-.dd-opt{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;
-  border:1px solid var(--hair);cursor:pointer;font-size:12.5px;background:var(--card)}
+.dd-opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1px 14px;
+  padding:8px 14px;max-height:260px;overflow-y:auto;border-top:1px solid var(--hair);margin-top:12px}
+/* compact rows (2026-09-25): no per-item box — hover/selected tint only */
+.dd-opt{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:6px;
+  border:0;cursor:pointer;font-size:12.5px;background:transparent;min-width:0}
 .dd-opt:hover{background:var(--rowhover)}
-.dd-opt.on{border-color:var(--primary);background:var(--primary-soft)}
-.dd-opt input{accent-color:var(--primary);flex:none}
+.dd-opt.on{background:var(--primary-soft)}
+.dd-opt.off .dd-nm{color:var(--muted)}
+.dd-opt input{accent-color:var(--primary);flex:none;width:13px;height:13px;margin:0}
+.dd-opt .ty{font-size:9.5px;padding:0 5px;margin-left:0;flex:none}
+.dd-off{flex:none;font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
 .dd-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
 .dd-kpi{cursor:pointer}
 .dd-kpi:hover{border-color:var(--primary)}

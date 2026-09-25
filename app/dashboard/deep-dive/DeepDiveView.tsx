@@ -75,10 +75,28 @@ export default function DeepDiveView({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Compact picker (user 2026-09-25: "too big"): "(INACTIVE)" projects are
+  // hidden by default behind a toggle and sorted after active ones; the
+  // prefix becomes a small tag. Selected projects always stay visible.
+  const [showInactive, setShowInactiveState] = useState(false);
+  useEffect(() => {
+    try { setShowInactiveState(localStorage.getItem('dd-inactive') === '1'); } catch { /* private mode */ }
+  }, []);
+  const setShowInactive = (v: boolean) => {
+    setShowInactiveState(v);
+    try { localStorage.setItem('dd-inactive', v ? '1' : '0'); } catch { /* ignore */ }
+  };
+  const INACTIVE_RE = /^\s*\(\s*inactive\s*\)\s*/i;
+  const opts = useMemo(() => options
+    .map((o) => ({ ...o, inactive: INACTIVE_RE.test(o.name), label: o.name.replace(INACTIVE_RE, '') }))
+    .sort((a, b) => Number(a.inactive) - Number(b.inactive) || a.label.localeCompare(b.label)),
+  [options]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const nInactive = opts.filter((o) => o.inactive).length;
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return t ? options.filter((o) => o.name.toLowerCase().includes(t) || o.type.toLowerCase().includes(t)) : options;
-  }, [options, q]);
+    return opts.filter((o) => (showInactive || !o.inactive || sel.includes(o.id))
+      && (!t || o.label.toLowerCase().includes(t) || o.type.toLowerCase().includes(t)));
+  }, [opts, q, showInactive, sel]);
 
   useEffect(() => {
     if (!sel.length || !period) { setData(null); return; }
@@ -117,6 +135,13 @@ export default function DeepDiveView({
             <button className="btn" onClick={() => setSel(shown.map((o) => o.id))}
               disabled={!shown.length}>Select all shown</button>
             <button className="btn" onClick={() => setSel([])} disabled={!sel.length}>Clear</button>
+            {nInactive > 0 && (
+              <button type="button" className={`tbtn${showInactive ? ' tbtn-sel' : ''}`} aria-pressed={showInactive}
+                onClick={() => setShowInactive(!showInactive)}
+                title="Projects marked (INACTIVE) in HMIS — hidden to keep the list short">
+                {showInactive ? 'Showing inactive' : 'Show inactive'} ({nInactive})
+              </button>
+            )}
           </div>
         </div>
 
@@ -124,10 +149,11 @@ export default function DeepDiveView({
           {shown.map((o) => (
             // Names are ellipsised to keep the grid tidy, so the full name lives
             // in a title on the whole row — hovering anywhere reveals it.
-            <label key={o.id} className={`dd-opt${sel.includes(o.id) ? ' on' : ''}`}
+            <label key={o.id} className={`dd-opt${sel.includes(o.id) ? ' on' : ''}${o.inactive ? ' off' : ''}`}
               title={o.type ? `${o.name} · ${typeFull(o.type)}` : o.name}>
               <input type="checkbox" checked={sel.includes(o.id)} onChange={() => toggle(o.id)} />
-              <span className="dd-nm">{o.name}</span>
+              <span className="dd-nm">{o.label}</span>
+              {o.inactive && <span className="dd-off">inactive</span>}
               {o.type && <span className="ty">{typeAbbr(o.type)}</span>}
             </label>
           ))}

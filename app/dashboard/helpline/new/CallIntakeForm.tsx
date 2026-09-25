@@ -625,7 +625,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
           </div>
           <div style={{ flex: 1, minWidth: 140 }}>
             <L>DOB — helps HMIS match</L>
-            <input className="tinput" style={{ width: '100%' }} type="date" value={f.dob}
+            <input className={`tinput${f.dob ? '' : ' is-empty'}`} style={{ width: '100%' }} type="date" value={f.dob}
               onChange={(e) => set('dob')(e.target.value)} />
           </div>
           <div style={{ flex: 0.7, minWidth: 110 }}>
