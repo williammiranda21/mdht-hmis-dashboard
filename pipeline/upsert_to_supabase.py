@@ -908,7 +908,7 @@ def build_intervention_drills(iv: dict | None) -> list[dict]:
 
 
 def build_intervention_meta(iv: dict | None) -> list[dict]:
-    """Aggregate-only meta key: model card, backtest, equity audit, summary.
+    """Aggregate-only meta key: model card, backtest, summary.
     Omitted when the payload is absent so `--only meta` can't blank it."""
     if not iv or not iv.get("model"):
         return []

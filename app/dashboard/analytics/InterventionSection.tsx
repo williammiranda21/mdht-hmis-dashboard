@@ -522,29 +522,6 @@ function Evidence({ iv }: { iv: InterventionIntel }) {
         <p className="bnl-sub" style={{ marginTop: 8 }}>AUC = how often the model ranks a client who succeeded above one who didn’t (0.5 = coin flip, 1 = perfect).</p>
       </div>
 
-      <div className="grouplabel">Equity audit (race/ethnicity is never a model input — used only to check fairness)</div>
-      <div className="panel" style={{ padding: '12px 16px' }}>
-        <table>
-          <thead><tr><th>Group</th><th className="num">Test episodes</th><th className="num">Observed success</th><th className="num">Predicted</th><th className="num">AUC</th><th className="num">PSH share: actual → model</th></tr></thead>
-          <tbody>
-            {m.equity.map((e) => (
-              <tr key={e.group}><td>{e.group}</td><td className="num">{fmt(e.n)}</td><td className="num">{pct(e.observed, 1)}</td>
-                <td className="num">{pct(e.predicted, 1)}</td><td className="num">{e.auc.toFixed(3)}</td>
-                <td className="num">{pct(e.psh_share_actual, 1)} → {pct(e.psh_share_model, 1)}</td></tr>
-            ))}
-          </tbody>
-        </table>
-        {m.equity.filter((e) => e.psh_share_actual != null && e.psh_share_model != null
-          && Math.abs(e.psh_share_model - e.psh_share_actual) >= 0.05).map((e) => (
-          <p key={e.group} style={{ marginTop: 8, fontSize: 12.5, padding: '7px 10px', borderRadius: 8,
-            background: 'var(--warn-light)', color: 'var(--text)' }}>
-            <b style={{ color: 'var(--warn)' }}>Needs governance review:</b> following the option matches would move {e.group} clients&rsquo;
-            PSH share from {pct(e.psh_share_actual)} to {pct(e.psh_share_model)}. Until reviewed, matches should not influence PSH prioritization.
-          </p>
-        ))}
-        <p className="bnl-sub" style={{ marginTop: 8 }}>Watch for groups where predicted and observed diverge, or where the model would shift PSH access sharply.</p>
-      </div>
-
       <div className="grouplabel">Definitions</div>
       <div className="panel" style={{ padding: '12px 16px' }}>
         <ul className="bnl-sub" style={{ lineHeight: 1.7, paddingLeft: 18 }}>

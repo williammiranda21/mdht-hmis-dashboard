@@ -222,7 +222,7 @@ export async function getPathwayIntel(): Promise<PathwayIntel | null> {
 }
 
 /** Intervention Guide (meta.intervention_intel, 2026-09-25) — AGGREGATE-ONLY:
- *  model card, backtest, equity audit, pathway table. Per-client estimates are
+ *  model card, backtest, pathway table. Per-client estimates are
  *  drill_clients `an:ivx` (agency-scoped) served by /api/analytics/intervention. */
 export interface IvxDriver { feat: string; label: string; w: number }
 export interface IvxPathway {
@@ -255,8 +255,6 @@ export interface InterventionIntel {
           psh_assign_auc_with: number; psh_assign_auc_without: number; n_program_with_spdat: number };
       };
     };
-    equity: { group: string; n: number; observed: number; predicted: number; auc: number; n_programs: number;
-      psh_share_actual: number | null; psh_share_model: number | null; lift: number | null }[];
     drivers: Record<string, IvxDriver[]>;
     modifiers: Record<string, IvxDriver[]>;
     pathways: IvxPathway[];
