@@ -245,6 +245,9 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
 /* granted-access / active-toggle state — green so admins see what a user can reach */
 .tbtn-on{color:var(--accent);border-color:var(--accent);background:var(--accent-light)}
 .tbtn-on:hover{color:var(--accent);border-color:var(--accent)}
+/* selected view toggle (e.g. Show inactive teams) — same violet as a selected .seg chip */
+.tbtn-sel{background:var(--primary-soft);border-color:rgba(126,103,254,.55);color:var(--primary)}
+:root[data-theme="dark"] .tbtn-sel,:root[data-theme="dark"] .tbtn-sel:hover{color:var(--secondary)}
 /* admin account actions wrap within the cell instead of overflowing to a scroll */
 .au-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
 thead th.sortable{cursor:pointer;user-select:none}

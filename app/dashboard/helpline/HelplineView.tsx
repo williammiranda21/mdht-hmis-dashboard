@@ -954,7 +954,16 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
             <select className="fselect" value={fTeam} onChange={(e) => setFTeam(e.target.value)}>
               <option value="">All</option>
               <option value="none">(never assigned)</option>
-              {teams.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
+              {teams.filter((x) => x.active).map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
+              {(() => {
+                const used = new Set(cases.map((c) => c.team_id));
+                const old = teams.filter((x) => !x.active && used.has(x.id));
+                return old.length ? (
+                  <optgroup label="Inactive teams">
+                    {old.map((x) => <option key={x.id} value={String(x.id)}>{x.name}</option>)}
+                  </optgroup>
+                ) : null;
+              })()}
             </select></div>
           <div className="fgroup"><span className="flabel">Enrollment</span>
             <select className="fselect" value={fEnroll} onChange={(e) => setFEnroll(e.target.value)}>
@@ -2414,6 +2423,21 @@ function TeamAdmin({ teams, busy, onCreate, onSave }: {
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
+  // Inactive teams hidden by default (user 2026-09-25: "doesn't clutter the
+  // screen") — the one being edited stays visible so a just-deactivated team
+  // doesn't vanish mid-edit.
+  const [showInactive, setShowInactiveState] = useState(false);
+  useEffect(() => {
+    try { setShowInactiveState(localStorage.getItem('hl-teams-inactive') === '1'); } catch { /* private mode */ }
+  }, []);
+  const setShowInactive = (v: boolean) => {
+    setShowInactiveState(v);
+    try { localStorage.setItem('hl-teams-inactive', v ? '1' : '0'); } catch { /* ignore */ }
+  };
+  const nInactive = teams.filter((t) => !t.active).length;
+  const shownTeams = [...teams]
+    .filter((t) => showInactive || t.active || t.id === editing)
+    .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name));
   const [saved, setSaved] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [name, setName] = useState('');
@@ -2521,20 +2545,32 @@ function TeamAdmin({ teams, busy, onCreate, onSave }: {
         </div>
       )}
       {open && (
-        <div style={{ display: 'flex', gap: 8, padding: '0 18px 12px' }}>
+        <div style={{ display: 'flex', gap: 8, padding: '0 18px 12px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input className="tinput" style={{ maxWidth: 320 }} value={newName} maxLength={80}
             placeholder="New team name — e.g. MHAP North"
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') create(); }} />
           <button className="btn primary" style={{ padding: '6px 14px', fontSize: 12.5 }}
             disabled={busy || !newName.trim()} onClick={create}>＋ Create team</button>
+          {nInactive > 0 && (
+            <button type="button" className={`tbtn${showInactive ? ' tbtn-sel' : ''}`} aria-pressed={showInactive}
+              onClick={() => setShowInactive(!showInactive)} style={{ marginLeft: 'auto' }}
+              title="Inactive teams keep their history; turn one back on from its Edit row">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {showInactive
+                  ? <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>
+                  : <><path d="M17.9 17.9A10 10 0 0 1 12 19c-6.5 0-10-7-10-7a18 18 0 0 1 4.1-5.1M9.9 5.2A9 9 0 0 1 12 5c6.5 0 10 7 10 7a18 18 0 0 1-2.2 3.2" /><line x1="2" y1="2" x2="22" y2="22" /></>}
+              </svg>
+              {showInactive ? 'Showing inactive' : 'Show inactive'} ({nInactive})
+            </button>
+          )}
         </div>
       )}
       {open && (
         <div className="scroll"><table className="bnl-table">
           <thead><tr><th>Team</th><th>Staff</th><th>Covers</th><th>Routing</th><th style={{ textAlign: 'right' }}></th></tr></thead>
           <tbody>
-            {teams.map((t) => (
+            {shownTeams.map((t) => (
               <FragmentZoneRow key={t.id}>
                 <tr style={{ cursor: 'default', opacity: t.active ? 1 : 0.55 }}>
                   <td className="bnl-nm" style={{ minWidth: 180 }}>{t.name}
