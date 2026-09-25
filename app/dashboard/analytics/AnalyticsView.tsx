@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { DEST_LABELS, SUBSIDY_LABELS, fmtInt, typeAbbr } from '../../../lib/format';
 import { IconTrendUp, IconAlertTriangle, IconClock, IconHome, IconInflow, IconShuffle,
   IconFunnel, IconTarget, IconSliders, IconDownload } from '../../../components/icons';
@@ -44,6 +44,96 @@ const TAB_KEY = 'an-tab';
 
 /* ══════════════ chart primitives ══════════════ */
 
+/**
+ * The SVGs scale with their card (viewBox + width:100%), and axis text used to
+ * scale with them — 8-unit labels rendered at ~5-6px in the 3-up and wide
+ * charts (user 2026-09-25: "so hard to see the axis"). k = viewBox units per
+ * CSS px, measured live, so AXIS_PX * k always renders at a true 11px and the
+ * margins grow to fit it. `guessPx` is the pre-measure width (SSR/first paint).
+ */
+const AXIS_PX = 11;
+function useSvgScale(W: number, guessPx: number) {
+  const ref = useRef<SVGSVGElement>(null);
+  const [k, setK] = useState(W / guessPx);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((es) => {
+      const w = es[0]?.contentRect.width;
+      if (w) setK(W / w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [W]);
+  return [ref, k] as const;
+}
+/** Left margin wide enough for the longest y-tick label at AXIS_PX. */
+const yAxisWidth = (labels: string[], k: number) =>
+  (Math.max(0, ...labels.map((s) => s.length)) * 6.6 + 10) * k;
+/**
+ * X tick placement by rendered width, not by month count: the first and last
+ * labels always show (anchored inward so neither clips), then evenly spaced
+ * candidates are kept only if their estimated extent clears every label
+ * already placed by a 12px gap. "Oct 2022"/"Sep 2023" used to overprint.
+ */
+function xTicks(labels: string[], x: (i: number) => number, k: number, maxTicks: number) {
+  type Tick = { i: number; anchor: 'start' | 'middle' | 'end'; a: number; b: number };
+  const n = labels.length;
+  if (!n) return [];
+  const width = (i: number) => labels[i].length * 6.4 * k;
+  const make = (i: number): Tick => {
+    const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+    const w = width(i); const cx = x(i);
+    const a = anchor === 'start' ? cx : anchor === 'end' ? cx - w : cx - w / 2;
+    return { i, anchor, a, b: a + w };
+  };
+  const gap = 12 * k;
+  const placed: Tick[] = [make(0)];
+  if (n > 1) {
+    const last = make(n - 1);
+    if (last.a - placed[0].b >= gap) placed.push(last); else placed[0] = last;
+  }
+  const step = Math.max(1, Math.round((n - 1) / Math.max(1, maxTicks - 1)));
+  for (let i = step; i < n - 1; i += step) {
+    const t = make(i);
+    if (placed.every((p) => t.b + gap <= p.a || t.a >= p.b + gap)) placed.push(t);
+  }
+  return placed.sort((p, q) => p.i - q.i);
+}
+
+/**
+ * Hover readout (user 2026-09-25): pointer x → nearest month index. The
+ * readout is HTML over the SVG (not SVG text) so it never scales with the card.
+ */
+function useHoverAt(W: number, toIndex: (vx: number) => number | null) {
+  const [hov, setHov] = useState<number | null>(null);
+  const onMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setHov(toIndex(((e.clientX - r.left) / r.width) * W));
+  };
+  return { hov, handlers: { onMouseMove, onMouseLeave: () => setHov(null) } };
+}
+/** Point series (x = L + i·span/(n-1)): nearest index. */
+function useHoverIndex(n: number, W: number, L: number, R: number) {
+  return useHoverAt(W, (vx) => {
+    const i = Math.round(((vx - L) / (W - L - R)) * Math.max(n - 1, 1));
+    return i < 0 || i > n - 1 ? null : i;
+  });
+}
+/** Bar series (n equal bands from L): the band under the pointer. */
+function useHoverBand(n: number, W: number, L: number, R: number) {
+  return useHoverAt(W, (vx) => {
+    const i = Math.floor(((vx - L) / (W - L - R)) * n);
+    return i < 0 || i > n - 1 ? null : i;
+  });
+}
+/** Readout sits beside the guide line, flipping left past 60% so it never clips. */
+const tipPos = (frac: number): React.CSSProperties => (frac > 0.6
+  ? { right: `calc(${(1 - frac) * 100}% + 10px)` }
+  : { left: `calc(${frac * 100}% + 10px)` });
+const fmtTip = (v: number, pct?: boolean, days?: boolean) =>
+  pct ? `${v.toFixed(1)}%` : days ? `${Math.round(v)} days` : fmt(v);
+
 /** Y-axis scale over the non-null values of every series considered. */
 function yDomain(vals: (number | null | undefined)[], padFrac = 0.08): [number, number] {
   const nums = vals.filter((v): v is number => v != null && Number.isFinite(v));
@@ -60,7 +150,7 @@ function yDomain(vals: (number | null | undefined)[], padFrac = 0.08): [number, 
 function TrendProjChart({ s, periods, pct, days }: {
   s: TrendSeries; periods: string[]; pct?: boolean; days?: boolean;
 }) {
-  const W = 520, H = 185, L = 40, R = 8, T = 8, B = 22;
+  const [ref, k] = useSvgScale(520, 400);
   const values = s.values ?? [];
   const fit = s.fit ?? [];
   const proj = s.proj ?? [];
@@ -69,6 +159,10 @@ function TrendProjChart({ s, periods, pct, days }: {
   const nAct = values.length;
   const n = nAct + proj.length;
   const [y0, y1] = yDomain([...values, ...fit, ...lo, ...hi]);
+  const fmtY = (v: number) => (pct ? `${Math.round(v * 10) / 10}%` : days ? `${Math.round(v)}d` : fmt(v));
+  const yT = [0, 0.5, 1].map((g) => y0 + (y1 - y0) * g);
+  const fs = AXIS_PX * k;
+  const W = 520, H = 185, L = yAxisWidth(yT.map(fmtY), k), R = 8 * k, T = 8 * k, B = 24 * k;
   const x = (i: number) => L + (i * (W - L - R)) / Math.max(n - 1, 1);
   const y = (v: number) => T + (H - T - B) * (1 - (v - y0) / (y1 - y0));
   const path = (pts: [number, number | null | undefined][]) => {
@@ -89,20 +183,22 @@ function TrendProjChart({ s, periods, pct, days }: {
   const projPts: [number, number | null][] = lastIdx >= 0
     ? [[lastIdx, values[lastIdx] as number], ...proj.map((v, k) => [nAct + k, v] as [number, number])]
     : [];
-  const fmtY = (v: number) => (pct ? `${Math.round(v * 10) / 10}%` : days ? `${Math.round(v)}d` : fmt(v));
   const allLabels = [...periods, ...(s.proj_labels ?? [])];
-  const step = Math.max(1, Math.ceil(n / 7));
+  const { hov, handlers } = useHoverIndex(n, W, L, R);
+  const hAct = hov != null && hov < nAct ? values[hov] : null;
+  const hProj = hov != null && hov >= nAct ? proj[hov - nAct] : null;
+  const hVal = hAct ?? hProj;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img">
-      {[0, 0.5, 1].map((g) => {
-        const v = y0 + (y1 - y0) * g;
-        return (
-          <g key={g}>
-            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--hair)" strokeWidth={1} />
-            <text x={L - 5} y={y(v) + 3} textAnchor="end" fontSize={8.5} fill="var(--muted)">{fmtY(v)}</text>
-          </g>
-        );
-      })}
+    <div style={{ position: 'relative' }}>
+    <svg ref={ref} viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img"
+      {...handlers}>
+      {yT.map((v, g) => (
+        <g key={g}>
+          <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--hair)" strokeWidth={k} />
+          <text x={L - 6 * k} y={y(v) + fs * 0.35} textAnchor="end" fontSize={fs} fill="var(--muted)"
+            className="num">{fmtY(v)}</text>
+        </g>
+      ))}
       {lastIdx >= 0 && proj.length > 0 && (
         <line x1={x(lastIdx)} x2={x(lastIdx)} y1={T} y2={H - B}
           stroke="var(--border-strong)" strokeWidth={1} strokeDasharray="2 3" />
@@ -114,10 +210,42 @@ function TrendProjChart({ s, periods, pct, days }: {
       {projPts.length > 1 && (
         <path d={path(projPts)} fill="none" stroke="var(--warn)" strokeWidth={2} strokeDasharray="5 3" />
       )}
-      {allLabels.map((m, i) => (i % step === 0 || i === n - 1) && (
-        <text key={`${m}-${i}`} x={x(i)} y={H - 8} textAnchor="middle" fontSize={8} fill="var(--muted)">{m}</text>
+      {xTicks(allLabels, x, k, 5).map(({ i, anchor }) => (
+        <text key={`${allLabels[i]}-${i}`} x={x(i)} y={H - 7 * k} textAnchor={anchor} fontSize={fs}
+          fill="var(--muted)">{allLabels[i]}</text>
       ))}
+      {hov != null && (
+        <g pointerEvents="none">
+          <line x1={x(hov)} x2={x(hov)} y1={T} y2={H - B} stroke="var(--border-strong)" strokeWidth={k} />
+          {hVal != null && (
+            <circle cx={x(hov)} cy={y(hVal)} r={3.5 * k} stroke="var(--card)" strokeWidth={1.5 * k}
+              fill={hAct != null ? 'var(--primary)' : 'var(--warn)'} />
+          )}
+        </g>
+      )}
+      {/* full-plot hit area so hovering blank space still tracks */}
+      <rect x={L} y={T} width={W - L - R} height={H - T - B} fill="transparent" />
     </svg>
+    {hov != null && (
+      <div className="ctip" style={tipPos(x(hov) / W)}>
+        <b>{allLabels[hov]}</b>
+        {hAct != null ? (
+          <span className="num">{fmtTip(hAct, pct, days)}</span>
+        ) : hProj != null ? (
+          <>
+            <span className="num" style={{ color: 'var(--warn)' }}>Projected {fmtTip(hProj, pct, days)}</span>
+            {lo[hov - nAct] != null && hi[hov - nAct] != null && (
+              <span className="num ctip-sub">
+                95% range {fmtTip(lo[hov - nAct], pct, days)} – {fmtTip(hi[hov - nAct], pct, days)}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="ctip-sub">No data this month</span>
+        )}
+      </div>
+    )}
+    </div>
   );
 }
 
@@ -126,13 +254,16 @@ function MultiLine({ series, periods, active, pct, days }: {
   series: { key: string; label: string; color: string; values: (number | null)[] }[];
   periods: string[]; active: Set<string>; pct?: boolean; days?: boolean;
 }) {
-  const W = 1000, H = 260, L = 42, R = 10, T = 10, B = 24;
+  const [ref, k] = useSvgScale(1000, 620);
   const shown = series.filter((s) => active.has(s.key));
   const [y0, y1] = yDomain(shown.flatMap((s) => s.values));
+  const fmtY = (v: number) => (pct ? `${Math.round(v * 10) / 10}%` : days ? `${Math.round(v)}d` : fmt(v));
+  const yT = [0, 0.25, 0.5, 0.75, 1].map((g) => y0 + (y1 - y0) * g);
+  const fs = AXIS_PX * k;
+  const W = 1000, H = 260, L = yAxisWidth(yT.map(fmtY), k), R = 10 * k, T = 10 * k, B = 24 * k;
   const n = periods.length;
   const x = (i: number) => L + (i * (W - L - R)) / Math.max(n - 1, 1);
   const y = (v: number) => T + (H - T - B) * (1 - (v - y0) / (y1 - y0));
-  const fmtY = (v: number) => (pct ? `${Math.round(v * 10) / 10}%` : days ? `${Math.round(v)}d` : fmt(v));
   const path = (vals: (number | null)[]) => {
     let d = ''; let started = false;
     vals.forEach((v, i) => {
@@ -142,25 +273,52 @@ function MultiLine({ series, periods, active, pct, days }: {
     });
     return d;
   };
-  const step = Math.max(1, Math.ceil(n / 10));
+  const { hov, handlers } = useHoverIndex(n, W, L, R);
+  const hRows = hov == null ? [] : shown
+    .map((s) => ({ s, v: s.values[hov] }))
+    .filter((r): r is { s: typeof shown[number]; v: number } => r.v != null)
+    .sort((a, b) => b.v - a.v);
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img">
-      {[0, 0.25, 0.5, 0.75, 1].map((g) => {
-        const v = y0 + (y1 - y0) * g;
-        return (
-          <g key={g}>
-            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--hair)" strokeWidth={1} />
-            <text x={L - 5} y={y(v) + 3} textAnchor="end" fontSize={9} fill="var(--muted)">{fmtY(v)}</text>
-          </g>
-        );
-      })}
+    <div style={{ position: 'relative' }}>
+    <svg ref={ref} viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img"
+      {...handlers}>
+      {yT.map((v, g) => (
+        <g key={g}>
+          <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--hair)" strokeWidth={k} />
+          <text x={L - 6 * k} y={y(v) + fs * 0.35} textAnchor="end" fontSize={fs} fill="var(--muted)"
+            className="num">{fmtY(v)}</text>
+        </g>
+      ))}
       {shown.map((s) => (
-        <path key={s.key} d={path(s.values)} fill="none" stroke={s.color} strokeWidth={1.6} opacity={0.9} />
+        <path key={s.key} d={path(s.values)} fill="none" stroke={s.color} strokeWidth={1.8 * k} opacity={0.9} />
       ))}
-      {periods.map((m, i) => (i % step === 0 || i === n - 1) && (
-        <text key={`${m}-${i}`} x={x(i)} y={H - 8} textAnchor="middle" fontSize={8.5} fill="var(--muted)">{m}</text>
+      {xTicks(periods, x, k, 8).map(({ i, anchor }) => (
+        <text key={`${periods[i]}-${i}`} x={x(i)} y={H - 7 * k} textAnchor={anchor} fontSize={fs}
+          fill="var(--muted)">{periods[i]}</text>
       ))}
+      {hov != null && (
+        <g pointerEvents="none">
+          <line x1={x(hov)} x2={x(hov)} y1={T} y2={H - B} stroke="var(--border-strong)" strokeWidth={k} />
+          {hRows.map(({ s, v }) => (
+            <circle key={s.key} cx={x(hov)} cy={y(v)} r={3.5 * k} fill={s.color}
+              stroke="var(--card)" strokeWidth={1.5 * k} />
+          ))}
+        </g>
+      )}
+      <rect x={L} y={T} width={W - L - R} height={H - T - B} fill="transparent" />
     </svg>
+    {hov != null && (
+      <div className="ctip" style={tipPos(x(hov) / W)}>
+        <b>{periods[hov]}</b>
+        {hRows.length ? hRows.map(({ s, v }) => (
+          <span key={s.key} className="ctip-row">
+            <i style={{ background: s.color }} />{s.label}
+            <span className="num ctip-v">{fmtTip(v, pct, days)}</span>
+          </span>
+        )) : <span className="ctip-sub">No data this month</span>}
+      </div>
+    )}
+    </div>
   );
 }
 
@@ -168,7 +326,9 @@ function MultiLine({ series, periods, active, pct, days }: {
 function KMChart({ types, curveKey }: {
   types: { label: string; color: string; curve: { x: number; y: number }[] }[]; curveKey: string;
 }) {
-  const W = 520, H = 240, L = 40, R = 10, T = 8, B = 30;
+  const [ref, k] = useSvgScale(520, 480);
+  const fs = AXIS_PX * k;
+  const W = 520, H = 240, L = yAxisWidth(['100%'], k), R = 14 * k, T = 8 * k, B = 38 * k;
   const x = (d: number) => L + (Math.min(d, 730) / 730) * (W - L - R);
   const y = (p: number) => T + (H - T - B) * (1 - p);
   const path = (curve: { x: number; y: number }[]) => {
@@ -179,22 +339,64 @@ function KMChart({ types, curveKey }: {
     }
     return d;
   };
+  // Hover = a day (0–730); each curve is a step function, so its value on day
+  // d is the last step at or before d.
+  const { hov: day, handlers } = useHoverAt(W, (vx) => {
+    const d = Math.round(((vx - L) / (W - L - R)) * 730);
+    return d < 0 || d > 730 ? null : d;
+  });
+  const at = (curve: { x: number; y: number }[], d: number) => {
+    let v: number | null = null;
+    for (const p of curve) { if (p.x <= d) v = p.y; else break; }
+    return v;
+  };
+  const hRows = day == null ? [] : types
+    .map((t) => ({ t, v: at(t.curve, day) }))
+    .filter((r): r is { t: typeof types[number]; v: number } => r.v != null)
+    .sort((a, b) => b.v - a.v);
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label={curveKey}>
+    <div style={{ position: 'relative' }}>
+    <svg ref={ref} viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label={curveKey}
+      {...handlers}>
       {[0, 0.25, 0.5, 0.75, 1].map((p) => (
         <g key={p}>
-          <line x1={L} x2={W - R} y1={y(p)} y2={y(p)} stroke="var(--hair)" strokeWidth={1} />
-          <text x={L - 5} y={y(p) + 3} textAnchor="end" fontSize={8.5} fill="var(--muted)">{Math.round(p * 100)}%</text>
+          <line x1={L} x2={W - R} y1={y(p)} y2={y(p)} stroke="var(--hair)" strokeWidth={k} />
+          <text x={L - 6 * k} y={y(p) + fs * 0.35} textAnchor="end" fontSize={fs} fill="var(--muted)"
+            className="num">{Math.round(p * 100)}%</text>
         </g>
       ))}
       {[0, 90, 180, 365, 545, 730].map((d) => (
-        <text key={d} x={x(d)} y={H - 14} textAnchor="middle" fontSize={8.5} fill="var(--muted)">{d}</text>
+        <text key={d} x={x(d)} y={H - 22 * k} textAnchor={d === 0 ? 'start' : d === 730 ? 'end' : 'middle'}
+          fontSize={fs} fill="var(--muted)" className="num">{d}</text>
       ))}
-      <text x={(L + W - R) / 2} y={H - 3} textAnchor="middle" fontSize={8.5} fill="var(--muted)">days since enrollment</text>
+      <text x={(L + W - R) / 2} y={H - 5 * k} textAnchor="middle" fontSize={fs} fill="var(--faint)">days since enrollment</text>
       {types.map((t) => (
-        <path key={t.label} d={path(t.curve)} fill="none" stroke={t.color} strokeWidth={1.8} />
+        <path key={t.label} d={path(t.curve)} fill="none" stroke={t.color} strokeWidth={1.8 * k} />
       ))}
+      {day != null && (
+        <g pointerEvents="none">
+          <line x1={x(day)} x2={x(day)} y1={T} y2={H - B} stroke="var(--border-strong)" strokeWidth={k} />
+          {hRows.map(({ t, v }) => (
+            <circle key={t.label} cx={x(day)} cy={y(v)} r={3.5 * k} fill={t.color}
+              stroke="var(--card)" strokeWidth={1.5 * k} />
+          ))}
+        </g>
+      )}
+      <rect x={L} y={T} width={W - L - R} height={H - T - B} fill="transparent" />
     </svg>
+    {day != null && (
+      <div className="ctip" style={tipPos(x(day) / W)}>
+        <b>Day {day}</b>
+        <span className="ctip-sub">{curveKey === 'ph' ? 'not yet exited to PH' : 'still enrolled'}</span>
+        {hRows.map(({ t, v }) => (
+          <span key={t.label} className="ctip-row">
+            <i style={{ background: t.color }} />{t.label}
+            <span className="num ctip-v">{(v * 100).toFixed(1)}%</span>
+          </span>
+        ))}
+      </div>
+    )}
+    </div>
   );
 }
 
@@ -263,7 +465,9 @@ const occColor = (o: number | null | undefined) =>
 
 /** Occupancy sparkline: 12-mo history (solid) + 30/60/90-day forecast (dashed) + 100% line. */
 function CapSpark({ row }: { row: CapRow }) {
-  const W = 460, H = 100, L = 34, R = 6, T = 6, B = 18;
+  const [ref, k] = useSvgScale(460, 440);
+  const fs = AXIS_PX * k;
+  const W = 460, H = 110, L = yAxisWidth(['100%'], k), R = 8 * k, T = 6 * k, B = 22 * k;
   const hist = row.occ_history ?? [];
   const nH = hist.length;
   const aHist = hist.map((h) => h.adult_occ);
@@ -288,11 +492,10 @@ function CapSpark({ row }: { row: CapRow }) {
   const lastA = aHist.length ? aHist[aHist.length - 1] : null;
   const lastF = fHist.length ? fHist[fHist.length - 1] : null;
   const labels = [...hist.map((h) => h.label), '+30d', '+60d', '+90d'];
-  const step = Math.max(1, Math.ceil(n / 6));
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img">
-      <line x1={L} x2={W - R} y1={y(100)} y2={y(100)} stroke="var(--danger)" strokeWidth={1} strokeDasharray="4 3" opacity={0.6} />
-      <text x={L - 4} y={y(100) + 3} textAnchor="end" fontSize={8} fill="var(--muted)">100%</text>
+    <svg ref={ref} viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img">
+      <line x1={L} x2={W - R} y1={y(100)} y2={y(100)} stroke="var(--danger)" strokeWidth={k} strokeDasharray="4 3" opacity={0.6} />
+      <text x={L - 6 * k} y={y(100) + fs * 0.35} textAnchor="end" fontSize={fs} fill="var(--muted)" className="num">100%</text>
       <path d={path(aHist)} fill="none" stroke={ADULT_COLOR} strokeWidth={1.8} />
       {lastA != null && (
         <path d={path([lastA, ...aFore], nH - 1)} fill="none" stroke={ADULT_COLOR} strokeWidth={1.8} strokeDasharray="5 3" />
@@ -301,8 +504,9 @@ function CapSpark({ row }: { row: CapRow }) {
       {hasFam && lastF != null && (
         <path d={path([lastF, ...fFore], nH - 1)} fill="none" stroke={FAMILY_COLOR} strokeWidth={1.8} strokeDasharray="5 3" />
       )}
-      {labels.map((m, i) => (i % step === 0 || i === n - 1) && (
-        <text key={`${m}-${i}`} x={x(i)} y={H - 6} textAnchor="middle" fontSize={7.5} fill="var(--muted)">{m}</text>
+      {xTicks(labels, x, k, 6).map(({ i, anchor }) => (
+        <text key={`${labels[i]}-${i}`} x={x(i)} y={H - 6 * k} textAnchor={anchor} fontSize={fs}
+          fill="var(--muted)">{labels[i]}</text>
       ))}
     </svg>
   );
@@ -1445,31 +1649,6 @@ function InflowSection({ inflow }: { inflow: Inflow | null }) {
   const slope = inflow.slope_per_month;
   const nextMo = inflow.future_months[0] ?? 'next mo';
 
-  // Main chart: bars = actuals, dashed lines = the two forecast methods.
-  const W = 1000, H = 280, L = 44, R = 12, T = 12, B = 40;
-  const n = inflow.months.length + inflow.future_months.length;
-  const maxV = Math.max(...inflow.total, ...inflow.wt_forecasts, ...inflow.trend_forecasts, 1);
-  const yMax = Math.ceil(maxV / 100) * 100 || 100;
-  const x = (i: number) => L + (i + 0.5) * ((W - L - R) / n);
-  const y = (v: number) => T + (H - T - B) * (1 - v / yMax);
-  const bw = ((W - L - R) / n) * 0.62;
-  const lastIdx = inflow.total.length - 1;
-  const linePath = (vals: number[]) => {
-    const pts = [[lastIdx, inflow.total[lastIdx]], ...vals.map((v, k) => [inflow.months.length + k, v])] as [number, number][];
-    return pts.map(([i, v], k) => `${k ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
-  };
-  const allLabels = [...inflow.months, ...inflow.future_months];
-  const step = Math.max(1, Math.ceil(n / 14));
-
-  // Stacked by-type chart.
-  const states = Object.keys(inflow.by_state ?? {});
-  const stackTotals = inflow.months.map((m) => states.reduce((s, st) => s + (inflow.by_state[st]?.[m] ?? 0), 0));
-  const sMax = Math.max(...stackTotals, 1);
-  const SH = 260, SB = 40;
-  const sy = (v: number) => T + (SH - T - SB) * (1 - v / sMax);
-  const sx = (i: number) => L + (i + 0.5) * ((W - L - R) / inflow.months.length);
-  const sbw = ((W - L - R) / inflow.months.length) * 0.66;
-
   const tile = (k: string, v: React.ReactNode, s?: string) => (
     <div className="hc-t"><div className="k">{k}</div><div className="v">{v}</div>{s && <div className="s">{s}</div>}</div>
   );
@@ -1495,35 +1674,7 @@ function InflowSection({ inflow }: { inflow: Inflow | null }) {
 
       <div className="grouplabel">First-time homeless — monthly actuals + 3-month forecast (M5)</div>
       <div className="panel" style={{ padding: '14px 18px' }}>
-        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img">
-          {[0, 0.25, 0.5, 0.75, 1].map((g) => (
-            <g key={g}>
-              <line x1={L} x2={W - R} y1={y(yMax * g)} y2={y(yMax * g)} stroke="var(--hair)" strokeWidth={1} />
-              <text x={L - 6} y={y(yMax * g) + 3} textAnchor="end" fontSize={9} fill="var(--muted)">{fmtInt(yMax * g)}</text>
-            </g>
-          ))}
-          {inflow.total.map((v, i) => (
-            <rect key={i} x={x(i) - bw / 2} y={y(v)} width={bw} height={Math.max(y(0) - y(v), 1)}
-              fill="var(--primary)" opacity={0.55} rx={2}>
-              <title>{inflow.months[i]}: {fmtInt(v)}</title>
-            </rect>
-          ))}
-          <line x1={x(lastIdx) + bw / 2 + 2} x2={x(lastIdx) + bw / 2 + 2} y1={T} y2={H - B}
-            stroke="var(--border-strong)" strokeWidth={1} strokeDasharray="2 3" />
-          <path d={linePath(inflow.wt_forecasts)} fill="none" stroke="var(--accent)" strokeWidth={2} strokeDasharray="6 4" />
-          <path d={linePath(inflow.trend_forecasts)} fill="none" stroke="var(--warn)" strokeWidth={2} strokeDasharray="3 3" />
-          {allLabels.map((m, i) => (i % step === 0 || i === n - 1) && (
-            <text key={`${m}-${i}`} x={x(i)} y={H - 22} textAnchor="middle" fontSize={8.5} fill="var(--muted)">{m.slice(2)}</text>
-          ))}
-          <g>
-            <rect x={L} y={H - 12} width={14} height={8} fill="var(--primary)" opacity={0.55} rx={2} />
-            <text x={L + 20} y={H - 5} fontSize={10} fill="var(--text)">actual (M5)</text>
-            <line x1={L + 120} x2={L + 142} y1={H - 8} y2={H - 8} stroke="var(--accent)" strokeWidth={2} strokeDasharray="6 4" />
-            <text x={L + 148} y={H - 5} fontSize={10} fill="var(--muted)">weighted avg</text>
-            <line x1={L + 260} x2={L + 282} y1={H - 8} y2={H - 8} stroke="var(--warn)" strokeWidth={2} strokeDasharray="3 3" />
-            <text x={L + 288} y={H - 5} fontSize={10} fill="var(--muted)">linear trend</text>
-          </g>
-        </svg>
+        <InflowMainChart inflow={inflow} />
       </div>
 
       <div className="grouplabel" style={{ marginTop: 16 }}>Total new enrollments by program type
@@ -1532,43 +1683,192 @@ function InflowSection({ inflow }: { inflow: Inflow | null }) {
         </span>
       </div>
       <div className="panel" style={{ padding: '14px 18px' }}>
-        <svg viewBox={`0 0 ${W} ${SH}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img">
-          {[0, 0.25, 0.5, 0.75, 1].map((g) => (
-            <g key={g}>
-              <line x1={L} x2={W - R} y1={sy(sMax * g)} y2={sy(sMax * g)} stroke="var(--hair)" strokeWidth={1} />
-              <text x={L - 6} y={sy(sMax * g) + 3} textAnchor="end" fontSize={9} fill="var(--muted)">{fmtInt(sMax * g)}</text>
-            </g>
-          ))}
-          {inflow.months.map((m, i) => {
-            let acc = 0;
-            return (
-              <g key={m}>
-                {states.map((st) => {
-                  const v = inflow.by_state[st]?.[m] ?? 0;
-                  if (!v) return null;
-                  const yTop = sy(acc + v); const yBot = sy(acc);
-                  acc += v;
-                  return (
-                    <rect key={st} x={sx(i) - sbw / 2} y={yTop} width={sbw} height={Math.max(yBot - yTop, 0.5)}
-                      fill={STATE_COLORS[st] ?? 'var(--muted)'} opacity={0.85}>
-                      <title>{m} · {STATE_LABELS[st] ?? st}: {fmtInt(v)}</title>
-                    </rect>
-                  );
-                })}
-                {(i % 2 === 0 || i === inflow.months.length - 1) && (
-                  <text x={sx(i)} y={SH - 24} textAnchor="middle" fontSize={8.5} fill="var(--muted)">{m.slice(2)}</text>
-                )}
-              </g>
-            );
-          })}
-          {states.map((st, k) => (
-            <g key={st}>
-              <rect x={L + k * 150} y={SH - 12} width={10} height={8} fill={STATE_COLORS[st] ?? 'var(--muted)'} rx={2} />
-              <text x={L + k * 150 + 15} y={SH - 5} fontSize={10} fill="var(--muted)">{STATE_LABELS[st] ?? st}</text>
-            </g>
-          ))}
-        </svg>
+        <InflowStackChart inflow={inflow} />
       </div>
     </>
+  );
+}
+
+/** '2024-08' → 'Aug 2024' for readouts (axis ticks keep the compact '24-08'). */
+const fmtYm = (m: string) => {
+  const r = /^(\d{4})-(\d{2})/.exec(m);
+  return r ? `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+r[2] - 1]} ${r[1]}` : m;
+};
+
+/** M5 bars (actuals) + both dashed forecasts, with the shared hover readout. */
+function InflowMainChart({ inflow }: { inflow: Inflow }) {
+  const [ref, k] = useSvgScale(1000, 1000);
+  const fs = AXIS_PX * k;
+  const n = inflow.months.length + inflow.future_months.length;
+  const maxV = Math.max(...inflow.total, ...inflow.wt_forecasts, ...inflow.trend_forecasts, 1);
+  const yMax = Math.ceil(maxV / 100) * 100 || 100;
+  const yT = [0, 0.25, 0.5, 0.75, 1].map((g) => yMax * g);
+  const W = 1000, H = 280, L = yAxisWidth(yT.map((v) => fmtInt(v)), k), R = 12 * k, T = 12 * k, B = 46 * k;
+  const x = (i: number) => L + (i + 0.5) * ((W - L - R) / n);
+  const y = (v: number) => T + (H - T - B) * (1 - v / yMax);
+  const bw = ((W - L - R) / n) * 0.62;
+  const lastIdx = inflow.total.length - 1;
+  const linePath = (vals: number[]) => {
+    const pts = [[lastIdx, inflow.total[lastIdx]], ...vals.map((v, j) => [inflow.months.length + j, v])] as [number, number][];
+    return pts.map(([i, v], j) => `${j ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  };
+  const allLabels = [...inflow.months, ...inflow.future_months].map((m) => m.slice(2));
+  const { hov, handlers } = useHoverBand(n, W, L, R);
+  const isFuture = hov != null && hov > lastIdx;
+  const fi = hov != null ? hov - inflow.months.length : -1;
+  // legend: swatch + label pairs laid out left→right at true pixel size
+  const legend: { kind: 'bar' | 'wt' | 'tr'; label: string }[] = [
+    { kind: 'bar', label: 'actual (M5)' }, { kind: 'wt', label: 'weighted avg' }, { kind: 'tr', label: 'linear trend' },
+  ];
+  let lx = L;
+  return (
+    <div style={{ position: 'relative' }}>
+      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img"
+        {...handlers}>
+        {yT.map((v) => (
+          <g key={v}>
+            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--hair)" strokeWidth={k} />
+            <text x={L - 6 * k} y={y(v) + fs * 0.35} textAnchor="end" fontSize={fs} fill="var(--muted)"
+              className="num">{fmtInt(v)}</text>
+          </g>
+        ))}
+        {inflow.total.map((v, i) => (
+          <rect key={i} x={x(i) - bw / 2} y={y(v)} width={bw} height={Math.max(y(0) - y(v), 1)}
+            fill="var(--primary)" opacity={hov === i ? 0.95 : 0.55} rx={2} />
+        ))}
+        <line x1={x(lastIdx) + bw / 2 + 2} x2={x(lastIdx) + bw / 2 + 2} y1={T} y2={H - B}
+          stroke="var(--border-strong)" strokeWidth={k} strokeDasharray="2 3" />
+        <path d={linePath(inflow.wt_forecasts)} fill="none" stroke="var(--accent)" strokeWidth={2 * k} strokeDasharray="6 4" />
+        <path d={linePath(inflow.trend_forecasts)} fill="none" stroke="var(--warn)" strokeWidth={2 * k} strokeDasharray="3 3" />
+        {isFuture && (
+          <g pointerEvents="none">
+            <line x1={x(hov!)} x2={x(hov!)} y1={T} y2={H - B} stroke="var(--border-strong)" strokeWidth={k} />
+            {inflow.wt_forecasts[fi] != null && (
+              <circle cx={x(hov!)} cy={y(inflow.wt_forecasts[fi])} r={3.5 * k} fill="var(--accent)" stroke="var(--card)" strokeWidth={1.5 * k} />
+            )}
+            {inflow.trend_forecasts[fi] != null && (
+              <circle cx={x(hov!)} cy={y(inflow.trend_forecasts[fi])} r={3.5 * k} fill="var(--warn)" stroke="var(--card)" strokeWidth={1.5 * k} />
+            )}
+          </g>
+        )}
+        {xTicks(allLabels, x, k, 12).map(({ i, anchor }) => (
+          <text key={`${allLabels[i]}-${i}`} x={x(i)} y={H - 26 * k} textAnchor={anchor} fontSize={fs}
+            fill="var(--muted)">{allLabels[i]}</text>
+        ))}
+        {legend.map(({ kind, label }) => {
+          const x0 = lx; lx += (28 + label.length * 6.4 + 22) * k;
+          const ly = H - 8 * k;
+          return (
+            <g key={kind}>
+              {kind === 'bar'
+                ? <rect x={x0} y={ly - 8 * k} width={14 * k} height={8 * k} fill="var(--primary)" opacity={0.55} rx={2 * k} />
+                : <line x1={x0} x2={x0 + 20 * k} y1={ly - 4 * k} y2={ly - 4 * k}
+                    stroke={kind === 'wt' ? 'var(--accent)' : 'var(--warn)'} strokeWidth={2 * k}
+                    strokeDasharray={kind === 'wt' ? '6 4' : '3 3'} />}
+              <text x={x0 + 26 * k} y={ly} fontSize={fs} fill={kind === 'bar' ? 'var(--text)' : 'var(--muted)'}>{label}</text>
+            </g>
+          );
+        })}
+        <rect x={L} y={T} width={W - L - R} height={H - T - B} fill="transparent" />
+      </svg>
+      {hov != null && (
+        <div className="ctip" style={tipPos(x(hov) / W)}>
+          <b>{fmtYm(isFuture ? inflow.future_months[fi] : inflow.months[hov])}</b>
+          {isFuture ? (
+            <>
+              <span className="ctip-row"><i style={{ background: 'var(--accent)' }} />Weighted forecast
+                <span className="num ctip-v">{fmtInt(inflow.wt_forecasts[fi] ?? 0)}</span></span>
+              <span className="ctip-row"><i style={{ background: 'var(--warn)' }} />Trend forecast
+                <span className="num ctip-v">{fmtInt(inflow.trend_forecasts[fi] ?? 0)}</span></span>
+            </>
+          ) : (
+            <span className="ctip-row"><i style={{ background: 'var(--primary)' }} />First-time homeless
+              <span className="num ctip-v">{fmtInt(inflow.total[hov])}</span></span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** New enrollments stacked by program type, hover = that month's breakdown. */
+function InflowStackChart({ inflow }: { inflow: Inflow }) {
+  const [ref, k] = useSvgScale(1000, 1000);
+  const fs = AXIS_PX * k;
+  const states = Object.keys(inflow.by_state ?? {});
+  const stackTotals = inflow.months.map((m) => states.reduce((s, st) => s + (inflow.by_state[st]?.[m] ?? 0), 0));
+  const sMax = Math.max(...stackTotals, 1);
+  const yT = [0, 0.25, 0.5, 0.75, 1].map((g) => sMax * g);
+  const W = 1000, SH = 260, L = yAxisWidth(yT.map((v) => fmtInt(v)), k), R = 12 * k, T = 12 * k, SB = 46 * k;
+  const nM = inflow.months.length;
+  const sy = (v: number) => T + (SH - T - SB) * (1 - v / sMax);
+  const sx = (i: number) => L + (i + 0.5) * ((W - L - R) / nM);
+  const sbw = ((W - L - R) / nM) * 0.66;
+  const labels = inflow.months.map((m) => m.slice(2));
+  const { hov, handlers } = useHoverBand(nM, W, L, R);
+  const hRows = hov == null ? [] : states
+    .map((st) => ({ st, v: inflow.by_state[st]?.[inflow.months[hov]] ?? 0 }))
+    .filter((r) => r.v > 0)
+    .sort((a, b) => b.v - a.v);
+  let lx = L;
+  return (
+    <div style={{ position: 'relative' }}>
+      <svg ref={ref} viewBox={`0 0 ${W} ${SH}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img"
+        {...handlers}>
+        {yT.map((v) => (
+          <g key={v}>
+            <line x1={L} x2={W - R} y1={sy(v)} y2={sy(v)} stroke="var(--hair)" strokeWidth={k} />
+            <text x={L - 6 * k} y={sy(v) + fs * 0.35} textAnchor="end" fontSize={fs} fill="var(--muted)"
+              className="num">{fmtInt(v)}</text>
+          </g>
+        ))}
+        {inflow.months.map((m, i) => {
+          let acc = 0;
+          return (
+            <g key={m} opacity={hov == null || hov === i ? 1 : 0.55}>
+              {states.map((st) => {
+                const v = inflow.by_state[st]?.[m] ?? 0;
+                if (!v) return null;
+                const yTop = sy(acc + v); const yBot = sy(acc);
+                acc += v;
+                return (
+                  <rect key={st} x={sx(i) - sbw / 2} y={yTop} width={sbw} height={Math.max(yBot - yTop, 0.5)}
+                    fill={STATE_COLORS[st] ?? 'var(--muted)'} opacity={0.85} />
+                );
+              })}
+            </g>
+          );
+        })}
+        {xTicks(labels, sx, k, 12).map(({ i, anchor }) => (
+          <text key={`${labels[i]}-${i}`} x={sx(i)} y={SH - 26 * k} textAnchor={anchor} fontSize={fs}
+            fill="var(--muted)">{labels[i]}</text>
+        ))}
+        {states.map((st) => {
+          const label = STATE_LABELS[st] ?? st;
+          const x0 = lx; lx += (16 + label.length * 6.4 + 22) * k;
+          const ly = SH - 8 * k;
+          return (
+            <g key={st}>
+              <rect x={x0} y={ly - 8 * k} width={10 * k} height={8 * k} fill={STATE_COLORS[st] ?? 'var(--muted)'} rx={2 * k} />
+              <text x={x0 + 15 * k} y={ly} fontSize={fs} fill="var(--muted)">{label}</text>
+            </g>
+          );
+        })}
+        <rect x={L} y={T} width={W - L - R} height={SH - T - SB} fill="transparent" />
+      </svg>
+      {hov != null && (
+        <div className="ctip" style={tipPos(sx(hov) / W)}>
+          <b>{fmtYm(inflow.months[hov])}</b>
+          {hRows.map(({ st, v }) => (
+            <span key={st} className="ctip-row">
+              <i style={{ background: STATE_COLORS[st] ?? 'var(--muted)' }} />{STATE_LABELS[st] ?? st}
+              <span className="num ctip-v">{fmtInt(v)}</span>
+            </span>
+          ))}
+          <span className="ctip-row ctip-total">Total
+            <span className="num ctip-v">{fmtInt(stackTotals[hov])}</span></span>
+        </div>
+      )}
+    </div>
   );
 }

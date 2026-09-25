@@ -61,13 +61,17 @@ BATCH = 1000                                       # default rows per upsert req
 # batches. 150→500 (2026-09-22): the limit that bit us was URL length on
 # DELETE .in_() chunks, not POST body size; ~4MB bodies ride fine and cut
 # the round-trip count ~3×.
-BATCH_OVERRIDE = {"drill_clients": 500}
+BATCH_OVERRIDE = {"drill_clients": 150}  # 500 + concurrency crashed Postgres 2026-09-25; back to proven 150
 # Concurrent upsert workers (2026-09-22, user: "make it faster"): the load is
 # round-trip-bound through the county proxy, so a small pool multiplies
 # throughput almost linearly. Kept modest — the 9/15 DB incident was stacked
 # HEAVY reads; five parallel small writes are a different animal. Override
 # with HMIS_LOAD_WORKERS=1 to restore the sequential behavior.
 WORKERS = max(1, int(os.environ.get("HMIS_LOAD_WORKERS", "5")))
+# drill_clients rows carry big personal_ids[] payloads: 5 parallel 500-row
+# upserts pushed Postgres into statement timeouts → 502/520 and a 503'd DB
+# (2026-09-25). The heavy table gets a gentler pool; light tables keep 5.
+WORKERS_OVERRIDE = {"drill_clients": 1, "bnl_clients": 2}  # sequential: the proven pre-9/22 path for the heavy table
 
 # Granularity codes used as table period keys.
 GRAN_MONTHLY, GRAN_QUARTERLY, GRAN_FISCAL = "monthly", "quarterly", "fiscal"
@@ -645,7 +649,11 @@ def upsert_batch(client, table: str, batch: list[dict], on_conflict: str, attemp
             return
         except Exception as e:  # postgrest APIError carries .code
             code = str(getattr(e, "code", "") or "")
-            transient = code in {"57014", "502", "503", "504"} or "timeout" in str(e).lower()
+            # httpx transport errors (WriteError/ReadError/RemoteProtocolError…)
+            # are network blips through the county proxy — retry, don't abort.
+            import httpx
+            transient = (code in {"57014", "500", "502", "503", "504", "520", "522", "524"} or "timeout" in str(e).lower()
+                         or isinstance(e, httpx.TransportError))
             if not transient:
                 raise
             if i < attempts - 1:
@@ -1154,6 +1162,18 @@ def main() -> None:
         client = make_client(url, key)
         print(f"Connected to {url}", flush=True)
 
+    # 2026-09-25: each worker thread gets its OWN client. Sharing one client
+    # meant 5 threads writing to a single HTTP/2 socket through the county
+    # proxy → httpx.WriteError [WinError 10035] on the first big table.
+    import threading
+    _tl = threading.local()
+
+    def _worker_upsert(table: str, batch: list[dict], on_conflict: str) -> None:
+        c = getattr(_tl, "client", None)
+        if c is None:
+            c = _tl.client = make_client(url, key)
+        upsert_batch(c, table, batch, on_conflict)
+
     # One watermark for the whole run: every row upserted below carries it, and
     # the per-table prune deletes what the run didn't stamp. Captured BEFORE any
     # write so no stamped row can ever sort below it. The Z-suffix form (never
@@ -1176,7 +1196,8 @@ def main() -> None:
                 r["loaded_at"] = run_ts
         n = 0
         batches = list(chunked(rows, BATCH_OVERRIDE.get(table, BATCH)))
-        if WORKERS <= 1 or len(batches) <= 1:
+        workers = min(WORKERS, WORKERS_OVERRIDE.get(table, WORKERS))
+        if workers <= 1 or len(batches) <= 1:
             for batch in batches:
                 upsert_batch(client, table, batch, on_conflict)
                 n += len(batch)
@@ -1186,8 +1207,8 @@ def main() -> None:
             # own retry/halving logic. First failure cancels the queue and
             # aborts the run exactly like the sequential path did.
             from concurrent.futures import ThreadPoolExecutor, as_completed
-            with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-                futs = {ex.submit(upsert_batch, client, table, b, on_conflict): len(b)
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                futs = {ex.submit(_worker_upsert, table, b, on_conflict): len(b)
                         for b in batches}
                 try:
                     for f in as_completed(futs):
