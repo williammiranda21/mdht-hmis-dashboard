@@ -15,12 +15,17 @@ import { typeAbbr } from '../lib/format';
  * "Projects" flabel, matching the other filter controls.
  */
 
-export interface ProjectOpt { id: number; name: string; type?: string | null }
+export interface ProjectOpt<K extends number | string = number> { id: K; name: string; type?: string | null }
 
-export default function ProjectPicker({ options, selected, onChange, title, mode, onModeChange }: {
-  options: ProjectOpt[];
-  selected: number[];
-  onChange: (next: number[]) => void;
+/** Also reused for other small multi-selects (BNL project TYPE, 2026-09-25):
+ *  `K` is the option id type and `noun` the plural shown in the labels. */
+export default function ProjectPicker<K extends number | string = number>({
+  options, selected, onChange, title, mode, onModeChange, noun = 'projects',
+}: {
+  options: ProjectOpt<K>[];
+  selected: K[];
+  onChange: (next: K[]) => void;
+  noun?: string;
   /** button tooltip, e.g. "Filter the roster to one or more projects" */
   title?: string;
   /** Optional include/exclude support: pass BOTH `mode` and `onModeChange` to
@@ -46,7 +51,7 @@ export default function ProjectPicker({ options, selected, onChange, title, mode
           const not = mode === 'out' ? 'Not: ' : '';
           return selected.length === 1
             ? not + (options.find((o) => o.id === selected[0])?.name ?? '1 selected').slice(0, 24)
-            : `${not}${selected.length} projects`;
+            : `${not}${selected.length} ${noun}`;
         })()} {anchor ? '▴' : '▾'}
       </button>
 
@@ -86,15 +91,17 @@ export default function ProjectPicker({ options, selected, onChange, title, mode
                           ? { color: 'var(--primary)', fontWeight: 700, borderColor: 'var(--primary)' }
                           : undefined}
                         title={m === 'in'
-                          ? 'Show only the selected projects'
-                          : 'Show everything EXCEPT the selected projects (clients with no current project stay visible)'}>
+                          ? `Show only the selected ${noun}`
+                          : `Show everything EXCEPT the selected ${noun} (clients with no current project stay visible)`}>
                         {m === 'in' ? 'Include selected' : 'Exclude selected'}
                       </button>
                     ))}
                   </div>
                 )}
-                <input className="finput" autoFocus placeholder="Search projects…" value={q}
-                  onChange={(e) => setQ(e.target.value)} style={{ width: '100%' }} />
+                {options.length > 12 && (
+                  <input className="finput" autoFocus placeholder={`Search ${noun}…`} value={q}
+                    onChange={(e) => setQ(e.target.value)} style={{ width: '100%' }} />
+                )}
               </div>
               <div style={{ maxHeight: 320, overflowY: 'auto', padding: '0 6px' }}>
                 {opts.map((o) => (
@@ -112,13 +119,13 @@ export default function ProjectPicker({ options, selected, onChange, title, mode
                     {o.type && <span className="ty" style={{ marginLeft: 0, flexShrink: 0 }}>{typeAbbr(o.type)}</span>}
                   </label>
                 ))}
-                {!opts.length && <div className="hc-none">No projects match that search.</div>}
+                {!opts.length && <div className="hc-none">No {noun} match that search.</div>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
                 borderTop: '1px solid rgba(148,163,184,0.2)' }}>
                 <span className="bnl-sub">{selected.length
                   ? `${selected.length} selected${mode === 'out' ? ' · excluded from view' : ''}`
-                  : 'showing all projects'}</span>
+                  : `showing all ${noun}`}</span>
                 <span style={{ flex: 1 }} />
                 {selected.length > 0 && (
                   <button className="btn" onClick={() => onChange([])}>Clear</button>

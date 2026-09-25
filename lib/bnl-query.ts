@@ -52,6 +52,10 @@ export interface RosterQuery {
    *  these. Exclude keeps clients with NO current project — excluding a
    *  project must not hide the unenrolled. */
   projMode: 'in' | 'out';
+  /** comma-separated BNL ptype labels (ES, TH, PSH, SO, SH, PH, RRH, CE);
+   *  '' = all types. Same include/exclude semantics as `projects`. */
+  ptypes: string;
+  ptypeMode: 'in' | 'out';
 }
 
 /** Note-WRITING population scopes (bnl_write_pops.sql). MUST stay in sync
@@ -85,6 +89,9 @@ const FLAG_COLS = new Set([
   'parenting', 'unaccompanied', 'in_school',
 ]);
 
+/** bnl_clients.ptype values (TYPE_NAME in bnl_core.py). */
+const PTYPES = new Set(['ES', 'TH', 'PSH', 'SO', 'SH', 'PH', 'RRH', 'CE']);
+
 export function parseRosterQuery(sp: URLSearchParams): RosterQuery {
   const sort = sp.get('sort') ?? 'days_homeless';
   const limit = Number(sp.get('limit') ?? PAGE_SIZE);
@@ -103,6 +110,8 @@ export function parseRosterQuery(sp: URLSearchParams): RosterQuery {
     ref: (sp.get('ref') ?? '').trim(),
     projects: (sp.get('projects') ?? '').trim(),
     projMode: sp.get('projMode') === 'out' ? 'out' : 'in',
+    ptypes: (sp.get('ptypes') ?? '').trim(),
+    ptypeMode: sp.get('ptypeMode') === 'out' ? 'out' : 'in',
   };
 }
 
@@ -172,6 +181,16 @@ export function applyRosterFilters<Q>(qb0: Q, p: RosterQuery, pidsIn?: string[])
       qb = qb.or(`project_id.is.null,project_id.not.in.(${ids.join(',')})`);
     } else if (ids.length) {
       qb = qb.in('project_id', ids);
+    }
+  }
+  if (p.ptypes) {
+    // Whitelisted labels only — safe to interpolate into the or() string.
+    const ts = p.ptypes.split(',').map((s) => s.trim()).filter((t) => PTYPES.has(t));
+    if (ts.length && p.ptypeMode === 'out') {
+      // as with projects: excluding a type must not hide the unenrolled
+      qb = qb.or(`ptype.is.null,ptype.not.in.(${ts.join(',')})`);
+    } else if (ts.length) {
+      qb = qb.in('ptype', ts);
     }
   }
   if (pidsIn) qb = qb.in('pid', pidsIn);

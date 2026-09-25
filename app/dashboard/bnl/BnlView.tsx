@@ -55,6 +55,18 @@ const MS_LABELS = Object.fromEntries(MILESTONES);
 
 /** Rows per fetch. Must match PAGE_SIZE in lib/bnl-query.ts. */
 const PAGE = 200;
+
+/** Project-type filter options — bnl_clients.ptype labels (TYPE_NAME in bnl_core.py). */
+const PTYPE_OPTS = [
+  { id: 'ES', name: 'Emergency Shelter', type: 'ES' },
+  { id: 'SO', name: 'Street Outreach', type: 'SO' },
+  { id: 'SH', name: 'Safe Haven', type: 'SH' },
+  { id: 'TH', name: 'Transitional Housing', type: 'TH' },
+  { id: 'RRH', name: 'Rapid Re-Housing', type: 'RRH' },
+  { id: 'PSH', name: 'Permanent Supportive Housing', type: 'PSH' },
+  { id: 'PH', name: 'Other Permanent Housing', type: 'PH' },
+  { id: 'CE', name: 'Coordinated Entry', type: 'CE' },
+];
 /** Search is a server round-trip now, so wait for a pause in typing. */
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -87,6 +99,9 @@ export default function BnlView({
   const [selProjects, setSelProjects] = useState<number[]>([]);
   // 'in' = only the selected projects · 'out' = everything except them
   const [projMode, setProjMode] = useState<'in' | 'out'>('in');
+  // Project-type multi-select, same include/exclude semantics (2026-09-25)
+  const [selTypes, setSelTypes] = useState<string[]>([]);
+  const [typeMode, setTypeMode] = useState<'in' | 'out'>('in');
   const [sortKey, setSortKey] = useState<SortKey>('days_homeless');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -266,9 +281,9 @@ export default function BnlView({
 
   const params = useCallback((offset: number) => new URLSearchParams({
     pop, status: fStatus, flag: fFlag, stage: fStage, ref: fRef,
-    projects: selProjects.join(','), projMode, q: qDebounced,
+    projects: selProjects.join(','), projMode, ptypes: selTypes.join(','), ptypeMode: typeMode, q: qDebounced,
     sort: sortKey, dir: sortDir, offset: String(offset), limit: String(PAGE),
-  }), [pop, fStatus, fFlag, fStage, fRef, selProjects, projMode, qDebounced, sortKey, sortDir]);
+  }), [pop, fStatus, fFlag, fStage, fRef, selProjects, projMode, selTypes, typeMode, qDebounced, sortKey, sortDir]);
 
   // Which request is current. A slow response for an old filter must not
   // overwrite a newer one — without this, typing fast can leave stale rows.
@@ -352,7 +367,7 @@ export default function BnlView({
   // not part of this — the cards partition the universe by status themselves.
   // With no filters active the precomputed population aggregate serves as
   // before (zero extra queries).
-  const countsFiltered = Boolean(fFlag || fStage || fRef || selProjects.length || qDebounced);
+  const countsFiltered = Boolean(fFlag || fStage || fRef || selProjects.length || selTypes.length || qDebounced);
   const [fCounts, setFCounts] = useState<BnlPopAgg['counts'] | null>(null);
   const cntReq = useRef(0);
   useEffect(() => {
@@ -360,7 +375,7 @@ export default function BnlView({
     if (!countsFiltered) { setFCounts(null); return; }
     const sp = new URLSearchParams({
       pop, flag: fFlag, stage: fStage, ref: fRef,
-      projects: selProjects.join(','), projMode, q: qDebounced,
+      projects: selProjects.join(','), projMode, ptypes: selTypes.join(','), ptypeMode: typeMode, q: qDebounced,
     });
     fetch(`/api/bnl/counts?${sp}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
@@ -368,7 +383,7 @@ export default function BnlView({
       // On failure fall back to the population aggregate rather than showing
       // stale filtered numbers against a different filter state.
       .catch(() => { if (id === cntReq.current) setFCounts(null); });
-  }, [countsFiltered, pop, fFlag, fStage, fRef, selProjects, projMode, qDebounced]);
+  }, [countsFiltered, pop, fFlag, fStage, fRef, selProjects, projMode, selTypes, typeMode, qDebounced]);
 
   const kpis: Array<[string, number | string, string, string]> = useMemo(() => {
     const c = fCounts ?? pa.counts;
@@ -606,6 +621,13 @@ export default function BnlView({
                 mode={projMode} onModeChange={setProjMode}
                 onChange={setSelProjects}
                 title="Filter the roster to one or more projects" />
+            </div>
+            <div className="fgroup">
+              <span className="flabel">Project type</span>
+              <ProjectPicker<string> options={PTYPE_OPTS} selected={selTypes} noun="types"
+                mode={typeMode} onModeChange={setTypeMode}
+                onChange={setSelTypes}
+                title="Filter the roster to one or more project types (current or last known project)" />
             </div>
             {fStage && (
               <div className="fgroup">
