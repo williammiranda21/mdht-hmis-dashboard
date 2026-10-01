@@ -89,11 +89,14 @@ export default function ReferOut({ title, onPick, onClose }: {
               <div style={{ fontSize: 14, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{sel.instructions}</div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn primary" onClick={() => onPick(sel, true)}>
-                Save — referred to {sel.name.split(' (')[0]}</button>
+              {/* labels say what HAPPENS (user 2026-10-01): terminal = no outreach
+                  dispatch; non-terminal = referral documented, outreach still goes */}
+              <button className="btn primary" onClick={() => onPick(sel, true)}
+                title={`The referral to ${sel.name} resolves the call — saved as Referred out; it never goes to the queue or an outreach team`}>
+                Referred out — no outreach needed</button>
               <button className="tbtn"
-                title="SOP: someone unsheltered in coverage still gets outreach — this only documents that the referral information was provided"
-                onClick={() => onPick(sel, false)}>Log info given · keep case active</button>
+                title="SOP: someone unsheltered in coverage still gets outreach — saves the case normally (queue / team) and documents that the referral information was provided"
+                onClick={() => onPick(sel, false)}>Gave referral info — still send outreach</button>
               <button className="tbtn" onClick={() => setSelId(null)}>← Back</button>
             </div>
           </>
