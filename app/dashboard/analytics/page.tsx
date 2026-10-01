@@ -1,5 +1,5 @@
-import { getAnalyticsInsights, getInterventionIntel, getPathwayIntel, getSystemForecast } from '../../../lib/queries';
-import AnalyticsView from './AnalyticsView';
+import { getAnalyticsInsights, getInterventionIntel, getPathwayIntel, getSystemAllSeries, getSystemForecast } from '../../../lib/queries';
+import AnalyticsView, { type FlowMonth } from './AnalyticsView';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +20,15 @@ export default async function AnalyticsPage() {
     getAnalyticsInsights(), getSystemForecast(), getPathwayIntel(),
     getInterventionIntel().catch(() => null),
   ]);
+  // Inflow and outflow (2026-10-01): last 24 complete months of the SPM
+  // pipeline's own monthly values — no new math here.
+  let flow: FlowMonth[] = [];
+  try {
+    const sys = await getSystemAllSeries('monthly');
+    const num = (v: unknown) => (typeof v === 'number' ? v : null);
+    flow = Object.keys(sys).filter((p) => /^\d{4}-\d{2}$/.test(p)).sort().slice(-24)
+      .map((m) => ({ m, first: num(sys[m].M5_FirstTime), newE: num(sys[m].M5_NewEntries), phx: num(sys[m].M_AllPHExits) }));
+  } catch { /* section hides when empty */ }
   if (!a?.risk?.model) {
     return (
       <div className="panel" style={{ padding: 24 }}>
@@ -31,5 +40,5 @@ export default async function AnalyticsPage() {
       </div>
     );
   }
-  return <AnalyticsView a={a} forecast={forecast} pi={pi} iv={iv} />;
+  return <AnalyticsView a={a} forecast={forecast} pi={pi} iv={iv} flow={flow} />;
 }

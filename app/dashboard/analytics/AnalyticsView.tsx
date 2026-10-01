@@ -28,7 +28,7 @@ const TABS: [Tab, string][] = [
   ['risk', 'Return Risk'],
   ['survival', 'Survival'],
   ['capacity', 'Capacity'],
-  ['inflow', 'Inflow'],
+  ['inflow', 'Inflow and outflow'],
   ['pathways', 'Pathways'],
   ['bottleneck', 'Bottlenecks'],
   ['predictor', 'Predictor'],
@@ -459,6 +459,7 @@ interface Inflow {
   months: string[]; total: number[]; future_months: string[];
   wt_forecasts: number[]; trend_forecasts: number[]; slope_per_month: number;
   total_enroll?: number[]; by_state: Record<string, Record<string, number>>;
+  turnover?: Turnover;
 }
 
 const ADULT_COLOR = 'var(--primary)';
@@ -517,8 +518,9 @@ function CapSpark({ row }: { row: CapRow }) {
 
 /* ══════════════ the view ══════════════ */
 
-export default function AnalyticsView({ a, forecast, pi, iv = null }: {
+export default function AnalyticsView({ a, forecast, pi, iv = null, flow = [] }: {
   a: AnalyticsInsights; forecast: SystemForecast; pi: PathwayIntel | null; iv?: InterventionIntel | null;
+  flow?: FlowMonth[];
 }) {
   const [tab, setTabState] = useState<Tab>('trends');
   // ?section=…&pid=… deep link (BNL drawer's "open in Analytics") wins over
@@ -574,7 +576,13 @@ export default function AnalyticsView({ a, forecast, pi, iv = null }: {
       {tab === 'risk' && <RiskSection a={a} initialPid={linkPid} />}
       {tab === 'survival' && <SurvivalSection a={a} />}
       {tab === 'capacity' && <CapacitySection capacity={capacity} />}
-      {tab === 'inflow' && <InflowSection inflow={inflow} />}
+      {tab === 'inflow' && (
+        <>
+          <InflowSection inflow={inflow} />
+          <SystemFlowSection flow={flow} />
+          <TurnoverSection turnover={inflow?.turnover} />
+        </>
+      )}
       {tab === 'pathways' && (pi ? <PathwaysSection pi={pi} /> : <PiEmpty />)}
       {tab === 'bottleneck' && (pi ? <BottleneckSection pi={pi} /> : <PiEmpty />)}
       {tab === 'predictor' && (pi ? <PredictorSection pi={pi} initialPid={linkPid} /> : <PiEmpty />)}
@@ -1883,5 +1891,260 @@ function InflowStackChart({ inflow }: { inflow: Inflow }) {
         </div>
       )}
     </div>
+  );
+}
+
+/* ══════════════ ⇄ Inflow and outflow · PSH / RRH turnover (2026-10-01) ══════════════ */
+
+/** One month of system flow, straight from system_metrics (monthly, All|All):
+ *  pipeline values only — M5_FirstTime, M5_NewEntries, M_AllPHExits. */
+export interface FlowMonth { m: string; first: number | null; newE: number | null; phx: number | null }
+
+/** generate_analytics.py → turnover_core.build_turnover (heads of household). */
+interface TurnSeries {
+  occupied: number[]; move_ins: number[]; exits: number[]; waiting: number[];
+  median_stay: (number | null)[];
+  ph: number[]; homeless: number[]; deceased: number[]; institutional: number[]; temporary: number[]; unknown: number[];
+}
+interface Turnover { months: string[]; groups: Record<string, TurnSeries> }
+
+type FlowSeries = { label: string; color: string; values: (number | null)[]; dash?: string };
+
+/** Grouped bars + optional dashed lines (or one filled area) on ONE y-axis,
+ *  hover readout per month — the Inflow charts' idiom, generalised. */
+function FlowChart({ months, bars = [], lines = [], area, H = 240 }: {
+  months: string[]; bars?: FlowSeries[]; lines?: FlowSeries[]; area?: FlowSeries; H?: number;
+}) {
+  const [ref, k] = useSvgScale(1000, 1000);
+  const fs = AXIS_PX * k;
+  const n = months.length;
+  const all = [...bars, ...lines, ...(area ? [area] : [])].flatMap((s) => s.values)
+    .filter((v): v is number => v != null);
+  const raw = Math.max(...all, 1);
+  // four gridline steps on a round number (e.g. 0·300·600·900·1,200) — tight to the data
+  const mag = 10 ** Math.floor(Math.log10(raw / 4));
+  const step = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map((f) => f * mag).find((s) => s * 4 >= raw) ?? 10 * mag;
+  const yMax = step * 4;
+  const yT = [0, 0.25, 0.5, 0.75, 1].map((g) => yMax * g);
+  const W = 1000, L = yAxisWidth(yT.map((v) => fmtInt(v)), k), R = 12 * k, T = 12 * k, B = 46 * k;
+  const band = (W - L - R) / n;
+  const x = (i: number) => L + (i + 0.5) * band;
+  const y = (v: number) => T + (H - T - B) * (1 - v / yMax);
+  const nb = Math.max(bars.length, 1);
+  const bw = Math.min((band * 0.72) / nb, 24 * k);
+  // gaps (null) break the line rather than dropping to zero
+  const path = (vals: (number | null)[]) => {
+    let d = ''; let pen = false;
+    vals.forEach((v, i) => {
+      if (v == null) { pen = false; return; }
+      d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
+      pen = true;
+    });
+    return d;
+  };
+  const labels = months.map((m) => m.slice(2));
+  const { hov, handlers } = useHoverBand(n, W, L, R);
+  const legend = [...bars.map((s) => ({ ...s, kind: 'bar' as const })),
+    ...lines.map((s) => ({ ...s, kind: 'line' as const })),
+    ...(area ? [{ ...area, kind: 'area' as const }] : [])];
+  let lx = L;
+  return (
+    <div style={{ position: 'relative' }}>
+      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img"
+        aria-label={legend.map((s) => s.label).join(', ') + ' by month'} {...handlers}>
+        {yT.map((v) => (
+          <g key={v}>
+            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--hair)" strokeWidth={k} />
+            <text x={L - 6 * k} y={y(v) + fs * 0.35} textAnchor="end" fontSize={fs} fill="var(--muted)"
+              className="num">{fmtInt(v)}</text>
+          </g>
+        ))}
+        {area && (
+          <>
+            <path d={`${path(area.values)} L${x(n - 1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`}
+              fill={area.color} opacity={0.12} />
+            <path d={path(area.values)} fill="none" stroke={area.color} strokeWidth={2 * k} strokeLinejoin="round" />
+          </>
+        )}
+        {bars.map((s, j) => s.values.map((v, i) => (v == null ? null : (
+          <rect key={`${j}-${i}`} x={x(i) - (nb * bw) / 2 + j * bw + 1 * k} y={y(v)} width={Math.max(bw - 2 * k, 1)}
+            height={Math.max(y(0) - y(v), 1)} fill={s.color} opacity={hov == null || hov === i ? 0.85 : 0.45} rx={2 * k} />
+        ))))}
+        {lines.map((s) => (
+          <path key={s.label} d={path(s.values)} fill="none" stroke={s.color} strokeWidth={2 * k}
+            strokeDasharray={s.dash ?? '6 4'} strokeLinejoin="round" />
+        ))}
+        {hov != null && (
+          <line x1={x(hov)} x2={x(hov)} y1={T} y2={H - B} stroke="var(--border-strong)" strokeWidth={k} pointerEvents="none" />
+        )}
+        {xTicks(labels, x, k, 12).map(({ i, anchor }) => (
+          <text key={`${labels[i]}-${i}`} x={x(i)} y={H - 26 * k} textAnchor={anchor} fontSize={fs}
+            fill="var(--muted)">{labels[i]}</text>
+        ))}
+        {legend.map((s) => {
+          const x0 = lx; lx += (28 + s.label.length * 6.4 + 22) * k;
+          const ly = H - 8 * k;
+          return (
+            <g key={s.label}>
+              {s.kind === 'bar'
+                ? <rect x={x0} y={ly - 8 * k} width={14 * k} height={8 * k} fill={s.color} opacity={0.85} rx={2 * k} />
+                : <line x1={x0} x2={x0 + 20 * k} y1={ly - 4 * k} y2={ly - 4 * k} stroke={s.color} strokeWidth={2 * k}
+                    strokeDasharray={s.kind === 'line' ? (s.dash ?? '6 4') : undefined} />}
+              <text x={x0 + 26 * k} y={ly} fontSize={fs} fill="var(--text)">{s.label}</text>
+            </g>
+          );
+        })}
+        <rect x={L} y={T} width={W - L - R} height={H - T - B} fill="transparent" />
+      </svg>
+      {hov != null && (
+        <div className="ctip" style={tipPos(x(hov) / W)}>
+          <b>{fmtYm(months[hov])}</b>
+          {legend.map((s) => (
+            <span key={s.label} className="ctip-row"><i style={{ background: s.color }} />{s.label}
+              <span className="num ctip-v">{s.values[hov] == null ? '—' : fmtInt(s.values[hov]!)}</span></span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const sumLast = (a: (number | null)[], n = 12) => a.slice(-n).reduce<number>((s, v) => s + (v ?? 0), 0);
+const avgLast = (a: (number | null)[], n = 12) => {
+  const v = a.slice(-n).filter((x): x is number => x != null);
+  return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
+};
+const median = (a: (number | null)[]) => {
+  const v = a.filter((x): x is number => x != null).sort((p, q) => p - q);
+  return v.length ? v[Math.floor(v.length / 2)] : null;
+};
+const flowTile = (k: string, v: React.ReactNode, s?: React.ReactNode) => (
+  <div className="hc-t"><div className="k">{k}</div><div className="v">{v}</div>{s && <div className="s">{s}</div>}</div>
+);
+
+/** System inflow vs outflow — people per month, pipeline SPM values only. */
+export function SystemFlowSection({ flow }: { flow: FlowMonth[] }) {
+  if (!flow.length) return null;
+  const months = flow.map((f) => f.m);
+  const first = flow.map((f) => f.first);
+  const newE = flow.map((f) => f.newE);
+  const phx = flow.map((f) => f.phx);
+  const aFirst = avgLast(first), aNew = avgLast(newE), aPhx = avgLast(phx);
+  const net = aFirst != null && aPhx != null ? Math.round(aPhx - aFirst) : null;
+  return (
+    <>
+      <div className="grouplabel" style={{ marginTop: 22 }}>System inflow vs outflow — people per month</div>
+      <p className="bnl-method" style={{ marginTop: 0 }}>
+        <b>Inflow</b> = first-time homeless (SPM Measure 5) and all new entries (adds people returning to the
+        system). <b>Outflow</b> = unduplicated exits to permanent housing, system-wide. Values come straight from
+        the System Performance pipeline, last complete month and back.
+      </p>
+      <div className="hc-tiles" style={{ marginBottom: 12 }}>
+        {flowTile('First-time homeless', aFirst != null ? fmtInt(Math.round(aFirst)) : '—', '12-mo avg · inflow')}
+        {flowTile('All new entries', aNew != null ? fmtInt(Math.round(aNew)) : '—', '12-mo avg · incl. returning')}
+        {flowTile('Exits to permanent housing', aPhx != null ? fmtInt(Math.round(aPhx)) : '—', '12-mo avg · outflow')}
+        {flowTile('Net: housing exits − first-time', net == null ? '—' : (
+          <span style={{ color: net >= 0 ? 'var(--accent)' : 'var(--danger)' }}>{net >= 0 ? '+' : '−'}{fmtInt(Math.abs(net))}</span>
+        ), 'per month')}
+      </div>
+      <div className="panel" style={{ padding: '14px 18px' }}>
+        <FlowChart months={months}
+          bars={[{ label: 'First-time homeless (inflow)', color: 'var(--warn)', values: first },
+                 { label: 'Exits to permanent housing (outflow)', color: 'var(--accent)', values: phx }]}
+          lines={[{ label: 'All new entries', color: 'var(--muted)', values: newE }]} />
+        <p className="bnl-sub" style={{ marginTop: 8 }}>
+          The most recent months can still rise as late exits are entered into HMIS — read the last few bars as a floor.
+        </p>
+      </div>
+    </>
+  );
+}
+
+const TURN_LABEL: Record<string, string> = {
+  PSH: 'PSH turnover — permanent supportive + other permanent housing (households)',
+  RRH: 'RRH turnover — rapid re-housing (households)',
+};
+
+/** Units freed vs filled, occupancy, where exits went — one program group. */
+function TurnoverGroup({ name, months, s }: { name: string; months: string[]; s: TurnSeries }) {
+  const occNow = s.occupied[s.occupied.length - 1] ?? 0;
+  const occAvg = avgLast(s.occupied) ?? 0;
+  const occ12 = s.occupied[Math.max(0, s.occupied.length - 13)] ?? occNow;
+  const dOcc = occNow - occ12;
+  const exits = sumLast(s.exits), moves = sumLast(s.move_ins);
+  const turn = occAvg ? (exits / occAvg) * 100 : null;
+  const pct = (v: number) => (exits ? `${Math.round((v / exits) * 100)}%` : '—');
+  const ph = sumLast(s.ph), hl = sumLast(s.homeless), died = sumLast(s.deceased);
+  const waitNow = s.waiting[s.waiting.length - 1] ?? 0;
+  const wait12 = s.waiting[Math.max(0, s.waiting.length - 13)] ?? waitNow;
+  const stay = median(s.median_stay.slice(-12));
+  const isRrh = name === 'RRH';
+  return (
+    <>
+      <div className="grouplabel" style={{ marginTop: 22 }}>{TURN_LABEL[name] ?? name}</div>
+      <div className="hc-tiles" style={{ marginBottom: 12 }}>
+        {flowTile('Households housed', fmtInt(occNow), (
+          <span style={{ color: Math.abs(dOcc) < occNow * 0.02 ? 'var(--muted)' : dOcc < 0 ? 'var(--danger)' : 'var(--accent)' }}>
+            {Math.abs(dOcc) < occNow * 0.02 ? '≈ stable over 12 mo' : `${dOcc < 0 ? '▼' : '▲'} ${fmtInt(Math.abs(dOcc))} vs 12 mo ago`}
+          </span>
+        ))}
+        {flowTile('Units freed (12 mo)', fmtInt(exits), turn != null ? `${Math.round(turn)}% turnover / yr` : undefined)}
+        {flowTile('Move-ins (12 mo)', fmtInt(moves), exits - moves > 0
+          ? <span style={{ color: 'var(--danger)' }}>{fmtInt(exits - moves)} fewer than freed</span>
+          : `${fmtInt(moves - exits)} more than freed`)}
+        {flowTile('Exits to permanent housing', pct(ph), `${pct(hl)} back to homelessness${died ? ` · ${fmtInt(died)} deceased` : ''}`)}
+        {isRrh && flowTile('Waiting to move in', fmtInt(waitNow), (
+          <span style={{ color: waitNow > wait12 * 1.1 ? 'var(--danger)' : 'var(--muted)' }}>
+            {waitNow >= wait12 ? '▲' : '▼'} from {fmtInt(wait12)} 12 mo ago
+          </span>
+        ))}
+        {isRrh && stay != null && flowTile('Median stay after move-in', `${fmtInt(stay)} days`, 'exits, last 12 mo')}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: isRrh ? 'repeat(auto-fit, minmax(380px, 1fr))' : '1fr', gap: 12 }}>
+        <div className="panel" style={{ padding: '14px 18px' }}>
+          <FlowChart months={months} H={isRrh ? 260 : 240}
+            bars={[{ label: 'Units freed (exits)', color: 'var(--info)', values: s.exits },
+                   { label: 'Move-ins', color: 'var(--primary)', values: s.move_ins }]} />
+        </div>
+        {isRrh ? (
+          <div className="panel" style={{ padding: '14px 18px' }}>
+            <FlowChart months={months} H={260}
+              area={{ label: 'Enrolled, waiting to move in', color: 'var(--warn)', values: s.waiting }} />
+          </div>
+        ) : (
+          <div className="panel" style={{ padding: '14px 18px' }}>
+            <FlowChart months={months} H={200}
+              area={{ label: 'Households housed', color: 'var(--primary)', values: s.occupied }} />
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+export function TurnoverSection({ turnover }: { turnover: Turnover | null | undefined }) {
+  if (!turnover?.groups) {
+    return (
+      <>
+        <div className="grouplabel" style={{ marginTop: 22 }}>PSH / RRH turnover</div>
+        <div className="panel" style={{ padding: 20 }}>
+          <p className="bnl-sub">Turnover fills in after the next refresh (generate_analytics.py → meta load).</p>
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      {['PSH', 'RRH'].filter((g) => turnover.groups[g]).map((g) => (
+        <TurnoverGroup key={g} name={g} months={turnover.months} s={turnover.groups[g]} />
+      ))}
+      <p className="bnl-method" style={{ marginTop: 10 }}>
+        Heads of household only, so a family counts once — like a unit. <b>Housed</b> = moved in by month end and not
+        yet exited. <b>Units freed</b> = exits after a move-in. <b>Waiting</b> = enrolled but not yet moved in.
+        Exit destinations use the HUD Appendix A sets the System Performance pipeline uses: permanent housing,
+        literal homelessness (shelter, safe haven, unsheltered), deceased. A move-in dated before entry is treated as
+        not moved in.
+      </p>
+    </>
   );
 }
