@@ -56,6 +56,9 @@ export interface RosterQuery {
    *  '' = all types. Same include/exclude semantics as `projects`. */
   ptypes: string;
   ptypeMode: 'in' | 'out';
+  /** BNL Family status filter (bnl_family_status side table): '' = any,
+   *  'set' = has a status, or one status key (lib/family-status.ts). */
+  fstat: string;
 }
 
 /** Note-WRITING population scopes (bnl_write_pops.sql). MUST stay in sync
@@ -112,6 +115,7 @@ export function parseRosterQuery(sp: URLSearchParams): RosterQuery {
     projMode: sp.get('projMode') === 'out' ? 'out' : 'in',
     ptypes: (sp.get('ptypes') ?? '').trim(),
     ptypeMode: sp.get('ptypeMode') === 'out' ? 'out' : 'in',
+    fstat: (sp.get('fstat') ?? '').trim(),
   };
 }
 

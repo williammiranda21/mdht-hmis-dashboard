@@ -10,10 +10,12 @@ import { IconDownload } from '../../../components/icons';
 import ProjectPicker from '../../../components/ProjectPicker';
 import ClientDrawer, { Flags } from './ClientDrawer';
 import { canWriteClient } from '../../../lib/bnl-query';
+import { FAMILY_STATUSES } from '../../../lib/family-status';
 
 type SortKey = 'name' | 'age' | 'status' | 'project' | 'days_homeless' | 'sys_days3' | 'risk_pts' | 'ref_status' | 'assessed' | 'ms_wait' | 'hh_n' | 'income';
 
-const COLS: Array<[SortKey | 'flags' | 'notes', string]> = [
+type ColKey = SortKey | 'flags' | 'notes' | 'fam_status';
+const COLS: Array<[ColKey, string]> = [
   ['name', 'Client'],
   ['age', 'Age'],
   ['hh_n', 'HH'],
@@ -90,6 +92,8 @@ export default function BnlView({
   const [q, setQ] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fFlag, setFFlag] = useState('');
+  // Family status filter (Family tab only): '' any · 'set' · one status key
+  const [fFam, setFFam] = useState('');
   const [fRef, setFRef] = useState('');
   // Milestone worklist — set by clicking a waiting number on the journey bar.
   const [fStage, setFStage] = useState('');
@@ -280,10 +284,10 @@ export default function BnlView({
   const pa = agg.pops[pop];
 
   const params = useCallback((offset: number) => new URLSearchParams({
-    pop, status: fStatus, flag: fFlag, stage: fStage, ref: fRef,
+    pop, status: fStatus, flag: fFlag, stage: fStage, ref: fRef, fstat: pop === 'family' ? fFam : '',
     projects: selProjects.join(','), projMode, ptypes: selTypes.join(','), ptypeMode: typeMode, q: qDebounced,
     sort: sortKey, dir: sortDir, offset: String(offset), limit: String(PAGE),
-  }), [pop, fStatus, fFlag, fStage, fRef, selProjects, projMode, selTypes, typeMode, qDebounced, sortKey, sortDir]);
+  }), [pop, fStatus, fFlag, fFam, fStage, fRef, selProjects, projMode, selTypes, typeMode, qDebounced, sortKey, sortDir]);
 
   // Which request is current. A slow response for an old filter must not
   // overwrite a newer one — without this, typing fast can leave stale rows.
@@ -355,8 +359,39 @@ export default function BnlView({
     }
   }
 
-  function setSort(k: SortKey | 'flags' | 'notes') {
-    if (k === 'flags' || k === 'notes') return;
+  // Family tab adds the Family status column right after Status.
+  const cols = useMemo(() => {
+    if (pop !== 'family') return COLS;
+    const i = COLS.findIndex(([k]) => k === 'status');
+    return [...COLS.slice(0, i + 1), ['fam_status', 'Family status'] as [ColKey, string], ...COLS.slice(i + 1)];
+  }, [pop]);
+
+  // Family status — optimistic; reverts (and says why) if the save fails.
+  async function setFamStatus(r: BnlClient, key: string) {
+    const prev = r.famStatus ?? null;
+    const label = FAMILY_STATUSES.find((x) => x.key === key)?.label ?? key;
+    const next = key ? { key, label, by: null, at: new Date().toISOString() } : null;
+    const apply = (v: BnlClient['famStatus']) => {
+      setRows((rs) => rs.map((x) => (x.pid === r.pid ? { ...x, famStatus: v } : x)));
+      setDrill((d) => (d && d.pid === r.pid ? { ...d, famStatus: v } : d));
+    };
+    apply(next);
+    try {
+      const res = await fetch('/api/bnl/family-status', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: r.pid, status: key || null }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
+      apply(j.famStatus ?? null);
+    } catch (e) {
+      apply(prev);
+      setLoadErr(`Family status not saved: ${(e as Error).message}`);
+    }
+  }
+
+  function setSort(k: ColKey) {
+    if (k === 'flags' || k === 'notes' || k === 'fam_status') return;
     setSortDir(sortKey === k ? (sortDir === 'desc' ? 'asc' : 'desc') : k === 'name' ? 'asc' : 'desc');
     setSortKey(k);
   }
@@ -367,14 +402,15 @@ export default function BnlView({
   // not part of this — the cards partition the universe by status themselves.
   // With no filters active the precomputed population aggregate serves as
   // before (zero extra queries).
-  const countsFiltered = Boolean(fFlag || fStage || fRef || selProjects.length || selTypes.length || qDebounced);
+  const countsFiltered = Boolean(fFlag || fStage || fRef || selProjects.length || selTypes.length || qDebounced
+    || (pop === 'family' && fFam));
   const [fCounts, setFCounts] = useState<BnlPopAgg['counts'] | null>(null);
   const cntReq = useRef(0);
   useEffect(() => {
     const id = ++cntReq.current;
     if (!countsFiltered) { setFCounts(null); return; }
     const sp = new URLSearchParams({
-      pop, flag: fFlag, stage: fStage, ref: fRef,
+      pop, flag: fFlag, stage: fStage, ref: fRef, fstat: pop === 'family' ? fFam : '',
       projects: selProjects.join(','), projMode, ptypes: selTypes.join(','), ptypeMode: typeMode, q: qDebounced,
     });
     fetch(`/api/bnl/counts?${sp}`)
@@ -383,7 +419,7 @@ export default function BnlView({
       // On failure fall back to the population aggregate rather than showing
       // stale filtered numbers against a different filter state.
       .catch(() => { if (id === cntReq.current) setFCounts(null); });
-  }, [countsFiltered, pop, fFlag, fStage, fRef, selProjects, projMode, selTypes, typeMode, qDebounced]);
+  }, [countsFiltered, pop, fFlag, fFam, fStage, fRef, selProjects, projMode, selTypes, typeMode, qDebounced]);
 
   const kpis: Array<[string, number | string, string, string]> = useMemo(() => {
     const c = fCounts ?? pa.counts;
@@ -615,6 +651,17 @@ export default function BnlView({
                 <option value="none">No referral</option>
               </select>
             </div>
+            {pop === 'family' && (
+              <div className="fgroup">
+                <span className="flabel">Family status</span>
+                <select className="fselect" value={fFam} onChange={(e) => setFFam(e.target.value)}
+                  style={fFam ? { color: 'var(--primary)', fontWeight: 700 } : undefined}>
+                  <option value="">Any</option>
+                  <option value="set">Any status set</option>
+                  {FAMILY_STATUSES.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
+                </select>
+              </div>
+            )}
             <div className="fgroup">
               <span className="flabel">Projects</span>
               <ProjectPicker options={projectOpts} selected={selProjects}
@@ -653,7 +700,7 @@ export default function BnlView({
           <table className="bnl-table">
             <thead>
               <tr>
-                {COLS.map(([k, label]) => (
+                {cols.map(([k, label]) => (
                   <th key={k} className={sortKey === k ? 'sorted' : ''} onClick={() => setSort(k)}>{label}</th>
                 ))}
               </tr>
@@ -689,6 +736,23 @@ export default function BnlView({
                         ? <span style={{ textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>{r.hh_n}</span>
                         : <span className="bnl-sub">1</span>}</td>
                     <td {...mkTd(r, 'status')}><span className={`bnl-chip bnl-${r.status}`}>{r.status === 'active' ? 'Active' : r.status === 'housed' ? 'Housed' : 'Inactive'}</span></td>
+                    {pop === 'family' && (
+                      <td onClick={(e) => e.stopPropagation()} style={{ minWidth: 190 }}
+                        title={r.famStatus ? `${r.famStatus.label} — ${r.famStatus.by ?? '—'} · ${new Date(r.famStatus.at).toLocaleDateString()}` : 'No family status yet'}>
+                        {canWriteClient(writePops, r) ? (
+                          <select className="fselect" value={r.famStatus?.key ?? ''} aria-label={`Family status for ${r.name}`}
+                            style={{ width: '100%', maxWidth: 230, fontSize: 12,
+                              ...(r.famStatus ? { color: 'var(--primary)', fontWeight: 600 } : {}) }}
+                            onChange={(e) => setFamStatus(r, e.target.value)}>
+                            <option value="">— Set status —</option>
+                            {FAMILY_STATUSES.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
+                          </select>
+                        ) : r.famStatus ? (
+                          <span style={{ color: 'var(--primary)', fontWeight: 600, fontSize: 12.5 }}>{r.famStatus.label}</span>
+                        ) : <span className="bnl-sub">—</span>}
+                        {r.famStatus && <div className="bnl-sub">{new Date(r.famStatus.at).toLocaleDateString()}{r.famStatus.by ? ` · ${r.famStatus.by}` : ''}</div>}
+                      </td>
+                    )}
                     <td {...mkTd(r, 'flags')}><Flags r={r} /></td>
                     <td {...mkTd(r, 'project', { minWidth: 220 })}>{r.project ? <><span className="ty">{r.ptype ?? '?'}</span> {r.project}{r.enrolled ? null : <span className="bnl-sub" title="not a current enrollment — last known project"> (former)</span>}</> : <span className="bnl-sub">—</span>}</td>
                     <td {...mkTd(r, 'days_homeless')}>
@@ -773,7 +837,7 @@ export default function BnlView({
                 );
               })}
               {!rows.length && !loading && (
-                <tr><td colSpan={COLS.length}><div className="hc-none">No clients match these filters.</div></td></tr>
+                <tr><td colSpan={cols.length}><div className="hc-none">No clients match these filters.</div></td></tr>
               )}
             </tbody>
           </table>

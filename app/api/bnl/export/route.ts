@@ -1,7 +1,7 @@
 import { getViewer, supabaseServer } from '../../../../lib/supabase-server';
 import { audit } from '../../../../lib/audit';
 import { parseRosterQuery, queryRoster, ROSTER_COLS } from '../../../../lib/bnl-query';
-import { enrichRoster, flagPidsFor } from '../../../../lib/bnl-enrich';
+import { enrichRoster, rosterPids } from '../../../../lib/bnl-enrich';
 import { MILESTONES } from '../../../dashboard/bnl/types';
 import type { BnlClient } from '../../../dashboard/bnl/types';
 
@@ -35,6 +35,7 @@ const HEADER = [
   // "PSH pending 2026-05-02 Carrfour | RRH accepted 2026-06-01 Chapman"
   'live_referrals',
   'last_note', 'last_note_at', 'last_note_author',
+  'family_status', 'family_status_updated',
 ];
 
 /** One CSV row = one table row, cell for cell (Flags logic mirrors <Flags/>). */
@@ -57,6 +58,7 @@ function toRow(r: BnlClient): unknown[] {
     (r.refs ?? []).map((f) =>
       [f.type, f.status, f.date, f.prov].filter(Boolean).join(' ')).join(' | '),
     note?.body, note?.at, note?.author,
+    r.famStatus?.label, r.famStatus?.at?.slice(0, 10),
   ];
 }
 
@@ -80,7 +82,7 @@ export async function GET(req: Request) {
 
   // Side-table flags (★ Focused, cell-mark colors) constrain by pid list —
   // previously the export silently ignored them and dumped the whole filter.
-  const pidsIn = await flagPidsFor(sb, base.flag);
+  const pidsIn = await rosterPids(sb, base);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

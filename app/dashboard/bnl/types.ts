@@ -71,6 +71,8 @@ export interface BnlClient {
    *  Optional — absent on rows that skipped enrichment (e.g. CSV export). */
   notes2?: { body: string; author: string | null; at: string }[] | null;
   focused?: boolean;
+  /** Family status (bnl_family_status, enrichment) — null = none set. */
+  famStatus?: { key: string; label: string; by: string | null; at: string } | null;
   /** ALL live referrals (newest first, one per type+provider, max 3) — a
    *  client can hold e.g. an RRH move-in-cost referral AND a PSH subsidy
    *  referral at once. Headline ref_* fields stay for sorting/compat. */

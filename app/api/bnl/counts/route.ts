@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../../lib/supabase-server';
 import { parseRosterQuery, applyRosterFilters } from '../../../../lib/bnl-query';
-import { flagPidsFor } from '../../../../lib/bnl-enrich';
+import { rosterPids } from '../../../../lib/bnl-enrich';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +26,7 @@ export async function GET(req: Request) {
   p.status = '';
   const sb = supabaseServer();
 
-  const pidsIn = await flagPidsFor(sb, p.flag);
+  const pidsIn = await rosterPids(sb, p);
   if (pidsIn && !pidsIn.length) return NextResponse.json(ZERO);
 
   const cnt = async (refine: (q: ReturnType<typeof base>) => ReturnType<typeof base>) => {

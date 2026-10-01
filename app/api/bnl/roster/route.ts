@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer, getViewer } from '../../../../lib/supabase-server';
 import { parseRosterQuery, queryRoster } from '../../../../lib/bnl-query';
-import { enrichRoster, flagPidsFor } from '../../../../lib/bnl-enrich';
+import { enrichRoster, rosterPids } from '../../../../lib/bnl-enrich';
 import type { BnlClient } from '../../../dashboard/bnl/types';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +22,7 @@ export async function GET(req: Request) {
   const sb = supabaseServer();
   // Side-table flags (★ Focused, cell-mark colors): no FK to the roster, so
   // resolve the pid list first and constrain the roster query to it.
-  const pidsIn = await flagPidsFor(sb, params.flag);
+  const pidsIn = await rosterPids(sb, params);
   if (pidsIn && !pidsIn.length) return NextResponse.json({ rows: [], total: 0, offset: 0 });
   const { data, error, count } = await queryRoster(sb, params, undefined, true, pidsIn);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

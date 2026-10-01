@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BnlClient } from '../app/dashboard/bnl/types';
+import { FAMILY_STATUS_LABEL, isFamilyStatus } from './family-status';
+import type { RosterQuery } from './bnl-query';
 
 /**
  * Page-scoped roster enrichment — the last 2 notes and the focus mark live in
@@ -11,7 +13,7 @@ import type { BnlClient } from '../app/dashboard/bnl/types';
 export async function enrichRoster(sb: SupabaseClient, rows: BnlClient[]): Promise<void> {
   if (!rows.length) return;
   const pids = rows.map((r) => r.pid);
-  const [notesRes, focusRes] = await Promise.all([
+  const [notesRes, focusRes, famRes] = await Promise.all([
     // Newest-first across the page, kept to 2 per client below. The flat cap
     // guards the payload; a single client with a very long thread can starve
     // later pids of their 2 — acceptable for a 200-row page today.
@@ -21,6 +23,9 @@ export async function enrichRoster(sb: SupabaseClient, rows: BnlClient[]): Promi
       .order('created_at', { ascending: false })
       .limit(1000),
     sb.from('bnl_focus').select('pid').in('pid', pids),
+    // Family status (bnl_family_status.sql) — errors (table not created yet)
+    // simply read as "no status".
+    sb.from('bnl_family_status').select('pid, status, author_name, updated_at').in('pid', pids),
   ]);
 
   const byPid = new Map<string, NonNullable<BnlClient['notes2']>>();
@@ -37,9 +42,13 @@ export async function enrichRoster(sb: SupabaseClient, rows: BnlClient[]): Promi
     }
   }
   const focused = new Set(((focusRes.data ?? []) as { pid: string }[]).map((f) => f.pid));
+  type FamRow = { pid: string; status: string; author_name: string | null; updated_at: string };
+  const fam = new Map(((famRes.error ? [] : famRes.data ?? []) as FamRow[]).map((f) => [f.pid, f]));
   for (const r of rows) {
     r.notes2 = byPid.get(r.pid) ?? null;
     r.focused = focused.has(r.pid);
+    const f = fam.get(r.pid);
+    r.famStatus = f ? { key: f.status, label: FAMILY_STATUS_LABEL[f.status] ?? f.status, by: f.author_name, at: f.updated_at } : null;
   }
 }
 
@@ -55,6 +64,28 @@ export async function focusPids(sb: SupabaseClient): Promise<string[]> {
 export async function markPids(sb: SupabaseClient, color: number): Promise<string[]> {
   const { data } = await sb.from('bnl_cell_marks').select('pid').eq('color', color).limit(5000);
   return [...new Set(((data ?? []) as { pid: string }[]).map((m) => m.pid))];
+}
+
+/** pids with a Family status — 'set' = any status, else one status key.
+ *  Family-scale (one row per family household); undefined = no filter. */
+export async function famStatusPids(sb: SupabaseClient, fstat: string): Promise<string[] | undefined> {
+  if (!fstat) return undefined;
+  if (fstat !== 'set' && !isFamilyStatus(fstat)) return undefined;
+  let q = sb.from('bnl_family_status').select('pid').limit(5000);
+  if (fstat !== 'set') q = q.eq('status', fstat);
+  const { data, error } = await q;
+  if (error) return [];
+  return ((data ?? []) as { pid: string }[]).map((f) => f.pid);
+}
+
+/** Every side-table constraint for a roster query (flag list + Family
+ *  status), intersected. undefined = unconstrained; [] = matches nobody. */
+export async function rosterPids(sb: SupabaseClient, p: RosterQuery): Promise<string[] | undefined> {
+  const [a, b] = await Promise.all([flagPidsFor(sb, p.flag), famStatusPids(sb, p.fstat)]);
+  if (!a) return b;
+  if (!b) return a;
+  const bs = new Set(b);
+  return a.filter((x) => bs.has(x));
 }
 
 /** Resolve a roster `flag` that filters by a SIDE TABLE rather than a
