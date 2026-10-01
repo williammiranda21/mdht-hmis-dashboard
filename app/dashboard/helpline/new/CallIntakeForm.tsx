@@ -15,6 +15,7 @@ import ReferOut, { type ReferralResource } from '../../../../components/ReferOut
 import { CopyId } from '../../analytics/shared';
 import { IconSearch, IconLink, IconMapPin, IconMap } from '../../../../components/icons';
 import PinMap from '../../../../components/PinMap';
+import DobInput from '../../../../components/DobInput';
 
 // District boundary files, fetched once per session (same-origin static).
 let _cityGeo: GeoFC | null | undefined;
@@ -625,8 +626,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
           </div>
           <div style={{ flex: 1, minWidth: 140 }}>
             <L>DOB — helps HMIS match</L>
-            <input className={`tinput${f.dob ? '' : ' is-empty'}`} style={{ width: '100%' }} type="date" value={f.dob}
-              onChange={(e) => set('dob')(e.target.value)} />
+            <DobInput value={f.dob} onChange={set('dob')} style={{ width: '100%' }} />
           </div>
           <div style={{ flex: 0.7, minWidth: 110 }}>
             <L>SSN-4 — optional</L>
