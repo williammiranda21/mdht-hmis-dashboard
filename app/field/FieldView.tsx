@@ -64,7 +64,7 @@ function getGps(): Promise<string | null> {
 
 const SHEET_COPY: Record<Outcome, { t: string; s: string; btn: string; cls: string }> = {
   attempt: { t: '✗ Couldn’t locate', s: 'Logs a failed attempt with today’s date — dispatch sees it immediately.', btn: 'Log attempt', cls: 'red' },
-  contact: { t: '✓ Made contact', s: 'Logs the contact on the outreach trail — and, when they’re homeless, confirms them in the same step (starts HMIS verification).', btn: 'Save contact', cls: 'green' },
+  contact: { t: '✓ Made contact', s: 'Logs the contact on the outreach trail and, when they’re homeless, confirms them in the same step.', btn: 'Save contact', cls: 'green' },
   confirm: { t: 'Confirmed homeless', s: 'Marks the case confirmed in the field. The system then watches HMIS for the enrollment to verify it.', btn: 'Confirm', cls: 'green' },
 };
 
@@ -87,8 +87,13 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
   const [sheet, setSheet] = useState<Outcome | null>(null);
   const [note, setNote] = useState('');
   // what happened (required) — see FIELD_DISPOSITIONS
-  const [disp, setDisp] = useState('');
+  // what happened — SEVERAL can apply at once (user 2026-10-01: enrolled +
+  // assessed + no bed in one contact)
+  const [disps, setDisps] = useState<string[]>([]);
+  const dispOk = disps.length > 0 && (!disps.includes('Other') || note.trim() !== '');
   const [conf, setConf] = useState(true);
+  // the worker ticks this once the HMIS step (entry / interim review) is done
+  const [hmisDone, setHmisDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -238,18 +243,43 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
     return { ...c, status: 'confirmed', confirmed_at: day };
   }
 
+  /** What the worker must do in HMIS (WellSky) after a contact (user
+   *  2026-10-01): not in HMIS → create client + Street Outreach entry; known
+   *  but nothing open → new Street Outreach entry on the existing record;
+   *  open enrollment → record the contact as an Interim Review / Current
+   *  Living Situation on it. Uses the same HMIS glance the case card shows. */
+  function hmisStep(c: HlCase): { title: string; body: string; done: string } {
+    const g = c.matched_pid ? hmis[c.matched_pid] : undefined;
+    if (!c.matched_pid) {
+      return { title: 'Create the client + Street Outreach entry in HMIS',
+        body: 'No HMIS record is linked to this case. Search HMIS by name and DOB first; if they’re not there, create the client, then the Street Outreach entry with today’s contact.',
+        done: 'client + Street Outreach entry created' };
+    }
+    if (g?.enroll?.open) {
+      return { title: 'Add an Interim Review (contact) in HMIS',
+        body: `Open enrollment: ${g.enroll.project}${g.enroll.entry ? ` since ${g.enroll.entry}` : ''}. Record today’s contact on it (Interim Review / Current Living Situation). If that isn’t a Street Outreach enrollment, create a Street Outreach entry instead.`,
+        done: 'interim review (contact) recorded' };
+    }
+    return { title: 'Create a Street Outreach entry in HMIS',
+      body: `Known to HMIS${g?.enroll ? ` — last enrollment ${g.enroll.project}, exited ${g.enroll.exit ?? '?'}` : ''}, no open enrollment. Open their existing record (HMIS ID below) and create a Street Outreach entry with today’s contact.`,
+      done: 'Street Outreach entry created' };
+  }
+
   async function saveOutcome() {
     if (!current || !sheet || busy) return;
-    if (!disp || (disp === 'Other' && !note.trim())) return;   // button is disabled anyway
+    if (!dispOk) return;   // button is disabled anyway
     setBusy(true);
     const kind = sheet, when = new Date().toISOString();
-    const noteText = disp === 'Other' ? note.trim() : [disp, note.trim()].filter(Boolean).join(' — ');
-    const dispo = disp;
+    const step = kind === 'contact' && current ? hmisStep(current) : null;
+    const picked = disps.filter((d) => d !== 'Other').join(' · ');
+    const noteText = [[picked, note.trim()].filter(Boolean).join(' — '),
+      step && hmisDone ? `HMIS: ${step.done}` : null].filter(Boolean).join(' · ');
+    const dispo = disps.join('; ');
     const confirmNow = kind === 'contact' && conf;
     const updated = applyLocal(current, kind, noteText, when, confirmNow);
     const gone = !['assigned', 'attempted', 'contacted'].includes(updated.status);
     setCases((cs) => cs.map((x) => (x.id === current.id ? updated : x)));
-    setSheet(null); setNote(''); setDisp('');
+    setSheet(null); setNote(''); setDisps([]);
     try {
       await send(current, kind, noteText, when, dispo, confirmNow);
       seen();
@@ -302,7 +332,9 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
   const sh = sheet ? SHEET_COPY[sheet] : null;
   return (
     <div className="fApp">
-      <style>{FIELD_CSS}</style>
+      {/* raw CSS: as a text child React escapes quotes (content:' · copied')
+          differently on server and client → hydration mismatch */}
+      <style dangerouslySetInnerHTML={{ __html: FIELD_CSS }} />
 
       <div className="ftop">
         {current ? (
@@ -435,10 +467,10 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
 
       {current && (
         <div className="factions">
-          <button className="fabtn fa-miss" disabled={busy} onClick={() => { setSheet('attempt'); setNote(''); setDisp(''); }}>
+          <button className="fabtn fa-miss" disabled={busy} onClick={() => { setSheet('attempt'); setNote(''); setDisps([]); }}>
             ✗ Couldn’t<br />locate</button>
-          <button className="fabtn fa-confirm" disabled={busy} onClick={() => { setSheet('contact'); setNote(''); setDisp(''); setConf(true); }}>
-            ✓ Made contact<small>confirms homeless · starts HMIS verification</small></button>
+          <button className="fabtn fa-confirm" disabled={busy} onClick={() => { setSheet('contact'); setNote(''); setDisps([]); setConf(true); setHmisDone(false); }}>
+            ✓ Made contact<small>confirms homeless</small></button>
         </div>
       )}
 
@@ -448,26 +480,67 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
           <div className="fsheet" role="dialog" aria-modal="true" aria-label={sh.t}>
             <h3>{sh.t}</h3>
             <div className="fsub2" style={{ marginBottom: 12 }}>{sh.s}</div>
-            <label className="fdlbl" htmlFor="fdisp">What happened? <span>required</span></label>
-            <select id="fdisp" className="fdisp" value={disp} autoFocus
-              onChange={(e) => { setDisp(e.target.value); setConf(!NOT_CONFIRMING_DISPOSITIONS.includes(e.target.value)); }}>
-              <option value="">Choose one…</option>
-              {sheet && FIELD_DISPOSITIONS[sheet].map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
+            <div className="fdlbl">What happened? <span>required · tap all that apply</span></div>
+            <div className="fchips" role="group" aria-label="What happened">
+              {sheet && FIELD_DISPOSITIONS[sheet].map((d) => {
+                const on = disps.includes(d);
+                return (
+                  <button key={d} type="button" aria-pressed={on} className={`fchipbtn${on ? ' on' : ''}`}
+                    onClick={() => {
+                      const next = on ? disps.filter((x) => x !== d) : [...disps, d];
+                      setDisps(next);
+                      setConf(!next.some((x) => NOT_CONFIRMING_DISPOSITIONS.includes(x)));
+                      if (!on && d.startsWith('Enrolled in HMIS')) setHmisDone(true);
+                    }}>{on ? '✓ ' : ''}{d}</button>
+                );
+              })}
+            </div>
+            {sheet === 'contact' && current && (() => {
+              const st = hmisStep(current);
+              const nm = [current.first_name, current.last_name].filter(Boolean).join(' ');
+              const rows: [string, string | null][] = [
+                ['Name', nm || null], ['DOB', current.dob], ['SSN-4', current.ssn4],
+                ['Phone', current.phone_callback || current.phone_line],
+                ['Location', [current.address, current.landmark].filter(Boolean).join(' · ') || current.area],
+                ['HMIS ID', current.matched_pid],
+              ];
+              return (
+                <div className="fhmis">
+                  <div className="fhmis-t">Next step in HMIS — {st.title}</div>
+                  <div className="fhmis-b">{st.body}</div>
+                  <div className="fhmis-g">
+                    {rows.filter(([, v]) => v).map(([k, v]) => (
+                      <button key={k} type="button" className="fhmis-row" title="Tap to copy"
+                        onClick={(e) => {
+                          navigator.clipboard?.writeText(String(v)).catch(() => {});
+                          const el = e.currentTarget; el.classList.add('copied');
+                          setTimeout(() => el.classList.remove('copied'), 1100);
+                        }}>
+                        <span>{k}</span><b>{v}</b>
+                      </button>
+                    ))}
+                  </div>
+                  <label className="fconf" style={{ margin: '8px 0 0' }}>
+                    <input type="checkbox" checked={hmisDone} onChange={(e) => setHmisDone(e.target.checked)} />
+                    <span>Done in HMIS <small>({st.done})</small></span>
+                  </label>
+                </div>
+              );
+            })()}
             {sheet === 'contact' && (
               <label className="fconf">
                 <input type="checkbox" checked={conf} onChange={(e) => setConf(e.target.checked)} />
-                <span>They’re homeless — <b>confirm</b> <small>(starts HMIS verification)</small></span>
+                <span>They’re homeless — <b>confirm</b></span>
               </label>
             )}
             <textarea value={note} onChange={(e) => setNote(e.target.value)}
-              placeholder={disp === 'Other' ? 'Required for “Other” — what happened?'
+              placeholder={disps.includes('Other') ? 'Required for “Other” — what happened?'
                 : 'Optional note — where you looked, what you saw…'} />
             <div className="fgps"><span className="dot" />Your location is stamped with this entry when available.</div>
             <div className="fsrow">
               <button className="fsbtn fs-cancel" onClick={() => setSheet(null)}>Cancel</button>
               <button className={`fsbtn fs-go ${sh.cls}`} onClick={saveOutcome}
-                disabled={busy || !disp || (disp === 'Other' && !note.trim())}>
+                disabled={busy || !dispOk}>
                 {busy ? 'Saving…' : sh.btn}</button>
             </div>
           </div>
@@ -480,11 +553,27 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
 }
 
 const FIELD_CSS = `
+  .fhmis{border:1px solid var(--fline); border-left:4px solid var(--fblue); border-radius:0 12px 12px 0;
+    padding:10px 12px; margin:0 0 12px; background:rgba(59,130,246,.07)}
+  .fhmis-t{font-weight:800; font-size:14.5px; color:var(--fink)}
+  .fhmis-b{font-size:13px; color:var(--fmut); margin-top:3px; line-height:1.45}
+  .fhmis-g{display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:8px}
+  .fhmis-row{display:flex; flex-direction:column; align-items:flex-start; gap:1px; text-align:left;
+    border:1px solid var(--fline); border-radius:9px; padding:6px 9px; background:var(--fcardc);
+    color:var(--fink); cursor:pointer; min-height:44px; overflow:hidden}
+  .fhmis-row span{font-size:11px; color:var(--fmut)}
+  .fhmis-row b{font-size:14px; font-weight:700; word-break:break-all}
+  .fhmis-row.copied{border-color:var(--fgreen)}
+  .fhmis-row.copied span::after{content:' · copied'; color:#27b47f}
   .fconf{display:flex; gap:10px; align-items:center; font-size:15px; color:var(--fink); margin:0 0 10px; min-height:44px}
   .fconf input{width:22px; height:22px}
   .fconf small{color:var(--fmut); font-size:12px}
   .fdlbl{display:block; font-size:13px; font-weight:700; color:var(--fink); margin:0 0 6px}
   .fdlbl span{color:var(--fred); font-weight:600; font-size:12px}
+  .fchips{display:flex; flex-wrap:wrap; gap:7px; margin:0 0 12px}
+  .fchipbtn{border:1px solid var(--fline); background:var(--fcardc); color:var(--fink); border-radius:999px;
+    padding:9px 13px; font-size:14px; font-weight:600; cursor:pointer; min-height:42px}
+  .fchipbtn.on{border-color:var(--fgreen); background:rgba(11,138,92,.16); color:#27b47f}
   .fdisp{width:100%; min-height:48px; font-size:16px; padding:10px 12px; border-radius:10px;
     border:1px solid var(--fline); background:var(--fcardc); color:var(--fink); margin-bottom:10px}
   .fApp{--fbg:var(--bg); --fcardc:var(--card); --fink:var(--text); --fmut:var(--muted);

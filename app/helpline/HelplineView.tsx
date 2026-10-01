@@ -212,7 +212,7 @@ export interface HmisGlance {
 export default function HelplineView({ me, isAdmin, cases, teams, events = {}, callsByCase = {}, callLog = [], hmis = {}, mergedFrom = {}, sqlMissing }: {
   me: string; isAdmin: boolean; cases: HlCase[]; teams: Team[];
   /** outreach trail per open case: chronological attempt/contact events */
-  events?: Record<number, { at: string; kind: string }[]>;
+  events?: Record<number, TrailEv[]>;
   /** phone calls received per case (initial + repeat) — the VOLUME record */
   callsByCase?: Record<number, number>;
   /** every phone call's timestamp+kind — demand patterns (day × hour) */
@@ -834,7 +834,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
             fixed column widths so every team's rows line up; teams are band rows. */}
         {working.length > 0 && (
         <div className="scroll"><table className="bnl-table hl-rows hl-board hl-cards">
-          <colgroup><col /><col style={{ width: 140 }} /><col style={{ width: 170 }} /><col style={{ width: 400 }} /></colgroup>
+          <colgroup><col /><col style={{ width: 140 }} /><col style={{ width: 250 }} /><col style={{ width: 380 }} /></colgroup>
           <thead><tr><th>Case</th><th>Status</th><th>Outreach trail</th>
             <th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
           <tbody>
@@ -1145,23 +1145,55 @@ function FragmentRow({ left, children, band }: { left: React.ReactNode; children
 
 /** Chronological ✗/✓ trail — answers "which try succeeded", not just how
  *  many. Falls back to the counters for cases logged before events existed. */
-function Trail({ events, c }: { events?: { at: string; kind: string }[]; c: HlCase }) {
+export type TrailEv = { at: string; kind: string; notes?: string | null; by?: string | null };
+
+function Trail({ events, c }: { events?: TrailEv[]; c: HlCase }) {
   const fmt = (iso: string) => {
     const d = new Date(iso);
     return `${d.getMonth() + 1}/${d.getDate()}`;
   };
+  const stamp = (iso: string) => new Date(iso).toLocaleString(undefined,
+    { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  // the field app appends "📍 lat, lng (±m)" — keep it for the tooltip, not the line
+  const clean = (n?: string | null) => (n ?? '').replace(/\s*·?\s*📍[^·]*$/, '').trim();
+  const tip = (e: TrailEv, i: number) => [
+    `${e.kind === 'contact' ? 'Contacted' : 'Contact attempt — failed'} (#${i + 1}) · ${stamp(e.at)}`,
+    e.by ? `by ${e.by}` : null,
+    e.notes ? e.notes : null,
+  ].filter(Boolean).join('\n');
   if (events?.length) {
+    const last = events[events.length - 1];
+    const nA = events.filter((e) => e.kind !== 'contact').length;
+    const nC = events.length - nA;
+    const what = clean(last.notes);
+    const earlier = events.slice(0, -1);
     return (
-      <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 5 }}>
-        {events.map((e, i) => (
-          <span key={i} className="bnl-fp" style={e.kind === 'contact'
-            ? { background: 'var(--accent-light)', color: 'var(--accent)' }
-            : { background: 'var(--danger-light)', color: 'var(--danger)' }}
-            title={e.kind === 'contact' ? `Successful contact — try #${i + 1}` : `Failed attempt #${i + 1}`}>
-            {e.kind === 'contact' ? '✓' : '✗'} {fmt(e.at)}
-          </span>
-        ))}
-      </span>
+      <div>
+        <div style={{ lineHeight: 1.45 }} title={tip(last, events.length - 1)}>
+          <b style={{ color: last.kind === 'contact' ? 'var(--accent)' : 'var(--danger)', fontSize: 12.5 }}>
+            {last.kind === 'contact' ? '✓ Contacted' : '✗ Not reached'} · {stamp(last.at)}</b>
+          <div className="bnl-sub">
+            {last.by && <>{last.by}</>}
+            {what && <>{last.by ? ' — ' : ''}<span style={{ color: 'var(--text)' }}>{what.length > 90 ? `${what.slice(0, 90)}…` : what}</span></>}
+          </div>
+        </div>
+        {earlier.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', marginTop: 4 }}>
+            <span className="bnl-sub" style={{ fontSize: 11 }}>earlier</span>
+            {earlier.map((e, i) => (
+              <span key={i} className="bnl-fp" style={e.kind === 'contact'
+                ? { background: 'var(--accent-light)', color: 'var(--accent)' }
+                : { background: 'var(--danger-light)', color: 'var(--danger)' }}
+                title={tip(e, i)}>
+                {e.kind === 'contact' ? '✓' : '✗'} {fmt(e.at)}
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="bnl-sub" style={{ fontSize: 11, marginTop: 2 }}>
+          {nA} attempt{nA === 1 ? '' : 's'} · {nC} contact{nC === 1 ? '' : 's'}
+        </div>
+      </div>
     );
   }
   // Pre-events fallback: this case was worked before per-try tracking, so

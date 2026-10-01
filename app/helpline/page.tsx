@@ -55,16 +55,34 @@ export default async function HelplinePage() {
   // Outreach trail (every ✗/✓ with its date) for ALL loaded cases — the board
   // shows it on open cases, the All-cases list on finished ones.
   const ids = allCases.map((c) => c.id);
-  const events: Record<number, { at: string; kind: string }[]> = {};
+  // (2026-10-01: + notes and WHO went out — the trail shows the latest
+  // outcome in words, every chip has the detail on hover.)
+  const events: Record<number, { at: string; kind: string; notes?: string | null; by?: string | null }[]> = {};
   if (ids.length) {
     const { data } = await sb.from('helpline_calls')
-      .select('case_id, received_at, kind')
+      .select('case_id, received_at, kind, notes, operator')
       .in('case_id', ids)
       .in('kind', ['attempt', 'contact'])
       .order('received_at', { ascending: true })
       .limit(4000);
-    for (const e of (data ?? []) as { case_id: number; received_at: string; kind: string }[]) {
-      (events[home(e.case_id)] ??= []).push({ at: e.received_at, kind: e.kind });
+    const rows = (data ?? []) as { case_id: number; received_at: string; kind: string; notes: string | null; operator: string | null }[];
+    // operator → display name. Service role on purpose (profiles RLS lets a
+    // user read only their own row); only names of staff who logged outreach
+    // on these cases leave the table. canSeeHelpline above is the boundary.
+    const names = new Map<string, string>();
+    const ops = [...new Set(rows.map((r) => r.operator).filter(Boolean))] as string[];
+    if (ops.length) {
+      try {
+        const { data: ps } = await supabaseAdmin().from('profiles')
+          .select('id, display_name, email').in('id', ops);
+        for (const p of (ps ?? []) as { id: string; display_name: string | null; email: string | null }[]) {
+          names.set(p.id, p.display_name || (p.email ?? '').split('@')[0] || 'staff');
+        }
+      } catch { /* names are a convenience */ }
+    }
+    for (const e of rows) {
+      (events[home(e.case_id)] ??= []).push({ at: e.received_at, kind: e.kind, notes: e.notes,
+        by: e.operator ? names.get(e.operator) ?? null : null });
     }
   }
 
