@@ -134,6 +134,43 @@ export function agingPts(createdAtIso: string, rules: PriorityRules = DEFAULT_RU
  *  stays one click, and a successful contact at any point disarms the rule. */
 export const MAX_FAILED_ATTEMPTS = 3;
 
+/** Field-app outcome dispositions (user 2026-10-01: "outreach can say what
+ *  happened, e.g. contacted but no bed available"). Required on every field
+ *  outcome; the label leads the trail note (visible everywhere) and is also
+ *  stored in helpline_calls.disposition for reporting (helpline_disposition.sql).
+ *  'Other' requires a note. Reword freely — stored values are these labels. */
+export const FIELD_DISPOSITIONS = {
+  attempt: [
+    'Not at the location',
+    'Location not found / wrong address',
+    'Area unsafe — couldn’t go in',
+    'Private property — no access',
+    'Seen leaving — moved on',
+    'Other',
+  ],
+  contact: [
+    'No bed available',
+    'Accepted shelter — placed',
+    'Declined services',
+    'Referred to services / another provider',
+    'Already connected to a provider',
+    'Not homeless / has housing',
+    'Medical — EMS called',
+    'Assessed / referred to housing (CE)',
+    'Needs a follow-up visit',
+    'Other',
+  ],
+  confirm: [
+    'Placed in shelter',
+    'On the street — engaged, waiting for a bed',
+    'Assessed / referred to housing (CE)',
+    'Other',
+  ],
+} as const;
+/** contact outcomes that do NOT confirm the person as homeless — the field
+ *  app's "They're homeless — confirm" box switches off for these */
+export const NOT_CONFIRMING_DISPOSITIONS: readonly string[] = ['Not homeless / has housing'];
+
 export const CASE_STATUSES = [
   'new', 'assigned', 'attempted', 'contacted', 'confirmed',
   'declined', 'no_locate', 'closed', 'referred_out',

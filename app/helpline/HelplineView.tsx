@@ -3,24 +3,26 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { supabaseBrowser } from '../../../lib/supabase-browser';
-import { fmtInt } from '../../../lib/format';
-import CaseMap from '../../../components/CaseMap';
+import { supabaseBrowser } from '../../lib/supabase-browser';
+import { fmtInt } from '../../lib/format';
+import CaseMap from '../../components/CaseMap';
 import ReportMap from './ReportMap';
 import { AREAS, COUNTY_ZONES, DEFAULT_RULES, EMERGENCY_SLEEPING, FACTORS, HOUSEHOLD_OPTIONS,
   MAX_FAILED_ATTEMPTS, SLEEPING_OPTIONS, agingPts, priorityBand, priorityOf, suggestTeam,
-  type CaseStatus, type PriorityRules } from '../../../lib/helpline-options';
-import { fetchPriorityRules, invalidatePriorityRules } from '../../../lib/priority-rules';
-import { inFeature, project, type GeoFC } from '../../../lib/slippy';
-import { fetchCustomAreas } from '../../../lib/custom-areas';
-import ReferOut, { type ReferralResource } from '../../../components/ReferOut';
-import { CopyId } from '../analytics/shared';
-import QrShare from '../../../components/QrShare';
-import { TeamMenu, TeamMultiSelect, type TeamOpt } from '../../../components/TeamMenu';
-import { IconPrinter, IconDownload, IconSmartphone, IconSearch, IconMapPin, IconHome } from '../../../components/icons';
+  type CaseStatus, type PriorityRules } from '../../lib/helpline-options';
+import { fetchPriorityRules, invalidatePriorityRules } from '../../lib/priority-rules';
+import { inFeature, project, type GeoFC } from '../../lib/slippy';
+import { fetchCustomAreas } from '../../lib/custom-areas';
+import ReferOut, { type ReferralResource } from '../../components/ReferOut';
+import { CopyId } from '../dashboard/analytics/shared';
+import QrShare from '../../components/QrShare';
+import { TeamMenu, TeamMultiSelect, type TeamOpt } from '../../components/TeamMenu';
+import { IconPrinter, IconDownload, IconSmartphone, IconSearch, IconMapPin, IconHome } from '../../components/icons';
 
 export interface HlCase {
   id: number;
+  /** set when merged into another case (helpline_merge.sql) */
+  merged_into?: number | null;
   created_at: string;
   status: CaseStatus;
   first_name: string | null;
@@ -207,7 +209,7 @@ export interface HmisGlance {
   housedNote: string | null; housedOpen: boolean;
 }
 
-export default function HelplineView({ me, isAdmin, cases, teams, events = {}, callsByCase = {}, callLog = [], hmis = {}, sqlMissing }: {
+export default function HelplineView({ me, isAdmin, cases, teams, events = {}, callsByCase = {}, callLog = [], hmis = {}, mergedFrom = {}, sqlMissing }: {
   me: string; isAdmin: boolean; cases: HlCase[]; teams: Team[];
   /** outreach trail per open case: chronological attempt/contact events */
   events?: Record<number, { at: string; kind: string }[]>;
@@ -217,6 +219,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
   callLog?: { at: string; kind: string }[];
   /** minimal BNL snapshot per MATCHED pid — the on-row HMIS glance */
   hmis?: Record<string, HmisGlance>;
+  /** survivor case id → case ids merged into it (their logs show in its drawer) */
+  mergedFrom?: Record<number, number[]>;
   sqlMissing: boolean;
 }) {
   const router = useRouter();
@@ -525,12 +529,12 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
           style={{ background: 'none', border: 'none', padding: 0, font: 'inherit',
             cursor: 'pointer', textDecoration: 'underline',
             textUnderlineOffset: 3, color: 'var(--strong)' }}>{nameOf(c)}</button>{' '}
-        <b style={{ color: bandColor(band), fontSize: 11 }}
-          title={e ? `${e.base} pts at intake${e.aging ? ` · +${e.aging} for waiting` : ''}${e.extra ? ` · +${e.extra} event/repeat boost` : ''}` : undefined}>
-          {band}</b>
+        <b style={{ color: bandColor(band), fontSize: 11, whiteSpace: 'nowrap' }}
+          title={e ? `${e.base} pts at intake${e.aging ? ` · +${e.aging} for waiting` : ''}${e.extra ? ` · +${e.extra} event/repeat boost` : ''}` : `${c.priority} pts at intake`}>
+          {band} · {e ? e.pts : c.priority} pts</b>
         {e && (e.aging > 0 || e.extra > 0) && (
           <span className="bnl-sub" title="Waiting-time and event boosts — transparent math, hover the band">
-            {' '}+{e.aging + e.extra}</span>
+            {' '}(incl. +{e.aging + e.extra})</span>
         )}
         <div className="bnl-sub" style={{ lineHeight: 1.6 }}>
           {c.area ?? 'area unknown'}{c.county_district ? ` · ${c.county_district}` : ''}{c.address ? ` · ${c.address}` : ''}{c.landmark ? ` · ${c.landmark}` : ''}
@@ -729,7 +733,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
           ))}
         </div>
         <span style={{ flex: 1 }} />
-        <Link className="btn primary pill" href="/dashboard/helpline/new">{PHONE_ICON} New call</Link>
+        <Link className="btn primary pill" href="/helpline/new">{PHONE_ICON} New call</Link>
       </div>
 
       {shownTab === 'queue' && (
@@ -762,7 +766,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
           ) : null;
         })()}
         {triage.length > 0 && (
-          <div className="scroll"><table className="bnl-table hl-rows">
+          <div className="scroll"><table className="bnl-table hl-rows hl-cards">
             <thead><tr><th>Called</th><th>Caller</th><th>HMIS</th><th style={{ textAlign: 'right' }}>Assignment</th></tr></thead>
             <tbody>
               {[...triage.map((c) => ({ c, e: eff(c) }))]
@@ -777,7 +781,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                 const hrs = hoursSince(c.created_at);
                 const late = pastTarget(c);
                 return (
-                <FragmentRow key={c.id} left={<>{when(c.created_at)}
+                <FragmentRow key={c.id} band={e.band} left={<>{when(c.created_at)}
                   <div className="bnl-sub" style={late ? { color: 'var(--danger)', fontWeight: 700 } : undefined}
                     title={late ? `No contact attempt yet — past the ${rules.slaHours}h target` : undefined}>
                     {fmtHours(hrs)} ago{late ? ' ⚠' : ''}</div></>}>
@@ -829,7 +833,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
         {/* ONE table for every team (2026-09-25 redesign): a single header and
             fixed column widths so every team's rows line up; teams are band rows. */}
         {working.length > 0 && (
-        <div className="scroll"><table className="bnl-table hl-rows hl-board">
+        <div className="scroll"><table className="bnl-table hl-rows hl-board hl-cards">
           <colgroup><col /><col style={{ width: 140 }} /><col style={{ width: 170 }} /><col style={{ width: 400 }} /></colgroup>
           <thead><tr><th>Case</th><th>Status</th><th>Outreach trail</th>
             <th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
@@ -849,7 +853,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
             </td></tr>
                 {working.filter((c) => c.team_id === team.id).map((c) => (
                   <FragmentZoneRow key={c.id}>
-                  <tr style={{ cursor: 'default' }}>
+                  <tr className="hl-case" style={{ cursor: 'default', ['--band-c' as string]: bandColor(priorityBand(c.priority, rules)) }}>
                     <CaseCell c={c} />
                     <td style={{ whiteSpace: 'nowrap' }}><ChipDated c={c} />
                       {pastTarget(c) && (
@@ -884,22 +888,12 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                               onClick={() => setMapId(mapId === c.id ? null : c.id)}>
                               {mapId === c.id ? 'Hide map' : <><IconMapPin size={11} /> Map</>}</button>
                           )}
-                          <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank"
+                          <Link className="tbtn" href={`/helpline/print/${c.id}`} target="_blank"
                             title="One-page dispatch sheet — print or save as PDF for the field team"><IconPrinter size={11} /> Sheet</Link>
                         </div>
-                        <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                          <button className="opill no" disabled={busy}
-                            title={`Went out, couldn't reach them — bumps the tried counter. ${MAX_FAILED_ATTEMPTS} failed tries with no successful contact auto-closes the case as could-not-locate.`}
-                            onClick={() => logAttempt(c)}>
-                            ✗ No contact{(c.contacts ?? 0) === 0 && c.attempts === MAX_FAILED_ATTEMPTS - 1 ? ' (final)' : ''}</button>
-                          <button className="opill yes" disabled={busy}
-                            title="Reached them — bumps the contacted counter; failed tries never erase this"
-                            onClick={() => logContact(c)}>✓ Contacted</button>
-                          <button className="opill home" disabled={busy}
-                            title="Outreach verified this person is homeless — starts the enrollment-verification clock"
-                            onClick={() => update(c.id, { status: 'confirmed', confirmed_at: new Date().toISOString().slice(0, 10) })}>
-                            <IconHome size={12} /> Confirmed</button>
-                        </div>
+                        {/* No contact / Contacted / Confirmed removed from the team board
+                            (user 2026-10-01): street outreach records outcomes — with a
+                            disposition — in the field app; the trail here still shows them. */}
                         <button className="linkbtn" disabled={busy}
                           title="FINAL — closes the case and removes it from this board. “Couldn't find them today” is Log attempt, not this."
                           onClick={() => {
@@ -914,14 +908,14 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                     </td>
                   </tr>
                   {openId === c.id && !c.matched_pid ? (
-                    <tr style={{ cursor: 'default' }}>
+                    <tr className="hl-extra" style={{ cursor: 'default' }}>
                       <td colSpan={4} style={{ background: 'var(--rowhover)' }}>
                         <MatchPanel c={c} />
                       </td>
                     </tr>
                   ) : null}
                   {mapId === c.id ? (
-                    <tr style={{ cursor: 'default' }}>
+                    <tr className="hl-extra" style={{ cursor: 'default' }}>
                       <td colSpan={4} style={{ background: 'var(--rowhover)' }}>
                         <div style={{ padding: '8px 6px 14px' }}>
                           <div style={{ marginBottom: 8, fontSize: 13 }}>
@@ -1003,7 +997,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
               <option value="gap">⚠ Enrollment gap</option>
             </select></div>
         </div>
-        <div className="scroll"><table className="bnl-table hl-rows">
+        <div className="scroll"><table className="bnl-table hl-rows hl-zebra">
           <thead><tr>
             {([['name', 'Caller'], ['called', 'Called'], ['team', 'Team'], ['status', 'Status'],
                ['trail', 'Outreach trail'], ['enroll', 'Enrollment']] as const).map(([k, lbl]) => (
@@ -1041,7 +1035,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                   || (fEnroll === 'gap' && c.status === 'confirmed' && !c.verified_entry))
                 .sort((a, b) => sortDir === 'asc' ? cmp(a, b) : cmp(b, a));
             })().map((c) => (
-              <tr key={c.id} style={{ cursor: 'default' }}>
+              <tr key={c.id} className="hl-case" style={{ cursor: 'default', ['--band-c' as string]: bandColor(priorityBand(c.priority, rules)) }}>
                 <CaseCell c={c} />
                 <td style={{ whiteSpace: 'nowrap' }}>{when(c.created_at)}</td>
                 <td>{c.team_id != null ? (teamById.get(c.team_id)?.name ?? '?') : '—'}</td>
@@ -1064,7 +1058,7 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
                           not enrolled · {c.confirmed_at ? `${Math.floor((Date.now() - new Date(c.confirmed_at).getTime()) / 86_400_000)}d` : '?'}</span>}
                 </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank"><IconPrinter size={11} /> Sheet</Link>
+                  <Link className="tbtn" href={`/helpline/print/${c.id}`} target="_blank"><IconPrinter size={11} /> Sheet</Link>
                   {c.matched_pid && (
                     <Link className="tbtn" style={{ marginLeft: 6 }}
                       href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}>BNL →</Link>
@@ -1098,7 +1092,8 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
       {drawerC && (
         <CaseDrawer c={cases.find((x) => x.id === drawerC.id) ?? drawerC}
           teamName={drawerC.team_id != null ? (teamById.get(drawerC.team_id)?.name ?? null) : null}
-          events={events[drawerC.id]} me={me} onClose={() => setDrawerC(null)} />
+          events={events[drawerC.id]} me={me} onClose={() => setDrawerC(null)}
+          mergedIds={mergedFrom[drawerC.id] ?? []} />
       )}
 
       {referFor && (
@@ -1129,18 +1124,18 @@ export default function HelplineView({ me, isAdmin, cases, teams, events = {}, c
 }
 
 /** Renders a case row spanning the standard cells + optional expansion row. */
-function FragmentRow({ left, children }: { left: React.ReactNode; children: React.ReactNode[] | React.ReactNode }) {
+function FragmentRow({ left, children, band }: { left: React.ReactNode; children: React.ReactNode[] | React.ReactNode; band?: string }) {
   const kids = Array.isArray(children) ? children : [children];
   const cells = kids.slice(0, 3);
   const expand = kids[3] ?? null;
   return (
     <>
-      <tr style={{ cursor: 'default' }}>
+      <tr className="hl-case" style={{ cursor: 'default', ['--band-c' as string]: bandColor(band ?? 'LOW') }}>
         <td style={{ whiteSpace: 'nowrap' }}>{left}</td>
         {cells}
       </tr>
       {expand ? (
-        <tr style={{ cursor: 'default' }}>
+        <tr className="hl-extra" style={{ cursor: 'default' }}>
           <td colSpan={4} style={{ background: 'var(--rowhover)' }}>{expand}</td>
         </tr>
       ) : null}
@@ -2199,7 +2194,7 @@ function Reporting({ cases: allCases, teams, events, callsByCase = {}, callLog =
               )}
             </span>
           )}
-          <Link href="/dashboard/helpline/report" className="tbtn"
+          <Link href="/helpline/report" className="tbtn"
             title="Board-ready monthly report — print or save as PDF"><IconPrinter size={11} /> Monthly report</Link>
           <button className="tbtn" onClick={downloadCsv}><IconDownload size={11} /> CSV</button>
         </div>
@@ -2818,26 +2813,28 @@ function FragmentZoneRow({ children }: { children: React.ReactNode }) {
  * verification, and the full call log with an append-only note composer
  * (notes are immutable helpline_calls events, same rule as BNL notes).
  */
-function CaseDrawer({ c, teamName, events, me, onClose }: {
+function CaseDrawer({ c, teamName, events, me, onClose, mergedIds = [] }: {
   c: HlCase; teamName: string | null;
+  mergedIds?: number[];
   events?: { at: string; kind: string }[];
   me: string; onClose: () => void;
 }) {
-  const [log, setLog] = useState<{ received_at: string; kind: string; notes: string | null }[] | null>(null);
+  const [log, setLog] = useState<{ case_id: number; received_at: string; kind: string; notes: string | null }[] | null>(null);
+  const [openGroups, setOpenGroups] = useState<Set<number>>(new Set());
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function load() {
     const { data } = await supabaseBrowser().from('helpline_calls')
-      .select('received_at, kind, notes')
-      .eq('case_id', c.id)
+      .select('case_id, received_at, kind, notes')
+      .in('case_id', [c.id, ...mergedIds])
       .order('received_at', { ascending: false })
-      .limit(50);
+      .limit(100);
     setLog((data ?? []) as any);
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setLog(null); load(); }, [c.id]);
+  useEffect(() => { setLog(null); setOpenGroups(new Set()); load(); }, [c.id, mergedIds.join(',')]);
 
   async function addNote() {
     const text = body.trim();
@@ -2854,6 +2851,37 @@ function CaseDrawer({ c, teamName, events, me, onClose }: {
   const band = priorityBand(c.priority);
   const stamp = (iso: string) => new Date(iso).toLocaleString(undefined,
     { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  // Repeat calls that added nothing collapse into one line (user 2026-10-01):
+  // the legacy "No new information given." and the new "Same info, calling
+  // again" — only when no location/number update rode along.
+  const isSame = (k: { kind: string; notes: string | null }) => k.kind === 'repeat'
+    && /(No new information given\.?|Same info, calling again)\s*$/.test(k.notes ?? '')
+    && !/location now:|different number/.test(k.notes ?? '');
+  const logGroups: { kind: 'same' | 'one'; rows: NonNullable<typeof log> }[] = [];
+  for (const k of log ?? []) {
+    const last = logGroups[logGroups.length - 1];
+    if (isSame(k) && last?.kind === 'same') last.rows.push(k);
+    else logGroups.push({ kind: isSame(k) ? 'same' : 'one', rows: [k] });
+  }
+  const calls = (log ?? []).filter((k) => k.kind === 'initial' || k.kind === 'repeat');
+  // Log entry look (user 2026-10-01: "make failed attempts and the initial
+  // call more apparent; contacted text + checkmark gets lost") — colored
+  // left edge + a labeled badge per kind.
+  const logStyle = (k: { kind: string; notes: string | null }): { label: string; color: string; solid?: boolean } => {
+    const n = k.notes ?? '';
+    if (/CONFIRMED homeless|Confirmed homeless\.?/.test(n)) return { label: '🏠 Confirmed homeless', color: 'var(--accent)', solid: true };
+    switch (k.kind) {
+      case 'initial': return { label: '☎ Initial call', color: 'var(--primary)' };
+      case 'repeat': return { label: '☎ Called again', color: 'var(--primary)' };
+      case 'attempt': return { label: '✗ Contact attempt — failed', color: 'var(--danger)' };
+      case 'contact': return { label: '✓ Contacted', color: 'var(--accent)' };
+      default: return /merged|duplicate/i.test(n)
+        ? { label: '⇄ Merge', color: 'var(--info)' }
+        : /closed|REOPENED|BACK TO OUTREACH|Referred out/i.test(n)
+        ? { label: '● Status change', color: 'var(--warn)' }
+        : { label: '📝 Note', color: 'var(--faint)' };
+    }
+  };
   const KIND_LBL: Record<string, string> = {
     initial: '☎ initial call', repeat: '☎ repeat call', followup: '📝 note',
     attempt: '✗ contact attempt (failed)', contact: '✓ contacted',
@@ -2874,10 +2902,12 @@ function CaseDrawer({ c, teamName, events, me, onClose }: {
           <b style={{ color: bandColor(band), fontSize: 13 }}>{band}</b></h3>
         <div style={{ margin: '4px 0 10px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <ChipDated c={c} />
-          <span className="bnl-sub">called {stamp(c.created_at)}</span>
+          <span className="bnl-sub">called {stamp(c.created_at)}
+            {calls.length > 1 && <> · <b style={{ color: 'var(--text)' }}>called {calls.length}×</b> · last {stamp(calls[0].received_at)}</>}
+            {mergedIds.length > 0 && <> · merged from {mergedIds.map((i) => `#${i}`).join(', ')}</>}</span>
           {teamName && <span className="bnl-fp bnl-fp-par">{teamName}</span>}
           <span style={{ flex: 1 }} />
-          <Link className="tbtn" href={`/dashboard/helpline/print/${c.id}`} target="_blank"><IconPrinter size={11} /> Sheet</Link>
+          <Link className="tbtn" href={`/helpline/print/${c.id}`} target="_blank"><IconPrinter size={11} /> Sheet</Link>
           {c.matched_pid && (
             <Link className="tbtn" href={`/dashboard/bnl?pid=${encodeURIComponent(c.matched_pid)}`}>BNL →</Link>
           )}
@@ -2941,12 +2971,26 @@ function CaseDrawer({ c, teamName, events, me, onClose }: {
           </div>
           <div style={{ maxHeight: 260, overflowY: 'auto' }}>
             {log === null && <div className="bnl-sub">Loading log…</div>}
-            {log?.map((k, i) => (
-              <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--hair)' }}>
-                <span className="bnl-sub">{stamp(k.received_at)} · {KIND_LBL[k.kind] ?? k.kind}</span>
-                {k.notes && <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{k.notes}</div>}
+            {logGroups.map((g, gi) => g.kind === 'same' && g.rows.length > 1 && !openGroups.has(gi) ? (
+              <div key={gi} style={{ padding: '6px 0', borderBottom: '1px solid var(--hair)' }}>
+                <span className="bnl-sub">☎ Called again ×{g.rows.length} — {g.rows.map((r) => stamp(r.received_at)).reverse().join(', ')}
+                  {' '}(no new information)</span>{' '}
+                <button type="button" className="tbtn" style={{ padding: '1px 8px', fontSize: 11 }}
+                  onClick={() => setOpenGroups((p) => new Set(p).add(gi))}>show</button>
               </div>
-            ))}
+            ) : g.rows.map((k, i) => {
+              const ls = logStyle(k);
+              return (
+                <div key={`${gi}-${i}`} className="hl-log" style={{ ['--lc' as string]: ls.color }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span className={`hl-log-tag${ls.solid ? ' solid' : ''}`}>{ls.label}</span>
+                    <span className="bnl-sub">{stamp(k.received_at)}</span>
+                    {k.case_id !== c.id && <span className="bnl-fp">from merged #{k.case_id}</span>}
+                  </div>
+                  {k.notes && <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', marginTop: 3 }}>{k.notes}</div>}
+                </div>
+              );
+            }))}
             {log?.length === 0 && <div className="bnl-sub">No log entries yet.</div>}
           </div>
         </div>

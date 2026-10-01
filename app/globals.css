@@ -500,6 +500,24 @@ td .dqsub{font-size:10px;color:var(--faint);font-weight:400}
    as one blur (user report 2026-08-25) — stronger separator + breathing room. */
 .hl-rows td{border-bottom:1px solid var(--border-strong);padding-top:12px;padding-bottom:12px}
 .hl-rows tbody tr:last-child td{border-bottom:0}
+/* Case separation (user 2026-10-01): Call queue + Team board render every
+   case as its own card (gap between rows, rounded, priority stripe on the
+   left — red HIGH · amber MED · gray LOW via --band-c); All cases keeps a
+   dense table with the same stripe plus alternating shade. */
+.hl-cards{border-collapse:separate;border-spacing:0 8px;margin:-4px 14px 6px;width:calc(100% - 28px)}
+.hl-cards thead th{border-bottom:0}
+.hl-cards tbody tr.hl-case>td{background:var(--card);border-top:1px solid var(--border-strong);border-bottom:1px solid var(--border-strong)}
+.hl-cards tbody tr.hl-case>td:first-child{border-left:4px solid var(--band-c,var(--faint));border-radius:12px 0 0 12px}
+.hl-cards tbody tr.hl-case>td:last-child{border-right:1px solid var(--border-strong);border-radius:0 12px 12px 0}
+.hl-cards tbody tr.hl-case:hover>td{background:var(--rowhover)}
+.hl-cards tbody tr.hl-extra>td{border:1px solid var(--border-strong);border-radius:12px}
+.hl-cards tbody tr.hl-grp>td{background:none!important;border:0!important;padding:14px 4px 0}
+.hl-zebra tbody tr.hl-case>td:first-child{box-shadow:inset 4px 0 0 var(--band-c,var(--faint))}
+.hl-zebra tbody tr.hl-case:nth-child(even)>td{background:var(--rowhover)}
+/* case-window log entries: colored edge + labeled badge per kind (--lc) */
+.hl-log{padding:8px 10px;margin:0 0 6px;border-left:4px solid var(--lc);border-radius:0 8px 8px 0;background:var(--rowhover)}
+.hl-log-tag{font-size:11.5px;font-weight:700;color:var(--lc);border:1px solid var(--lc);border-radius:999px;padding:1px 9px;white-space:nowrap}
+.hl-log-tag.solid{background:var(--lc);color:#fff}
 .bnl-nm{font-weight:600;color:var(--strong)} .bnl-sub{font-size:11px;color:var(--muted)}
 .bnl-chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:700;white-space:nowrap;line-height:1.4}
 .bnl-chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}

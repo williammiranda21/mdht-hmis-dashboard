@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '../../lib/supabase-browser';
-import { MAX_FAILED_ATTEMPTS, priorityBand } from '../../lib/helpline-options';
-import type { HlCase } from '../dashboard/helpline/HelplineView';
+import { FIELD_DISPOSITIONS, MAX_FAILED_ATTEMPTS, NOT_CONFIRMING_DISPOSITIONS, priorityBand } from '../../lib/helpline-options';
+import type { HlCase } from '../helpline/HelplineView';
 import QrShare from '../../components/QrShare';
 import { IconCompass, IconHome } from '../../components/icons';
 
@@ -24,7 +24,10 @@ import { IconCompass, IconHome } from '../../components/icons';
 
 type Ev = { at: string; kind: string; notes: string | null };
 type Outcome = 'attempt' | 'contact' | 'confirm';
-type QItem = { caseId: number; kind: Outcome; note: string; when: string };
+/** conf = this contact also confirms them homeless (one action, one log entry —
+ *  user 2026-10-01). 'confirm' stays in Outcome only for items queued offline
+ *  before the change. */
+type QItem = { caseId: number; kind: Outcome; note: string; when: string; disp?: string; conf?: boolean };
 
 const QKEY = 'hl-field-queue';
 function readQ(): QItem[] {
@@ -61,7 +64,7 @@ function getGps(): Promise<string | null> {
 
 const SHEET_COPY: Record<Outcome, { t: string; s: string; btn: string; cls: string }> = {
   attempt: { t: '✗ Couldn’t locate', s: 'Logs a failed attempt with today’s date — dispatch sees it immediately.', btn: 'Log attempt', cls: 'red' },
-  contact: { t: '✓ Made contact', s: 'Logs a successful contact on the outreach trail.', btn: 'Log contact', cls: '' },
+  contact: { t: '✓ Made contact', s: 'Logs the contact on the outreach trail — and, when they’re homeless, confirms them in the same step (starts HMIS verification).', btn: 'Save contact', cls: 'green' },
   confirm: { t: 'Confirmed homeless', s: 'Marks the case confirmed in the field. The system then watches HMIS for the enrollment to verify it.', btn: 'Confirm', cls: 'green' },
 };
 
@@ -83,6 +86,9 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
   const [openId, setOpenId] = useState<number | null>(null);
   const [sheet, setSheet] = useState<Outcome | null>(null);
   const [note, setNote] = useState('');
+  // what happened (required) — see FIELD_DISPOSITIONS
+  const [disp, setDisp] = useState('');
+  const [conf, setConf] = useState(true);
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -145,15 +151,24 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
 
   /** The board's exact write set for one outcome. Throws on failure so the
    *  caller can queue it. */
-  async function send(c: HlCase, kind: Outcome, noteText: string, when: string) {
+  async function send(c: HlCase, kind: Outcome, noteText: string, when: string, disposition?: string, confirm = false) {
     const gps = await getGps();
+    // insert a trail event; the disposition column is optional (SQL may not
+    // have run yet) — on a missing-column error retry without it
+    const logEv = async (row: Record<string, unknown>) => {
+      const r = await db().from('helpline_calls').insert(disposition ? { ...row, disposition } : row);
+      if (r.error && disposition && /disposition|PGRST204|42703|schema cache/i.test(r.error.message)) {
+        return db().from('helpline_calls').insert(row);
+      }
+      return r;
+    };
     const evNote = [noteText, gps].filter(Boolean).join(' · ') || null;
     const day = when.slice(0, 10);
     if (kind === 'attempt') {
       const attempts = c.attempts + 1;
       const strikeOut = attempts >= MAX_FAILED_ATTEMPTS && (c.contacts ?? 0) === 0
         && ['assigned', 'attempted'].includes(c.status);
-      const ev = await db().from('helpline_calls').insert({ case_id: c.id, operator: me, kind: 'attempt', notes: evNote });
+      const ev = await logEv({ case_id: c.id, operator: me, kind: 'attempt', notes: evNote });
       if (ev.error) throw ev.error;
       if (strikeOut) {
         await db().from('helpline_calls').insert({
@@ -171,18 +186,20 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
       return strikeOut;
     }
     if (kind === 'contact') {
-      const ev = await db().from('helpline_calls').insert({ case_id: c.id, operator: me, kind: 'contact', notes: evNote });
+      const ev = await logEv({ case_id: c.id, operator: me, kind: 'contact',
+        notes: [evNote, confirm ? 'Confirmed homeless.' : null].filter(Boolean).join(' · ') || null });
       if (ev.error) throw ev.error;
       const up = await db().from('helpline_cases').update({
-        status: ['assigned', 'attempted'].includes(c.status) ? 'contacted' : c.status,
+        status: confirm ? 'confirmed' : ['assigned', 'attempted'].includes(c.status) ? 'contacted' : c.status,
         contacts: (c.contacts ?? 0) + 1, last_contact: day,
+        ...(confirm ? { confirmed_at: c.confirmed_at ?? day } : {}),
       }).eq('id', c.id);
       if (up.error) throw up.error;
       return false;
     }
     // confirm — the board's update, plus a trail event so the drawer shows
     // WHO confirmed in the field and where.
-    await db().from('helpline_calls').insert({
+    await logEv({
       case_id: c.id, operator: me, kind: 'followup',
       notes: ['CONFIRMED homeless in the field.', evNote].filter(Boolean).join(' '),
     });
@@ -194,7 +211,7 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
   }
 
   /** Optimistic local apply so the UI moves even before (or without) signal. */
-  function applyLocal(c: HlCase, kind: Outcome, noteText: string, when: string): HlCase {
+  function applyLocal(c: HlCase, kind: Outcome, noteText: string, when: string, confirm = false): HlCase {
     // attempt/contact store the bare note — the trail renderer adds the
     // "Attempted — not located" / "Made contact" label for those kinds, so
     // the optimistic row matches the server row exactly (no double label).
@@ -203,7 +220,7 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
       [c.id]: [...(p[c.id] ?? []), { at: when, kind: kind === 'attempt' ? 'attempt' : kind === 'contact' ? 'contact' : 'followup',
         notes: kind === 'confirm'
           ? ['CONFIRMED homeless in the field.', noteText].filter(Boolean).join(' ')
-          : (noteText || null) }],
+          : ([noteText, kind === 'contact' && confirm ? 'Confirmed homeless.' : null].filter(Boolean).join(' · ') || null) }],
     }));
     const day = when.slice(0, 10);
     if (kind === 'attempt') {
@@ -215,27 +232,32 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
     }
     if (kind === 'contact') {
       return { ...c, contacts: (c.contacts ?? 0) + 1, last_contact: day,
-        status: ['assigned', 'attempted'].includes(c.status) ? 'contacted' : c.status };
+        ...(confirm ? { status: 'confirmed' as const, confirmed_at: c.confirmed_at ?? day }
+          : { status: ['assigned', 'attempted'].includes(c.status) ? 'contacted' as const : c.status }) };
     }
     return { ...c, status: 'confirmed', confirmed_at: day };
   }
 
   async function saveOutcome() {
     if (!current || !sheet || busy) return;
+    if (!disp || (disp === 'Other' && !note.trim())) return;   // button is disabled anyway
     setBusy(true);
-    const kind = sheet, noteText = note.trim(), when = new Date().toISOString();
-    const updated = applyLocal(current, kind, noteText, when);
+    const kind = sheet, when = new Date().toISOString();
+    const noteText = disp === 'Other' ? note.trim() : [disp, note.trim()].filter(Boolean).join(' — ');
+    const dispo = disp;
+    const confirmNow = kind === 'contact' && conf;
+    const updated = applyLocal(current, kind, noteText, when, confirmNow);
     const gone = !['assigned', 'attempted', 'contacted'].includes(updated.status);
     setCases((cs) => cs.map((x) => (x.id === current.id ? updated : x)));
-    setSheet(null); setNote('');
+    setSheet(null); setNote(''); setDisp('');
     try {
-      await send(current, kind, noteText, when);
+      await send(current, kind, noteText, when, dispo, confirmNow);
       seen();
-      toast(kind === 'confirm' ? 'Confirmed — dispatch notified'
+      toast(kind === 'confirm' || confirmNow ? 'Contact saved — confirmed homeless'
         : updated.status === 'no_locate' ? `Logged — case closed (${MAX_FAILED_ATTEMPTS} failed tries)` : 'Saved');
       router.refresh();
     } catch {
-      const q = readQ(); q.push({ caseId: current.id, kind, note: noteText, when });
+      const q = readQ(); q.push({ caseId: current.id, kind, note: noteText, when, disp: dispo, conf: confirmNow });
       writeQ(q); setQueued(q.length);
       toast('No signal — saved on this phone, will send automatically');
     } finally {
@@ -261,7 +283,7 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
             // send() the pre-image so counters don't double-bump on retry.
             const pre = item.kind === 'attempt' ? { ...c, attempts: Math.max(0, c.attempts - 1) }
               : item.kind === 'contact' ? { ...c, contacts: Math.max(0, (c.contacts ?? 0) - 1) } : c;
-            await send(pre as HlCase, item.kind, item.note, item.when);
+            await send(pre as HlCase, item.kind, item.note, item.when, item.disp, item.conf);
           }
         } catch { rest.push(item); }
       }
@@ -413,12 +435,10 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
 
       {current && (
         <div className="factions">
-          <button className="fabtn fa-miss" disabled={busy} onClick={() => { setSheet('attempt'); setNote(''); }}>
+          <button className="fabtn fa-miss" disabled={busy} onClick={() => { setSheet('attempt'); setNote(''); setDisp(''); }}>
             ✗ Couldn’t<br />locate</button>
-          <button className="fabtn fa-contact" disabled={busy} onClick={() => { setSheet('contact'); setNote(''); }}>
-            ✓ Made<br />contact</button>
-          <button className="fabtn fa-confirm" disabled={busy} onClick={() => { setSheet('confirm'); setNote(''); }}>
-            <IconHome size={17} /> Confirmed<br />homeless<small>starts HMIS verification</small></button>
+          <button className="fabtn fa-confirm" disabled={busy} onClick={() => { setSheet('contact'); setNote(''); setDisp(''); setConf(true); }}>
+            ✓ Made contact<small>confirms homeless · starts HMIS verification</small></button>
         </div>
       )}
 
@@ -428,12 +448,26 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
           <div className="fsheet" role="dialog" aria-modal="true" aria-label={sh.t}>
             <h3>{sh.t}</h3>
             <div className="fsub2" style={{ marginBottom: 12 }}>{sh.s}</div>
-            <textarea value={note} onChange={(e) => setNote(e.target.value)} autoFocus
-              placeholder="Optional note — where you looked, what you saw…" />
+            <label className="fdlbl" htmlFor="fdisp">What happened? <span>required</span></label>
+            <select id="fdisp" className="fdisp" value={disp} autoFocus
+              onChange={(e) => { setDisp(e.target.value); setConf(!NOT_CONFIRMING_DISPOSITIONS.includes(e.target.value)); }}>
+              <option value="">Choose one…</option>
+              {sheet && FIELD_DISPOSITIONS[sheet].map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+            {sheet === 'contact' && (
+              <label className="fconf">
+                <input type="checkbox" checked={conf} onChange={(e) => setConf(e.target.checked)} />
+                <span>They’re homeless — <b>confirm</b> <small>(starts HMIS verification)</small></span>
+              </label>
+            )}
+            <textarea value={note} onChange={(e) => setNote(e.target.value)}
+              placeholder={disp === 'Other' ? 'Required for “Other” — what happened?'
+                : 'Optional note — where you looked, what you saw…'} />
             <div className="fgps"><span className="dot" />Your location is stamped with this entry when available.</div>
             <div className="fsrow">
               <button className="fsbtn fs-cancel" onClick={() => setSheet(null)}>Cancel</button>
-              <button className={`fsbtn fs-go ${sh.cls}`} disabled={busy} onClick={saveOutcome}>
+              <button className={`fsbtn fs-go ${sh.cls}`} onClick={saveOutcome}
+                disabled={busy || !disp || (disp === 'Other' && !note.trim())}>
                 {busy ? 'Saving…' : sh.btn}</button>
             </div>
           </div>
@@ -446,6 +480,13 @@ export default function FieldView({ me, myName, teamLabel, scoped, cases: initia
 }
 
 const FIELD_CSS = `
+  .fconf{display:flex; gap:10px; align-items:center; font-size:15px; color:var(--fink); margin:0 0 10px; min-height:44px}
+  .fconf input{width:22px; height:22px}
+  .fconf small{color:var(--fmut); font-size:12px}
+  .fdlbl{display:block; font-size:13px; font-weight:700; color:var(--fink); margin:0 0 6px}
+  .fdlbl span{color:var(--fred); font-weight:600; font-size:12px}
+  .fdisp{width:100%; min-height:48px; font-size:16px; padding:10px 12px; border-radius:10px;
+    border:1px solid var(--fline); background:var(--fcardc); color:var(--fink); margin-bottom:10px}
   .fApp{--fbg:var(--bg); --fcardc:var(--card); --fink:var(--text); --fmut:var(--muted);
     --fline:var(--border); --fbrand:var(--accent); --fred:var(--danger); --fgreen:#0b8a5c;
     --fblue:#3b82f6; --famber:var(--warn);
@@ -505,7 +546,7 @@ const FIELD_CSS = `
   .factions{position:fixed; bottom:0; left:0; right:0; z-index:30; max-width:520px; margin:0 auto;
     background:var(--fcardc); border-top:1px solid var(--fline);
     padding:10px 12px calc(12px + env(safe-area-inset-bottom));
-    display:grid; grid-template-columns:1fr 1fr 1.3fr; gap:8px}
+    display:grid; grid-template-columns:1fr 1.6fr; gap:8px}
   .fabtn{border:none; border-radius:13px; padding:15px 6px; font-size:15px; font-weight:800;
     cursor:pointer; line-height:1.25; min-height:62px}
   .fabtn small{display:block; font-weight:600; font-size:11px; opacity:.85}

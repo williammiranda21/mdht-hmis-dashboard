@@ -1,12 +1,12 @@
 ﻿'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { tilesFor, frameFor, toPx, unproject, project, inFeature, TILE, type GeoFC } from '../../../lib/slippy';
-import { muniArea } from '../../../lib/helpline-options';
-import { fetchCustomAreas, invalidateCustomAreas, type CustomArea } from '../../../lib/custom-areas';
-import { supabaseBrowser } from '../../../lib/supabase-browser';
-import TileImg from '../../../components/TileImg';
-import { IconPencil, IconTrash } from '../../../components/icons';
+import { tilesFor, frameFor, toPx, unproject, project, inFeature, TILE, type GeoFC } from '../../lib/slippy';
+import { muniArea } from '../../lib/helpline-options';
+import { fetchCustomAreas, invalidateCustomAreas, type CustomArea } from '../../lib/custom-areas';
+import { supabaseBrowser } from '../../lib/supabase-browser';
+import TileImg from '../../components/TileImg';
+import { IconPencil, IconTrash } from '../../components/icons';
 import type { HlCase, Team } from './HelplineView';
 
 /**

@@ -15,8 +15,6 @@ const TITLES: [string, string][] = [
   ['/dashboard/utilization', 'Unit Utilization'],
   ['/dashboard/bnl', 'By-Name List'],
   ['/dashboard/youth-intake', 'Youth Intake'],
-  ['/dashboard/helpline/report', 'Helpline · Monthly report'],
-  ['/dashboard/helpline', 'Helpline'],
   ['/dashboard/rankings', 'Rankings'],
   ['/dashboard/deep-dive', 'Deep Dive'],
   ['/dashboard/analytics', 'Analytics'],

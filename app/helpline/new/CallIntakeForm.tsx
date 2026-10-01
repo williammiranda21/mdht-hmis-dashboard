@@ -1,21 +1,21 @@
 ﻿'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { supabaseBrowser } from '../../../../lib/supabase-browser';
+import { supabaseBrowser } from '../../../lib/supabase-browser';
 import {
   AREAS, DEFAULT_RULES, SLEEPING_OPTIONS, HOUSEHOLD_OPTIONS, FACTORS, muniArea, priorityOf,
   priorityBand, suggestTeam, type PriorityRules, type RoutableTeam,
-} from '../../../../lib/helpline-options';
-import { fetchPriorityRules } from '../../../../lib/priority-rules';
-import { featuresAt, inFeature, type GeoFC } from '../../../../lib/slippy';
-import { fetchCustomAreas } from '../../../../lib/custom-areas';
-import ReferOut, { type ReferralResource } from '../../../../components/ReferOut';
-import { CopyId } from '../../analytics/shared';
-import { IconSearch, IconLink, IconMapPin, IconMap } from '../../../../components/icons';
-import PinMap from '../../../../components/PinMap';
-import DobInput from '../../../../components/DobInput';
+} from '../../../lib/helpline-options';
+import { fetchPriorityRules } from '../../../lib/priority-rules';
+import { featuresAt, inFeature, type GeoFC } from '../../../lib/slippy';
+import { fetchCustomAreas } from '../../../lib/custom-areas';
+import ReferOut, { type ReferralResource } from '../../../components/ReferOut';
+import { CopyId } from '../../dashboard/analytics/shared';
+import { IconSearch, IconLink, IconMapPin, IconMap } from '../../../components/icons';
+import PinMap from '../../../components/PinMap';
+import DobInput from '../../../components/DobInput';
 
 // District boundary files, fetched once per session (same-origin static).
 let _cityGeo: GeoFC | null | undefined;
@@ -32,8 +32,15 @@ interface PriorCase {
   id: number; created_at: string; status: string; team_id: number | null;
   first_name: string | null; last_name: string | null; area: string | null;
   dob: string | null; phone_line: string | null; ssn4: string | null;
+  address?: string | null; landmark?: string | null;
 }
-const PRIOR_COLS = 'id, created_at, status, team_id, first_name, last_name, area, dob, phone_line, ssn4';
+const PRIOR_COLS = 'id, created_at, status, team_id, first_name, last_name, area, dob, phone_line, ssn4, address, landmark';
+/** why a known caller is calling again — required on a follow-up so the log
+ *  never reads "no new information" by accident (user 2026-10-01) */
+const FU_REASONS = ['Checking on status', 'New location', 'Situation changed',
+  'Found housing / wants to cancel', 'Same info, calling again'] as const;
+/** most advanced first — the merge keeps the highest */
+const STATUS_RANK = ['new', 'assigned', 'attempted', 'contacted', 'confirmed'];
 /** 8xx toll-free / relay lines: many unrelated callers share them, so
  *  number-based repeat detection is noise — the name check carries it. */
 const isTollFree = (digits: string) => /^1?8(00|88|77|66|55|44|33)\d{7}$/.test(digits);
@@ -59,7 +66,11 @@ interface HmisCand {
  * /api/helpline/geocode so county PCs never call external services; a failed
  * geocode still saves the typed address.
  */
-export default function CallIntakeForm({ me }: { me: string }) {
+export default function CallIntakeForm({ me, canMerge = false }: {
+  me: string;
+  /** full admins + helpline admins may merge duplicate open cases */
+  canMerge?: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -258,36 +269,53 @@ export default function CallIntakeForm({ me }: { me: string }) {
       lat: latN, lng: lngN,
     }));
     void detectArea(latN, lngN);
+    void describePin(latN, lngN);
+  }
+
+  // A clicked/dropped pin → nearest address + intersection in words (user
+  // 2026-10-01: logs showed "pin 25.82041, -80.21537"). Fills an EMPTY
+  // address box (the operator can still edit it); never overwrites typing.
+  const [pinPlace, setPinPlace] = useState<string | null>(null);
+  const pinSeq = useRef(0);
+  const autoAddr = useRef<string | null>(null);
+  async function describePin(latN: number, lngN: number) {
+    const seq = ++pinSeq.current;
+    setPinPlace(null);
+    try {
+      const j = await (await fetch(`/api/helpline/geocode?lat=${latN}&lng=${lngN}`)).json();
+      if (seq !== pinSeq.current || !j?.label) return;
+      setPinPlace(j.label);
+      setF((prev) => {
+        const cur = prev.address.trim();
+        if (cur && cur !== autoAddr.current) return prev;      // operator typed something — keep it
+        autoAddr.current = j.label;
+        return { ...prev, address: j.label };
+      });
+    } catch { /* lookup is a convenience — coordinates still save */ }
   }
 
   const pts = priorityOf(factors, f.household || null, f.sleeping || null, rules);
   const band = priorityBand(pts, rules);
 
-  // In-page attach confirmation (user: no browser alert popups). Shows what
-  // will attach, warns when the form is empty; the summary reads LIVE state,
-  // so Go back → type notes → Confirm includes them.
-  const [confirmAttach, setConfirmAttach] = useState<{
-    p: PriorCase;
-    /** attach = log only · reopen = closed case back to the board ·
-     *  outreach = CONFIRMED case back to the field (user ask 2026-08-25) */
-    mode: 'attach' | 'reopen';
-  } | null>(null);
+  // Follow-up mode (user 2026-10-01): "This is them" switches the form to a
+  // follow-up on that case — nothing is written until the operator saves it
+  // with a reason. attach = open case · reopen = closed case back to its team.
+  const [followUp, setFollowUp] = useState<{ p: PriorCase; mode: 'attach' | 'reopen' } | null>(null);
+  const [reason, setReason] = useState('');
+  const [sendBack, setSendBack] = useState(false);
+  const [fuLog, setFuLog] = useState<{ received_at: string; kind: string; notes: string | null }[] | null>(null);
+  useEffect(() => {
+    setSendBack(false);
+    if (!followUp) { setFuLog(null); return; }
+    setFuLog(null);
+    supabaseBrowser().from('helpline_calls').select('received_at, kind, notes')
+      .eq('case_id', followUp.p.id).order('received_at', { ascending: false }).limit(3)
+      .then(({ data }) => setFuLog((data ?? []) as { received_at: string; kind: string; notes: string | null }[]));
+  }, [followUp]);
+  const [mergeArm, setMergeArm] = useState(false);
+  const [mergeMsg, setMergeMsg] = useState<string | null>(null);
   const [confirmNewCase, setConfirmNewCase] = useState(false);
   const [armCancel, setArmCancel] = useState(false);
-  const attachPreview = (p: PriorCase): string[] => {
-    const locBits = [f.address.trim(), f.landmark.trim(),
-      pin ? `pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''].filter(Boolean).join(' · ');
-    const typedNum = (f.phone_callback || f.phone_line).trim();
-    const newNumber = typedNum
-      && typedNum.replace(/\D/g, '').slice(-7) !== (p.phone_line ?? '').replace(/\D/g, '').slice(-7)
-      ? typedNum : '';
-    return [
-      f.notes.trim() ? `Notes: ${f.notes.trim().slice(0, 140)}${f.notes.trim().length > 140 ? '…' : ''}` : '',
-      locBits ? `New location: ${locBits}` : '',
-      newNumber ? `New callback number: ${newNumber}` : '',
-    ].filter(Boolean);
-  };
-
   // open-case matches from every channel, deduped — labeled by WHAT matched
   // Collapsed by default — a call is in progress; the summary line whispers
   // and the full match list is opt-in (user: the banner was too intrusive).
@@ -331,15 +359,79 @@ export default function CallIntakeForm({ me }: { me: string }) {
     STILL_OPEN.includes(p.status) && idHits(p).length === 0);
   // identifiers changed → any pending confirmations are stale
   const matchKey = openMatches.map((m) => m.p.id).join(',');
-  useEffect(() => { setConfirmNewCase(false); setConfirmAttach(null); }, [matchKey]);
+  useEffect(() => { setConfirmNewCase(false); setMergeArm(false); setMergeMsg(null); }, [matchKey]);
+
+  // calls received + last call per matched case (initial + repeat = the phone rang)
+  const [callStats, setCallStats] = useState<Record<number, { n: number; last: string }>>({});
+  const statsKey = [...new Set([...prior, ...priorName].map((x) => x.id))].sort().join(',');
+  useEffect(() => {
+    const ids = statsKey ? statsKey.split(',').map(Number) : [];
+    if (!ids.length) { setCallStats({}); return; }
+    supabaseBrowser().from('helpline_calls').select('case_id, received_at')
+      .in('case_id', ids).in('kind', ['initial', 'repeat']).limit(1000)
+      .then(({ data }) => {
+        const m: Record<number, { n: number; last: string }> = {};
+        for (const e of (data ?? []) as { case_id: number; received_at: string }[]) {
+          const cur = m[e.case_id] ?? { n: 0, last: e.received_at };
+          m[e.case_id] = { n: cur.n + 1, last: e.received_at > cur.last ? e.received_at : cur.last };
+        }
+        setCallStats(m);
+      });
+  }, [statsKey]);
+
+  const nm = (p: PriorCase) => [p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous';
+  /** open cases that look like the SAME person as the strongest match:
+   *  same SSN-4, or same full name + same DOB */
+  const samePersonGroup = (): PriorCase[] => {
+    const top = openMatches[0]?.p;
+    if (!top) return [];
+    const key = (x: PriorCase) => `${(x.first_name ?? '').trim().toLowerCase()}|${(x.last_name ?? '').trim().toLowerCase()}|${x.dob ?? ''}`;
+    const same = (x: PriorCase) => (top.ssn4 && x.ssn4 === top.ssn4)
+      || (Boolean(top.dob) && Boolean(top.last_name) && key(x) === key(top));
+    return openMatches.map((m) => m.p).filter(same);
+  };
+  const pickSurvivor = (g: PriorCase[]): PriorCase => [...g].sort((x, y) =>
+    STATUS_RANK.indexOf(y.status) - STATUS_RANK.indexOf(x.status) || x.created_at.localeCompare(y.created_at))[0];
+
+  async function mergeInto(survivor: PriorCase, group: PriorCase[]) {
+    if (busy) return;
+    setBusy(true); setErr(null);
+    const res = await fetch('/api/helpline/merge', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ survivor: survivor.id, others: group.filter((g) => g.id !== survivor.id).map((g) => g.id) }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false); setMergeArm(false);
+    if (!res.ok) { setErr(j?.error || `Merge failed (HTTP ${res.status})`); return; }
+    const gone = new Set(group.filter((g) => g.id !== survivor.id).map((g) => g.id));
+    setPrior((l) => l.filter((x) => !gone.has(x.id)));
+    setPriorName((l) => l.filter((x) => !gone.has(x.id)));
+    setMergeMsg(`Merged into #${survivor.id} ✓`);
+  }
+  async function flagDup(survivor: PriorCase, group: PriorCase[]) {
+    if (busy) return;
+    setBusy(true); setErr(null);
+    const { error } = await supabaseBrowser().from('helpline_calls').insert({
+      case_id: survivor.id, operator: me, kind: 'followup',
+      notes: `⚠ Possible duplicate open cases for the same person: ${group.map((g) => `#${g.id}`).join(', ')} — flagged by the call operator for a helpline admin to merge.`,
+    });
+    setBusy(false);
+    if (error) { setErr(error.message); return; }
+    setMergeMsg('Flagged for a helpline admin ✓');
+  }
 
   /** Automated duplicate handling (user pick 2026-08-20): the system tells
    *  the operator this number has an OPEN case and one click logs the new
    *  call (and any fresher location) onto it — no duplicate queue row. */
   async function attachToCase(p: PriorCase, mode: 'attach' | 'reopen' | 'outreach' = 'attach') {
     if (busy) return;
-    const locBits = [f.address.trim(), f.landmark.trim(),
-      pin ? `pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''].filter(Boolean).join(' · ');
+    const placeText = f.address.trim() || pinPlace || '';
+    if (!reason && !f.notes.trim()) {
+      setErr('Pick why they’re calling (or add notes) before saving the follow-up.');
+      return;
+    }
+    const locBits = [placeText, f.landmark.trim(),
+      pin && !placeText ? `pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''].filter(Boolean).join(' · ');
     // borrowed phone? capture the number they're reachable at NOW
     const typedNum = (f.phone_callback || f.phone_line).trim();
     const newNumber = typedNum
@@ -351,11 +443,11 @@ export default function CallIntakeForm({ me }: { me: string }) {
       case_id: p.id, operator: me,
       kind: 'repeat', // a real incoming CALL — counts toward call volume
       notes: (mode === 'reopen'
-        ? 'Caller called again — case REOPENED, failed-attempt counter reset. '
+        ? 'Called again — case REOPENED, failed-attempt counter reset. '
         : mode === 'outreach'
-        ? 'Caller called again — sent BACK TO OUTREACH from confirmed (confirmed-date history stays in this log); failed-attempt counter reset. '
-        : `Repeat call${newNumber ? ` from a different number (${newNumber})` : ' (same number)'}. `)
-        + (f.notes.trim() || 'No new information given.')
+        ? 'Called again — sent BACK TO OUTREACH from confirmed (confirmed-date history stays in this log); failed-attempt counter reset. '
+        : `Follow-up call${newNumber ? ` from a different number (${newNumber})` : ''}. `)
+        + [reason, f.notes.trim()].filter(Boolean).join(' — ')
         + (locBits ? ` — location now: ${locBits}` : ''),
     });
     let e2 = ev.error;
@@ -381,7 +473,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
     }
     setBusy(false);
     if (e2) { setErr(e2.message); return; }
-    router.push('/dashboard/helpline');
+    router.push('/helpline');
     router.refresh();
   }
   const sug = teams.length ? suggestTeam(
@@ -444,7 +536,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
     }
     setBusy(false);
     if (error) { setErr(error.message); return; }
-    router.push('/dashboard/helpline');
+    router.push('/helpline');
     router.refresh();
   }
 
@@ -474,9 +566,9 @@ export default function CallIntakeForm({ me }: { me: string }) {
     <div className="panel" style={{ maxWidth: 720, margin: '0 auto' }}>
       <div className="panel-h">
         <div>
-          <h3>New call</h3>
+          <h3>{followUp ? `Follow-up call — #${followUp.p.id}` : 'New call'}</h3>
           <div className="meta">Call time is stamped automatically ·{' '}
-            <Link href="/dashboard/helpline">Back to triage</Link></div>
+            <Link href="/helpline">Back to triage</Link></div>
         </div>
         <span className="bnl-chip" style={{
           background: band === 'HIGH' ? 'var(--danger-light)' : band === 'MED' ? 'var(--warn-light)' : 'var(--track)',
@@ -504,115 +596,191 @@ export default function CallIntakeForm({ me }: { me: string }) {
               placeholder="“But reach me at…”" onChange={(e) => set('phone_callback')(e.target.value)} />
           </div>
         </div>
-        {(openMatches.length > 0 || phoneOnlyOpen.length > 0
+        {/* Repeat-caller rework (user 2026-10-01, approved mockup): a match is
+            a CARD with a field-by-field identity check and one "This is them"
+            button that switches the form into FOLLOW-UP mode — nothing is
+            logged until the operator saves a follow-up with a reason. Same
+            person open more than once → merge (helpline admins) or flag. */}
+        {followUp ? (() => {
+          const p = followUp.p;
+          const team = p.team_id != null ? teams.find((t) => t.id === p.team_id)?.name : null;
+          const st = callStats[p.id];
+          return (
+            <div style={{ margin: '12px 0 0', border: '1px solid var(--primary)', borderRadius: 10,
+              padding: '10px 13px', background: 'var(--primary-soft)', fontSize: 12.5 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <b style={{ color: 'var(--strong)', fontSize: 14 }}>
+                  {followUp.mode === 'reopen' ? 'Reopen + follow-up' : 'Follow-up call'} on #{p.id} {nm(p)}</b>
+                <span className="bnl-fp">{p.status}</span>
+                {team && <span className="bnl-fp bnl-fp-par">{team}</span>}
+                {st && <span className="bnl-sub">called {st.n}× · last {new Date(st.last).toLocaleDateString()}</span>}
+                <span style={{ flex: 1 }} />
+                <button type="button" className="tbtn" onClick={() => { setFollowUp(null); setReason(''); }}>
+                  Not the same person — start a new case</button>
+              </div>
+              {(p.address || p.landmark || p.area) && (
+                <div style={{ marginTop: 6 }}><span className="bnl-sub">Location on file: </span>
+                  {[p.address, p.landmark, p.area].filter(Boolean).join(' · ')}</div>
+              )}
+              <div className="bnl-sub" style={{ marginTop: 8, fontWeight: 700 }}>Last on this case</div>
+              {fuLog === null ? <div className="bnl-sub">Loading…</div> : fuLog.length === 0
+                ? <div className="bnl-sub">No log entries yet.</div>
+                : fuLog.map((e, i) => (
+                  <div key={i} style={{ marginTop: 3 }}>
+                    <span className="bnl-sub">{new Date(e.received_at).toLocaleDateString()} · {e.kind}</span>
+                    {e.notes && <> — {e.notes.length > 140 ? `${e.notes.slice(0, 140)}…` : e.notes}</>}
+                  </div>
+                ))}
+              <div style={{ marginTop: 10, fontSize: 11, color: 'var(--faint)', fontWeight: 700,
+                letterSpacing: '.05em', textTransform: 'uppercase' }}>
+                Why are they calling? <span style={{ color: 'var(--danger)' }}>required</span></div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 6 }}>
+                {FU_REASONS.map((r) => {
+                  const on = reason === r;
+                  return (
+                    <button key={r} type="button" aria-pressed={on} onClick={() => setReason(on ? '' : r)}
+                      style={{ border: `1px solid ${on ? 'var(--secondary)' : 'var(--border)'}`,
+                        background: on ? 'var(--primary-light)' : 'var(--card)',
+                        color: on ? 'var(--strong)' : 'var(--muted)',
+                        borderRadius: 20, padding: '6px 12px', fontSize: 12.5, fontWeight: 600,
+                        cursor: 'pointer', font: 'inherit' }}>{r}</button>
+                  );
+                })}
+              </div>
+              <div className="bnl-sub" style={{ marginTop: 6 }}>
+                Add a new address, landmark, pin, or callback number below if they gave one — it updates the case.
+              </div>
+            </div>
+          );
+        })() : (openMatches.length > 0 || phoneOnlyOpen.length > 0
           || prior.some((p) => !STILL_OPEN.includes(p.status))) && (() => {
           const closed = prior.filter((p) => !STILL_OPEN.includes(p.status));
           const top = openMatches[0];
-          const ctxN = closed.length + phoneOnlyOpen.length;
-          const nm = (p: PriorCase) => [p.first_name, p.last_name].filter(Boolean).join(' ') || 'anonymous';
+          const rest = openMatches.slice(1);
+          const dup = samePersonGroup();
+          const survivor = dup.length >= 2 ? pickSurvivor(dup) : null;
+          const idRow = (label: string, theirs: string | null, ours: string, cmp: 'eq' | 'phone' = 'eq') => {
+            const norm = (s: string) => (cmp === 'phone' ? s.replace(/\D/g, '').slice(-7) : s.trim().toLowerCase());
+            const state = !ours.trim() ? 'none' : !theirs ? 'blank' : norm(theirs) === norm(ours) ? 'same' : 'diff';
+            return (
+              <tr key={label}>
+                <td className="bnl-sub" style={{ padding: '2px 8px 2px 0' }}>{label}</td>
+                <td style={{ padding: '2px 8px' }}>{theirs || '—'}</td>
+                <td style={{ padding: '2px 0' }}>
+                  {state === 'same' && <span className="bnl-fp" style={{ color: 'var(--accent)' }}>✓ same</span>}
+                  {state === 'diff' && <span className="bnl-fp" style={{ color: 'var(--danger)' }}>✗ different</span>}
+                  {state === 'none' && <span className="bnl-sub">not given on this call</span>}
+                  {state === 'blank' && <span className="bnl-sub">not on the case</span>}
+                </td>
+              </tr>
+            );
+          };
           return (
-            <div style={{ margin: '10px 0 0' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5,
-                background: top ? 'var(--info-light)' : 'var(--primary-soft)',
-                border: `1px solid ${top ? 'var(--info)' : 'var(--primary-light)'}`,
-                borderRadius: dupOpen ? '8px 8px 0 0' : 8, padding: '5px 11px' }}>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {top
-                    ? <><IconSearch size={11} /> Possible existing case: <b>#{top.p.id} {nm(top.p)}</b>
-                        <span className="bnl-sub"> · {top.via} · {top.p.status}
-                        {openMatches.length > 1 ? ` · +${openMatches.length - 1} more` : ''}</span></>
-                    : <>☎ Number called before <span className="bnl-sub">· {ctxN} earlier
-                        case{ctxN === 1 ? '' : 's'} from this number</span></>}
-                </span>
-                <button className="tbtn" type="button" style={{ padding: '2px 10px', fontSize: 12 }}
-                  onClick={() => setDupOpen(!dupOpen)}>{dupOpen ? 'Hide' : 'Review'}</button>
-              </div>
-              {dupOpen && (
-                <div style={{ border: '1px solid var(--border-strong)', borderTop: 0,
-                  borderRadius: '0 0 8px 8px', padding: '8px 12px', fontSize: 12.5,
-                  background: 'var(--card)' }}>
-                  {openMatches.map(({ p, via }) => (
-                    <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center',
-                      flexWrap: 'wrap', padding: '4px 0' }}>
-                      <span>#{p.id} <b>{nm(p)}</b> · {p.status}
-                        {p.team_id != null && teams.find((t) => t.id === p.team_id)
-                          ? ` · ${teams.find((t) => t.id === p.team_id)!.name}` : ''}
-                        {p.area ? ` · ${p.area}` : ''}{p.dob ? ` · DOB ${p.dob}` : ''}
-                        {' '}<span className="bnl-fp bnl-fp-sch">{via}</span></span>
-                      <button className="btn primary" type="button" style={{ padding: '3px 11px', fontSize: 12 }}
-                        disabled={busy} onClick={() => setConfirmAttach({ p, mode: 'attach' })}>
-                        Log this call on #{p.id}</button>
-                    </div>
-                  ))}
-                  {phoneOnlyOpen.map((p) => (
-                    <div key={p.id} style={{ padding: '4px 0' }}>
-                      <span className="bnl-sub">#{p.id} <b style={{ color: 'var(--text)' }}>{nm(p)}</b>
-                        {' '}· {p.status} · same number only — not treated as a match; it
-                        becomes one if SSN-4, name, or DOB agree</span>
-                    </div>
-                  ))}
-                  {closed.map((p) => (
-                    <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center',
-                      flexWrap: 'wrap', padding: '4px 0' }}>
-                      <span className="bnl-sub">#{p.id} <b style={{ color: 'var(--text)' }}>{nm(p)}</b>
-                        {' '}· {new Date(p.created_at).toLocaleDateString()} · {p.status}
-                        {p.area ? ` · ${p.area}` : ''}</span>
-                      <button className="tbtn" type="button" style={{ padding: '2px 10px', fontSize: 12 }}
-                        disabled={busy}
-                        title="Same person calling again? Returns the case to its team (or the queue) with a fresh attempt counter; these notes attach to it"
-                        onClick={() => setConfirmAttach({ p, mode: 'reopen' })}>
-                        Reopen #{p.id} + log call</button>
-                    </div>
-                  ))}
-                  <div className="bnl-sub" style={{ marginTop: 4 }}>
-                    Attaching adds the notes, fresher location, and new number — no duplicate.
-                    A shared phone isn&rsquo;t proof of identity; a different person → just save a new call.
+            <div style={{ margin: '10px 0 0', display: 'grid', gap: 8 }}>
+              {survivor && (
+                <div style={{ background: 'var(--warn-light)', border: '1px solid var(--warn)', borderRadius: 8,
+                  padding: '8px 12px', fontSize: 12.5 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ flex: 1, color: 'var(--text)' }}>
+                      ⚠ <b>{dup.length} open cases look like the same person</b>{' '}
+                      ({dup.map((d) => `#${d.id}`).join(', ')}) — {new Set(dup.map((d) => d.team_id ?? 0)).size > 1
+                        ? 'different teams may be working them' : 'only one should stay open'}</span>
+                    {mergeMsg ? <b style={{ color: 'var(--accent)' }}>{mergeMsg}</b>
+                      : canMerge ? (
+                        mergeArm
+                          ? <>
+                              <button type="button" className="btn primary" disabled={busy}
+                                style={{ background: 'var(--warn)' }} onClick={() => mergeInto(survivor, dup)}>
+                                Confirm — merge into #{survivor.id}</button>
+                              <button type="button" className="tbtn" onClick={() => setMergeArm(false)}>Cancel</button>
+                            </>
+                          : <button type="button" className="tbtn" onClick={() => setMergeArm(true)}
+                              title="Keeps the most-advanced case (oldest on a tie) with its team; the others close as merged and their calls show in its log">
+                              Merge into #{survivor.id} →</button>
+                      ) : (
+                        <button type="button" className="tbtn" disabled={busy} onClick={() => flagDup(survivor, dup)}
+                          title="Adds a note to the case asking a helpline admin to merge the duplicates">
+                          Flag for a helpline admin</button>
+                      )}
                   </div>
+                  {mergeArm && !mergeMsg && (
+                    <div className="bnl-sub" style={{ marginTop: 4 }}>
+                      Keeps #{survivor.id} ({survivor.status}) with its team. Closes{' '}
+                      {dup.filter((d) => d.id !== survivor.id).map((d) => `#${d.id}`).join(', ')} as
+                      &ldquo;merged into #{survivor.id}&rdquo; — nothing is deleted; their calls show in #{survivor.id}&rsquo;s log.
+                    </div>
+                  )}
+                </div>
+              )}
+              {top && (
+                <div style={{ border: '1px solid var(--info)', background: 'var(--info-light)', borderRadius: 10,
+                  padding: '9px 12px', fontSize: 12.5 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <IconSearch size={12} />
+                    <b style={{ color: 'var(--strong)' }}>Possible existing case #{top.p.id} {nm(top.p)}</b>
+                    <span className="bnl-fp">{top.p.status}</span>
+                    {top.p.team_id != null && teams.find((t) => t.id === top.p.team_id) && (
+                      <span className="bnl-fp bnl-fp-par">{teams.find((t) => t.id === top.p.team_id)!.name}</span>)}
+                    <span style={{ flex: 1 }} />
+                    {callStats[top.p.id] && <span className="bnl-sub">called {callStats[top.p.id].n}× · last{' '}
+                      {new Date(callStats[top.p.id].last).toLocaleDateString()}</span>}
+                  </div>
+                  <table style={{ marginTop: 6, fontSize: 12.5, borderCollapse: 'collapse' }}><tbody>
+                    {idRow('Name', [top.p.first_name, top.p.last_name].filter(Boolean).join(' ') || null,
+                      [f.first_name, f.last_name].filter((s) => s.trim()).join(' '))}
+                    {idRow('DOB', top.p.dob, f.dob)}
+                    {idRow('SSN-4', top.p.ssn4, f.ssn4)}
+                    {idRow('Phone', top.p.phone_line, f.phone_line, 'phone')}
+                  </tbody></table>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                    <button type="button" className="btn primary" disabled={busy}
+                      onClick={() => { setFollowUp({ p: top.p, mode: 'attach' }); setReason(''); }}>
+                      This is them — follow-up call →</button>
+                    <span className="bnl-sub">Nothing is logged until you save the follow-up.</span>
+                  </div>
+                </div>
+              )}
+              {(rest.length > 0 || closed.length > 0 || phoneOnlyOpen.length > 0) && (
+                <div style={{ fontSize: 12.5 }}>
+                  <button type="button" className="tbtn" onClick={() => setDupOpen(!dupOpen)}>
+                    {dupOpen ? 'Hide' : 'Show'} {rest.length ? `${rest.length} more match${rest.length === 1 ? '' : 'es'}` : ''}
+                    {rest.length && (closed.length + phoneOnlyOpen.length) ? ' · ' : ''}
+                    {closed.length + phoneOnlyOpen.length
+                      ? `${closed.length + phoneOnlyOpen.length} earlier call${closed.length + phoneOnlyOpen.length === 1 ? '' : 's'} from this number` : ''}
+                  </button>
+                  {dupOpen && (
+                    <div style={{ marginTop: 6, display: 'grid', gap: 4 }}>
+                      {rest.map(({ p, via }) => (
+                        <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span>#{p.id} <b>{nm(p)}</b> · {p.status}{p.dob ? ` · DOB ${p.dob}` : ''}
+                            {' '}<span className="bnl-fp bnl-fp-sch">{via}</span></span>
+                          <button type="button" className="tbtn" disabled={busy}
+                            onClick={() => { setFollowUp({ p, mode: 'attach' }); setReason(''); }}>This is them →</button>
+                        </div>
+                      ))}
+                      {phoneOnlyOpen.map((p) => (
+                        <div key={p.id} className="bnl-sub">#{p.id} <b style={{ color: 'var(--text)' }}>{nm(p)}</b>
+                          {' '}· {p.status} · same number only — not treated as a match</div>
+                      ))}
+                      {closed.map((p) => (
+                        <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span className="bnl-sub">#{p.id} <b style={{ color: 'var(--text)' }}>{nm(p)}</b>
+                            {' '}· {new Date(p.created_at).toLocaleDateString()} · {p.status}</span>
+                          <button type="button" className="tbtn" disabled={busy}
+                            title="Same person calling again? Reopens the case with its team (fresh attempt counter) and logs this call on it"
+                            onClick={() => { setFollowUp({ p, mode: 'reopen' }); setReason(''); }}>
+                            This is them — reopen →</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           );
         })()}
 
-        {confirmAttach && (
-          <div style={{ background: 'var(--info-light)', border: '1px solid var(--info)',
-            borderRadius: 8, padding: '10px 13px', fontSize: 12.5, margin: '10px 0 0' }}>
-            <b style={{ color: 'var(--strong)' }}>
-              {confirmAttach.mode === 'reopen'
-                ? `Reopen case #${confirmAttach.p.id} and log this call?`
-                : `Log this call on open case #${confirmAttach.p.id}?`}</b>
-            {attachPreview(confirmAttach.p).length > 0
-              ? attachPreview(confirmAttach.p).map((s, i) => (
-                  <div key={i} style={{ marginTop: 4 }}>{s}</div>))
-              : <div style={{ color: 'var(--warn)', fontWeight: 600, marginTop: 4 }}>
-                  Nothing new is filled in — it will be logged as &ldquo;No new information
-                  given.&rdquo; Go back to add call notes or an updated location first.
-                </div>}
-            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-              <button className="btn primary" type="button" disabled={busy}
-                style={{ background: 'var(--accent)' }}
-                onClick={() => {
-                  const a = confirmAttach;
-                  setConfirmAttach(null);
-                  if (a) attachToCase(a.p, a.mode);
-                }}>
-                {confirmAttach.mode === 'reopen' ? 'Confirm — reopen + log call' : 'Confirm — log call'}</button>
-              {confirmAttach.mode === 'attach' && confirmAttach.p.status === 'confirmed' && (
-                <button className="btn primary" type="button" disabled={busy}
-                  style={{ background: 'var(--info)' }}
-                  title="They're confirmed but outreach needs to come back — moved, situation changed, enrollment stalled. Returns the case to its team (or the queue) with a fresh attempt counter; the confirmed history stays in the log."
-                  onClick={() => {
-                    const a = confirmAttach;
-                    setConfirmAttach(null);
-                    if (a) attachToCase(a.p, 'outreach');
-                  }}>
-                  Log call + send back to outreach</button>
-              )}
-              <button className="tbtn" type="button" onClick={() => setConfirmAttach(null)}>← Go back</button>
-            </div>
-          </div>
-        )}
-
+        {!followUp && (<>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 160 }}>
             <L>First name</L>
@@ -721,11 +889,13 @@ export default function CallIntakeForm({ me }: { me: string }) {
           </div>
         ) : null}
 
+        </>)}
+
         <L>Address or intersection — as exact as they can give</L>
         <div style={{ display: 'flex', gap: 8 }}>
           <input className="tinput" style={{ flex: 1 }} value={f.address} maxLength={160}
             placeholder="e.g. 401 NW 2nd Ave · or NW 36th St & 17th Ave"
-            onChange={(e) => { set('address')(e.target.value); setGeo(null); setPin(null); }}
+            onChange={(e) => { set('address')(e.target.value); setGeo(null); setPin(null); setPinPlace(null); autoAddr.current = null; }}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); geocode(); } }} />
           <button className="tbtn" type="button" disabled={geo === 'loading'} onClick={geocode}
             title="Look up coordinates (server-side); the pin sets the district and drives the team suggestion">
@@ -781,6 +951,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
           placeholder="“Amelia Earhart Park, by the north lot — blue tent”"
           onChange={(e) => set('landmark')(e.target.value)} />
 
+        {!followUp && (<>
         <L>Where did they sleep last night?</L>
         <Chips options={SLEEPING_OPTIONS} value={f.sleeping} onPick={set('sleeping')} />
         <L>Household on the call</L>
@@ -824,12 +995,15 @@ export default function CallIntakeForm({ me }: { me: string }) {
           })}
         </div>
 
-        <L>Call notes</L>
+        </>)}
+
+        <L>{followUp ? 'Notes from this call' : 'Call notes'}</L>
         <textarea className="tinput" rows={3} style={{ width: '100%', resize: 'vertical' }}
           value={f.notes} maxLength={4000}
           placeholder="What they said, callback window, safety context…"
           onChange={(e) => set('notes')(e.target.value)} />
 
+        {!followUp && (<>
         {sug && (
           <div style={{ background: 'var(--primary-soft)', border: '1px solid var(--primary-light)',
             borderRadius: 8, padding: '10px 14px', fontSize: 12.5, marginTop: 14 }}>
@@ -864,8 +1038,8 @@ export default function CallIntakeForm({ me }: { me: string }) {
             <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               <button className="btn primary" type="button" disabled={busy}
                 style={{ background: 'var(--info)' }}
-                onClick={() => { setConfirmNewCase(false); setConfirmAttach({ p: openMatches[0].p, mode: 'attach' }); }}>
-                Attach to #{openMatches[0].p.id} instead</button>
+                onClick={() => { setConfirmNewCase(false); setFollowUp({ p: openMatches[0].p, mode: 'attach' }); setReason(''); }}>
+                It&rsquo;s them — follow-up on #{openMatches[0].p.id}</button>
               <button className="btn primary" type="button" disabled={busy}
                 style={{ background: 'var(--accent)' }}
                 onClick={() => { setConfirmNewCase(false); submit(undefined, true); }}>
@@ -875,9 +1049,35 @@ export default function CallIntakeForm({ me }: { me: string }) {
           </div>
         )}
 
+        </>)}
+
         {/* color-coded, equal-size actions (user directives 2026-08-20 colors,
             2026-09-22 soft tint + ALL CAPS): green = save, blue = save +
             refer, red = cancel (two-step, no browser dialogs on this form) */}
+        {followUp ? (
+          <div style={{ marginTop: 14 }}>
+            {followUp.mode === 'attach' && followUp.p.status === 'confirmed' && (
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, marginBottom: 8, cursor: 'pointer' }}
+                title="They're confirmed but outreach needs to come back — moved, situation changed, enrollment stalled. Returns the case to its team with a fresh attempt counter; the confirmed history stays in the log.">
+                <input type="checkbox" checked={sendBack} onChange={(e) => setSendBack(e.target.checked)} />
+                Send back to outreach (they need a team visit again)
+              </label>
+            )}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button className="abtn" type="button" disabled={busy || (!reason && !f.notes.trim())}
+                onClick={() => attachToCase(followUp.p, followUp.mode === 'reopen' ? 'reopen' : sendBack ? 'outreach' : 'attach')}
+                style={{ color: 'var(--accent)', borderColor: 'var(--accent)', background: 'var(--accent-light)', minWidth: 200 }}
+                title={!reason && !f.notes.trim() ? 'Pick why they’re calling (or add notes) first' : undefined}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                {busy ? 'Saving…' : followUp.mode === 'reopen' ? `Reopen #${followUp.p.id} + save follow-up` : `Save follow-up to #${followUp.p.id}`}
+              </button>
+              <button className="abtn" type="button" disabled={busy}
+                style={{ color: 'var(--muted)', borderColor: 'var(--border-strong)', background: 'var(--card)', minWidth: 160 }}
+                onClick={() => { setFollowUp(null); setReason(''); }}>
+                ← Back to new call</button>
+            </div>
+          </div>
+        ) : (<>
         <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button className="abtn" disabled={busy} onClick={() => submit()}
             style={{ color: 'var(--accent)', borderColor: 'var(--accent)',
@@ -900,7 +1100,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
             onClick={() => {
               const touched = Object.values(f).some((v) => v.trim() !== '')
                 || factors.length > 0 || pin !== null;
-              if (!touched || armCancel) { router.push('/dashboard/helpline'); return; }
+              if (!touched || armCancel) { router.push('/helpline'); return; }
               setArmCancel(true);
               setTimeout(() => setArmCancel(false), 4000);
             }}>
@@ -908,6 +1108,7 @@ export default function CallIntakeForm({ me }: { me: string }) {
             {armCancel ? 'Discard? Click again' : 'Cancel call'}
           </button>
         </div>
+        </>)}
         {referOpen && (
           <ReferOut title="Refer the caller out"
             onPick={(resource, terminal) => { setReferOpen(false); submit({ resource, terminal }); }}

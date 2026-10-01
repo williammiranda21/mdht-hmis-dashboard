@@ -2,7 +2,7 @@ import { supabaseServer, getViewer } from '../../lib/supabase-server';
 import { supabaseAdmin } from '../../lib/supabase';
 import PolicyAttestation from '../../components/PolicyAttestation';
 import FieldView, { type HmisGlance } from './FieldView';
-import type { HlCase, Team } from '../dashboard/helpline/HelplineView';
+import type { HlCase, Team } from '../helpline/HelplineView';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Field Outreach' };

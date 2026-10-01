@@ -430,6 +430,19 @@ seeded from the SOP — RUN in prod),
 + immutable change log + helpline_cases.pinned + helpline_hmis_flags()
 definer fn for the chronic boost; NOT YET RUN — held local, unpushed).
 
+### Helpline — standalone app at /helpline (moved 2026-10-01)
+Own layout (app/helpline/layout.tsx + HelplineNav: Triage · New call · Monthly
+report, Field app + Dashboard links, idle sign-out + P&P gate); old
+/dashboard/helpline/* routes redirect. Permissions unchanged. 2026-10-01 batch:
+repeat-caller FOLLOW-UP mode (reason required — no empty logs), duplicate MERGE
+(helpline admins; /api/helpline/merge; helpline_cases.merged_into via
+helpline_merge.sql — merged cases leave board/counts, their logs show on the
+survivor), pin → address + nearest intersection (geocode ?lat=&lng=), team
+board outcome buttons removed (field app records them), field "Made contact"
+= contact + confirm in ONE event with a required disposition
+(FIELD_DISPOSITIONS; helpline_calls.disposition via helpline_disposition.sql,
+optional), case cards with priority stripes + colored log badges.
+
 ### Helpline Triage (2026-08-19 — built, NOT yet pushed; user tests locally first)
 Homeless helpline → triage → outreach assignment → enrollment verification.
 Access = admins + `profiles.helpline_access`. Tables (supabase/helpline.sql,
@@ -456,7 +469,7 @@ HelplineView, admin-only): create teams, rename, activate/deactivate (never
 delete — history), assign dashboard ACCOUNTS (member_accounts snapshot),
 free-text field workers + dispatch contact, zone coverage. Run-once
 team_mgmt.sql adds the column and makes team writes admin-only.
-Surfaces: `/dashboard/helpline` (KPIs, triage queue, team board, all-cases +
+Surfaces: `/helpline` (KPIs, triage queue, team board, all-cases +
 admin zone editor) · `/new` (call intake: repeat-caller banner by phone,
 priority computed live from lib/helpline-options.ts closed lists, geocoding
 via `/api/helpline/geocode` — server-side Nominatim, Miami-Dade-bounded, so

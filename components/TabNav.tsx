@@ -20,7 +20,8 @@ const TABS = [
   // everyone else — the page re-checks, hiding the tab is not the boundary.
   { href: '/dashboard/youth-intake', label: 'Youth Intake', icon: 'sprout', ycOnly: true, dev: true },
   // Helpline Triage: admins + helpline_access grantees (operators/Trust staff).
-  { href: '/dashboard/helpline', label: 'Helpline', icon: 'phone', hlOnly: true, dev: true },
+  // opens the standalone Helpline app (/helpline, user 2026-10-01)
+  { href: '/helpline', label: 'Helpline', icon: 'phone', hlOnly: true, dev: true },
   { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy', adminOnly: true },
   { href: '/dashboard/deep-dive', label: 'Deep Dive', icon: 'search' },
   { href: '/dashboard/analytics', label: 'Analytics', icon: 'chart' },

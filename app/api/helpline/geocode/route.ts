@@ -25,7 +25,18 @@ export async function GET(req: Request) {
   if (!viewer) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   if (!viewer.canSeeHelpline) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
-  const q = (new URL(req.url).searchParams.get('q') ?? '').trim().slice(0, 200);
+  const sp = new URL(req.url).searchParams;
+  // Reverse mode (?lat=&lng=, user 2026-10-01): a dropped pin becomes words
+  // outreach can use — nearest street address + nearest intersection — so
+  // logs read "1161 NW 49th St · near NW 12th Ave & NW 50th St", not decimals.
+  const lat = Number(sp.get('lat')), lng = Number(sp.get('lng'));
+  if (sp.has('lat') && Number.isFinite(lat) && Number.isFinite(lng)) {
+    const [address, cross] = await Promise.all([reverseAddress(lat, lng), nearestIntersection(lat, lng)]);
+    const label = [address, cross ? `near ${cross}` : null].filter(Boolean).map((x) => short(x!)).join(' · ');
+    return NextResponse.json({ label: label || null, address, intersection: cross });
+  }
+
+  const q = (sp.get('q') ?? '').trim().slice(0, 200);
   if (q.length < 4) return NextResponse.json({ results: [] });
 
   try {
@@ -85,4 +96,65 @@ export async function GET(req: Request) {
     // address regardless, so a proxy/network failure degrades gracefully.
     return NextResponse.json({ results: [], error: String((e as Error).message) });
   }
+}
+
+const UA = { 'User-Agent': 'MDHT-HMIS-Dashboard helpline (miamidade.gov)' };
+
+/** Nominatim reverse → "1161 NW 49th St" (house number + road), else the road. */
+async function reverseAddress(lat: number, lng: number): Promise<string | null> {
+  try {
+    const r = await fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1'
+      + `&lat=${lat}&lon=${lng}`, { headers: UA, cache: 'no-store', signal: AbortSignal.timeout(6000) });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { address?: Record<string, string>; name?: string };
+    const a = j.address ?? {};
+    const road = a.road ?? a.pedestrian ?? a.footway ?? a.path ?? null;
+    const place = a.amenity ?? a.leisure ?? a.building ?? a.shop ?? null;
+    const street = road ? [a.house_number, road].filter(Boolean).join(' ') : null;
+    return [place && place !== street ? place : null, street].filter(Boolean).join(', ') || j.name || null;
+  } catch { return null; }
+}
+
+/** Overpass: the closest node shared by two differently-named streets within
+ *  ~150 m → "NW 12th Ave & NW 50th St". Null when nothing is close. */
+async function nearestIntersection(lat: number, lng: number): Promise<string | null> {
+  try {
+    const ql = `[out:json][timeout:8];way(around:150,${lat},${lng})[highway][name]`
+      + '[highway!~"footway|path|cycleway|service|steps|track"];(._;>;);out body;';
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', ...UA },
+      body: 'data=' + encodeURIComponent(ql), cache: 'no-store', signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { elements?: { type: string; id: number; lat?: number; lon?: number;
+      nodes?: number[]; tags?: Record<string, string> }[] };
+    const els = j.elements ?? [];
+    const pos = new Map<number, [number, number]>();
+    for (const e of els) if (e.type === 'node' && e.lat != null && e.lon != null) pos.set(e.id, [e.lat, e.lon]);
+    const names = new Map<number, Set<string>>();
+    for (const w of els) {
+      if (w.type !== 'way' || !w.tags?.name) continue;
+      for (const n of w.nodes ?? []) (names.get(n) ?? names.set(n, new Set()).get(n)!).add(w.tags.name);
+    }
+    let best: { d: number; label: string } | null = null;
+    names.forEach((set, id) => {
+      const p = pos.get(id);
+      if (!p || set.size < 2) return;
+      const dy = (p[0] - lat) * 111_000, dx = (p[1] - lng) * 111_000 * Math.cos((lat * Math.PI) / 180);
+      const d = Math.hypot(dx, dy);
+      if (!best || d < best.d) best = { d, label: [...set].slice(0, 2).join(' & ') };
+    });
+    return best ? (best as { d: number; label: string }).label : null;
+  } catch { return null; }
+}
+
+/** "1161 Northwest 49th Street" → "1161 NW 49th St" — dispatch-sheet style. */
+function short(x: string): string {
+  const dir: Record<string, string> = { Northwest: 'NW', Northeast: 'NE', Southwest: 'SW', Southeast: 'SE',
+    North: 'N', South: 'S', East: 'E', West: 'W' };
+  const sfx: Record<string, string> = { Street: 'St', Avenue: 'Ave', Road: 'Rd', Boulevard: 'Blvd', Drive: 'Dr',
+    Court: 'Ct', Place: 'Pl', Terrace: 'Ter', Lane: 'Ln', Parkway: 'Pkwy', Highway: 'Hwy', Circle: 'Cir', Trail: 'Trl' };
+  return x
+    .replace(/\b(Northwest|Northeast|Southwest|Southeast|North|South|East|West)\b(?=\s+\w)/g, (m) => dir[m])
+    .replace(/\b(Street|Avenue|Road|Boulevard|Drive|Court|Place|Terrace|Lane|Parkway|Highway|Circle|Trail)\b/g, (m) => sfx[m]);
 }
