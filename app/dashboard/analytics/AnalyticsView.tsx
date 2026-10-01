@@ -6,8 +6,9 @@ import { IconTrendUp, IconAlertTriangle, IconClock, IconHome, IconInflow, IconSh
   IconFunnel, IconTarget, IconSliders, IconDownload, IconCompass } from '../../../components/icons';
 import type { AnalyticsInsights, InterventionIntel, PathwayIntel, SystemForecast, TrendSeries } from '../../../lib/queries';
 import { CopyId, fmt, pct1 } from './shared';
-import { PathwaysSection, BottleneckSection, PredictorSection, SimulatorSection } from './PathwaySections';
+import { PathwaysSection, BottleneckSection, PredictorSection } from './PathwaySections';
 import { InterventionSection } from './InterventionSection';
+import { SimulatorTabs } from './CapacitySim';
 
 /**
  * Analytics — the full port of the old static analytics page (user 2026-09-18:
@@ -586,7 +587,7 @@ export default function AnalyticsView({ a, forecast, pi, iv = null, flow = [] }:
       {tab === 'pathways' && (pi ? <PathwaysSection pi={pi} /> : <PiEmpty />)}
       {tab === 'bottleneck' && (pi ? <BottleneckSection pi={pi} /> : <PiEmpty />)}
       {tab === 'predictor' && (pi ? <PredictorSection pi={pi} initialPid={linkPid} /> : <PiEmpty />)}
-      {tab === 'simulator' && (pi ? <SimulatorSection pi={pi} /> : <PiEmpty />)}
+      {tab === 'simulator' && (pi ? <SimulatorTabs pi={pi} /> : <PiEmpty />)}
       {tab === 'guide' && (iv ? <InterventionSection iv={iv} initialPid={linkPid} /> : (
         <div className="panel" style={{ padding: 24 }}><p className="bnl-sub">The Intervention Guide hasn&rsquo;t been loaded yet — run generate_intervention.py and pipeline/load_intervention.py.</p></div>
       ))}

@@ -212,7 +212,32 @@ export interface PathwayIntel {
       from_state: string; to_state: string; label: string; color: string;
       row: number; col: number; baseline: number;
     }[];
+    /** Capacity scenario simulator calibration (capacity_sim_core.py, 2026-10-01). */
+    capacity?: CapacitySimData | null;
   } | null;
+}
+
+export interface CapacitySimData {
+  version: number; month: string; states: string[];
+  stocks: { PSH: number; RRH: number; TH: number; ES: number; U: number; HOUSED: number; OUT: number };
+  params: {
+    exit: Record<'PSH' | 'RRH' | 'TH' | 'ES', { housed: number; out: number; homeless: number }>;
+    fill_src: Record<'PSH' | 'RRH' | 'TH' | 'ES', Record<string, number>>;
+    u: { housed: number; out: number };
+    housed: { return: number; age: number };
+    out: { return: number; age: number };
+    new_per_month: number;
+  };
+  hh_size: Record<string, number>;
+  new_bed_use: Record<string, number>;
+  beds: Record<string, number>;
+  history: { month: string; homeless: number; unsheltered: number; sheltered: number }[];
+  backtest: {
+    rows: { month: string; pred_homeless: number; act_homeless: number; pred_unsheltered: number;
+      act_unsheltered: number; pred_sheltered: number; act_sheltered: number }[];
+    mape_homeless: number; mape_unsheltered: number; mape_sheltered: number; mape_homeless_6: number;
+    from: string; to: string;
+  };
 }
 export async function getPathwayIntel(): Promise<PathwayIntel | null> {
   const { data, error } = await supabaseServer()
