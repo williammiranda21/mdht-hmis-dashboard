@@ -62,10 +62,13 @@ export default function ReferOut({ title, onPick, onClose }: {
             </div>
             {list.map((r) => (
               <button key={r.id} className="tbtn"
-                style={{ display: 'flex', justifyContent: 'flex-start', width: '100%', textAlign: 'left',
-                  marginBottom: 7, fontSize: 14, fontWeight: 600, color: 'var(--strong)', padding: '11px 16px' }}
+                // .tbtn is nowrap — long names + phone ran past the edge (user 2026-10-01)
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2,
+                  width: '100%', textAlign: 'left', whiteSpace: 'normal', borderRadius: 14,
+                  marginBottom: 7, fontSize: 14, fontWeight: 600, color: 'var(--strong)', padding: '10px 16px' }}
                 onClick={() => setSelId(r.id)}>
-                {r.name}{r.phone ? <span className="bnl-sub" style={{ fontSize: 13.5 }}> · ☎ {r.phone}</span> : null}
+                <span>{r.name}</span>
+                {r.phone ? <span className="bnl-sub" style={{ fontSize: 12.5, fontWeight: 500 }}>☎ {r.phone}</span> : null}
               </button>
             ))}
             {list.length === 0 && (
