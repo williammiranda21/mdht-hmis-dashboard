@@ -92,7 +92,9 @@ approved, so disabling an account revokes admin power.
 - Bootstrap (first admin only, already done): the `UPDATE` at the bottom of `auth_setup.sql`
 - Admin console `/dashboard/admin`: approve/disable, grant/revoke admin, **edit projects**
   (searchable picker — only renders for non-admins, since admins bypass grants), and
-  **reset password** (temp password shown once, never emailed — no SMTP configured)
+  **reset password** (temp password shown once, never emailed — no SMTP configured), **reset 2FA**.
+  Layout (2026-10-01): compact list with access tags → click a user → right-side profile panel
+  (Account / Access / Projects / Security / Activity)
 - Users self-change password at `/dashboard/account`
 
 ### Idle sign-out + last-seen (2026-08-20, user directive "away 1 hour = logged out")
@@ -279,9 +281,10 @@ sidebar in both modes**, dark mode default.
 ## 10. Conventions
 
 - Server Components fetch data; Client Components only for interactivity.
-- Keep `SUPABASE_SERVICE_ROLE_KEY` server-only. It's used in exactly one place now
-  (`app/api/admin/reset-password/route.ts`), and that route verifies the **caller** is an admin
-  before using it. Everything else goes through RLS.
+- Keep `SUPABASE_SERVICE_ROLE_KEY` server-only. Admin uses: `app/api/admin/reset-password`,
+  `app/api/admin/reset-mfa` (2026-10-01 — deletes a user's MFA factors, audited `mfa_reset`), and
+  the admin page's auth lookups (last sign-in + per-user 2FA state). Each verifies the **caller**
+  is an admin first. Everything else goes through RLS (plus lib/audit.ts writes).
 - Prefer extending `lib/queries.ts` over scattering Supabase calls.
 - Don't change metric math without checking `apr_monthly_report.py`.
 - Hashed PersonalIDs are not names, but `bnl_clients` **is** real PII — treat it accordingly.

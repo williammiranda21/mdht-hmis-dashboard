@@ -255,6 +255,27 @@ tfoot td{padding:11px 16px;border-top:1px solid var(--border);font-weight:700;co
 :root[data-theme="dark"] .tbtn-sel,:root[data-theme="dark"] .tbtn-sel:hover{color:var(--secondary)}
 /* admin account actions wrap within the cell instead of overflowing to a scroll */
 .au-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+/* Admin Users — compact list + right-side profile panel (2026-10-01) */
+.au-row{cursor:pointer}
+.au-row:hover td,.au-row-sel td{background:var(--primary-soft)}
+.au-row:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+.au-tags{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.au-sub{font-size:11.5px;color:var(--muted)}
+.au-ov{position:fixed;inset:0;background:rgba(10,17,32,.45);z-index:50;display:flex;justify-content:flex-end}
+.au-panel{background:var(--card);border-left:1px solid var(--border);box-shadow:var(--shadow);width:520px;max-width:100vw;height:100%;overflow-y:auto;padding:18px 22px 28px}
+.au-panel h3{font-family:var(--serif);font-size:17px;color:var(--strong)}
+.au-phead{display:flex;align-items:center;gap:12px;padding-bottom:12px}
+.au-avatar{width:40px;height:40px;flex-shrink:0;border-radius:50%;background:var(--primary-soft);color:var(--primary);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px}
+.au-sec{border-top:1px solid var(--hair);padding:14px 0}
+.au-sec h4{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:0 0 9px}
+.au-k{font-size:11.5px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.au-btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.au-kv{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;padding:3px 0}
+.au-kv>span:first-child{color:var(--muted)}
+.au-projlist{font-size:12.5px;line-height:1.7;max-height:180px;overflow-y:auto}
+.au-danger{margin-top:12px;padding:10px 12px;border:1px solid var(--danger-light);border-radius:10px;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.au-tbtn-danger{color:var(--danger);border-color:var(--danger)}
+.au-tbtn-danger:hover{color:var(--danger);border-color:var(--danger);background:var(--danger-light)}
 thead th.sortable{cursor:pointer;user-select:none}
 thead th .car{opacity:0;margin-left:4px;font-size:9px}
 thead th.sorted .car{opacity:1;color:var(--primary)}

@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabaseBrowser } from '../../../lib/supabase-browser';
 import { fmtInt, typeAbbr } from '../../../lib/format';
 
@@ -37,6 +37,9 @@ export interface AdminProfile {
   /** auth.users.last_sign_in_at — stamped on fresh sign-ins only (a session
    *  kept alive by token refresh does NOT update it). Floor, not "last seen". */
   lastSignInAt: string | null;
+  /** Two-factor state from Supabase Auth: 'on' = verified authenticator,
+   *  'started' = unfinished setup only, null = none (or auth unreachable). */
+  mfa: 'on' | 'started' | null;
   /** profiles.last_seen_at — real usage, stamped by /api/seen while the user
    *  is active in the dashboard. Null until supabase/last_seen.sql runs (or
    *  the user's first visit after this shipped). */
@@ -62,6 +65,14 @@ export default function AdminUsers({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openFor, setOpenFor] = useState<string | null>(null);
+  // Profile panel: which account is open (null = list only).
+  const [selId, setSelId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!selId) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setSelId(null); setOpenFor(null); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selId]);
   const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
   const [copied, setCopied] = useState(false);
   // Search over the All-accounts list (name / email / agency, case-insensitive).
@@ -79,6 +90,30 @@ export default function AdminUsers({
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Reset failed');
       setIssued({ email: json.email, password: json.password });
+    } catch (e) {
+      setError(String((e as Error).message));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Admin 2FA reset (2026-10-01): deletes the user's authenticator factors so
+  // they can enroll again (lost/changed phone). Server route checks is_admin
+  // and writes an access_log 'mfa_reset' row.
+  async function resetMfa(r: AdminProfile) {
+    if (!confirm(`Reset two-factor sign-in for ${r.email}?
+
+Their authenticator app stops working for this dashboard. They sign in with just their password, then set up two-factor again under Account. Until then they can't open the By-Name List or client names.`)) return;
+    setBusy(r.id); setError(null);
+    try {
+      const res = await fetch('/api/admin/reset-mfa', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: r.id }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Reset failed');
+      setList((prev) => prev.map((x) => (x.id === r.id ? { ...x, mfa: null } : x)));
     } catch (e) {
       setError(String((e as Error).message));
     } finally {
@@ -175,29 +210,6 @@ export default function AdminUsers({
       : <span title={title}>{label}</span>;
   }
 
-  // Annual P&P acknowledgment — compliance review at a glance. Green = current
-  // (within 365d), amber = coming due is implicit (the gate renews it), red =
-  // never acknowledged (pre-gate account that hasn't signed in since).
-  function attestSub(r: AdminProfile) {
-    if (r.status !== 'approved') return null;
-    if (!r.policiesAttestedAt) {
-      return (
-        <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2 }}
-          title="Has not acknowledged the HMIS Policies & Procedures in-app — the gate will require it at their next visit">
-          P&amp;P: not acknowledged
-        </div>
-      );
-    }
-    const d = new Date(r.policiesAttestedAt);
-    const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
-    return (
-      <div style={{ fontSize: 11, color: days > 365 ? 'var(--danger)' : 'var(--accent)', marginTop: 2 }}
-        title={`HMIS Policies & Procedures acknowledged ${d.toLocaleString()} — renewed annually by the sign-in gate`}>
-        P&amp;P ✓ {days === 0 ? 'today' : `${days}d ago`}
-      </div>
-    );
-  }
-
   // Real usage (profiles.last_seen_at) — the answer to "sign-in says 20d ago
   // but I know they were in here yesterday": persistent sessions don't stamp
   // a sign-in, the /api/seen heartbeat stamps this.
@@ -218,135 +230,247 @@ export default function AdminUsers({
   // inside AdminUsers, a component here gets a NEW identity every render, so
   // React unmounted and rebuilt every row on each state change — the page
   // height collapsed for a frame and the browser clamped scroll to the top
-  // (the "list jumps to the top when I grant access" bug, second half; the
-  // first half was router.refresh(), fixed 2026-09-03). It also reset the
-  // open ProjectPicker's checkboxes. A function call renders inline in
-  // AdminUsers's own tree — no boundary, nothing remounts.
+  // (the "list jumps to the top when I grant access" bug). A function call
+  // renders inline in AdminUsers's own tree — no boundary, nothing remounts.
+  //
+  // Layout (user 2026-10-01): the list is a compact one-line-per-person index
+  // with green access tags; clicking a row opens the profile panel where
+  // every setting lives, grouped Account / Access / Projects / Security /
+  // Activity.
   function row(r: AdminProfile) {
     const isMe = r.id === me;
+    const open = () => { setSelId(r.id); setOpenFor(null); setError(null); };
     return (
-      <Fragment key={r.id}>
-        <tr>
-          <td>
-            <span className="nm">{r.displayName || '—'}</span>
-            {isMe && <span className="ty">you</span>}
-            <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{r.email}</div>
-          </td>
-          <td>{r.agency || <span style={{ color: 'var(--faint)' }}>—</span>}</td>
-          <td>{statusPill(r.status)}</td>
-          <td style={{ whiteSpace: 'nowrap' }}>{lastSignInCell(r)}{lastSeenSub(r)}{attestSub(r)}</td>
-          <td className="num">
-            {r.isAdmin ? (
-              <span className="pill good" title="Admins see every project — grants aren't used">
-                all projects
-              </span>
-            ) : (
-              <button className="tbtn" onClick={() => setOpenFor(openFor === r.id ? null : r.id)}>
-                {openFor === r.id ? 'Close' : `Edit projects (${fmtInt(r.projectIds.length)})`}
-              </button>
-            )}
-          </td>
-          {/* Actions wrap within the cell (no horizontal scroll). Access toggles
-              turn GREEN when granted, so an admin sees at a glance what each user
-              can reach — the green ones are their active accesses. */}
-          <td className="num">
-            <div className="au-actions">
+      <tr key={r.id} className={`au-row${selId === r.id ? ' au-row-sel' : ''}`} tabIndex={0}
+        onClick={open} onKeyDown={(e) => { if (e.key === 'Enter') open(); }}
+        title="Open this user's profile">
+        <td>
+          <span className="nm">{r.displayName || '—'}</span>
+          {isMe && <span className="ty">you</span>}
+          <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{r.email}</div>
+        </td>
+        <td>{r.agency || <span style={{ color: 'var(--faint)' }}>—</span>}</td>
+        <td>{statusPill(r.status)}</td>
+        <td style={{ whiteSpace: 'nowrap' }}>{lastSignInCell(r)}{lastSeenSub(r)}</td>
+        <td>{accessTags(r)}</td>
+        <td className="num" style={{ color: 'var(--faint)', fontSize: 16 }} aria-hidden="true">›</td>
+      </tr>
+    );
+  }
+
+  // What this account can reach, at a glance (green = granted).
+  function accessTags(r: AdminProfile) {
+    const tags: [string, string][] = [];
+    if (r.isAdmin) tags.push(['Admin', 'Full dashboard admin — every project and module']);
+    else if (r.status === 'approved') {
+      if (r.bnlAccess) tags.push(['BNL', 'By-Name List access']);
+      if (r.hlAccess) tags.push([r.hlAdmin ? 'Helpline admin' : 'Helpline', 'Helpline Triage access']);
+      if (r.ycAccess) tags.push(['Youth', 'Youth Intake access']);
+    }
+    return (
+      <div className="au-tags">
+        {tags.map(([t, title]) => <span key={t} className="pill good" title={title}>{t}</span>)}
+        {r.mfa === 'on' && <span className="pill good" title="Two-factor sign-in is set up">2FA</span>}
+        {!r.isAdmin && r.status === 'approved' && (
+          <span className="au-sub">{fmtInt(r.projectIds.length)} project{r.projectIds.length === 1 ? '' : 's'}</span>
+        )}
+      </div>
+    );
+  }
+
+  const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined,
+    { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
+
+  function profile(r: AdminProfile) {
+    const isMe = r.id === me;
+    const dis = busy === r.id;
+    const approved = r.status === 'approved';
+    const projName = new Map(projects.map((p) => [p.id, p.name]));
+    const close = () => { setSelId(null); setOpenFor(null); };
+    return (
+      <div className="au-ov" onClick={(e) => e.target === e.currentTarget && close()}>
+        <aside className="au-panel" role="dialog" aria-label={`Profile: ${r.displayName || r.email}`}>
+          <div className="au-phead">
+            <div className="au-avatar" aria-hidden="true">
+              {(r.displayName || r.email || '?').split(/[\s@.]+/).filter(Boolean).slice(0, 2)
+                .map((w) => w[0]?.toUpperCase()).join('')}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h3 style={{ margin: 0 }}>{r.displayName || '—'} {isMe && <span className="ty">you</span>}</h3>
+              <div className="au-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {r.email}{r.agency ? ` · ${r.agency}` : ''}
+              </div>
+            </div>
+            {statusPill(r.status)}
+            <button className="bnl-x" onClick={close} aria-label="Close">✕</button>
+          </div>
+          {error && <div className="lerror" style={{ margin: '10px 0 0' }} role="alert">{error}</div>}
+
+          <section className="au-sec">
+            <h4>Account</h4>
+            <div className="au-btns">
               {r.status !== 'approved' && (
-                <button className="tbtn" disabled={busy === r.id}
-                  onClick={() => setStatus(r, 'approved')}>Approve</button>
+                <button className="tbtn" disabled={dis} onClick={() => setStatus(r, 'approved')}>Approve</button>
               )}
-              {r.status === 'approved' && !isMe && (
-                <button className="tbtn" disabled={busy === r.id}
-                  onClick={() => setStatus(r, 'disabled')}>Disable</button>
+              {approved && !isMe && (
+                <button className="tbtn" disabled={dis} onClick={() => setStatus(r, 'disabled')}>Disable account</button>
               )}
               {!isMe && (
-                <button className={`tbtn${r.isAdmin ? ' tbtn-on' : ''}`} disabled={busy === r.id}
+                <button className={`tbtn${r.isAdmin ? ' tbtn-on' : ''}`} disabled={dis}
                   onClick={() => setAdmin(r, !r.isAdmin)}>
                   {r.isAdmin ? 'Revoke admin' : 'Make admin'}
                 </button>
               )}
-              {/* Admins already have BNL access via can_see_bnl(), so this toggle
-                  would be a no-op for them — only show it for non-admins. */}
-              {!r.isAdmin && r.status === 'approved' && (
-                <button className={`tbtn${r.bnlAccess ? ' tbtn-on' : ''}`} disabled={busy === r.id}
-                  title="By-Name List contains real client names. Grant only to staff who need it."
-                  onClick={() => setBnlAccess(r, !r.bnlAccess)}>
-                  {r.bnlAccess ? 'Revoke BNL access' : 'Grant BNL access'}
-                </button>
-              )}
-              {/* Note-WRITING scopes (bnl_write_pops.sql, user directive
-                  2026-08-25): per BNL population — e.g. write in Youth but
-                  not Families. Only meaningful with BNL access. */}
-              {!r.isAdmin && r.status === 'approved' && r.bnlAccess && (
-                <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}
-                  title="Which BNL populations this account may WRITE notes on. A client in two populations is writable by either scope. None selected = read-only.">
-                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--faint)',
-                    letterSpacing: '.05em' }}>NOTES</span>
-                  {([['all', 'All'], ['youth', 'Youth'], ['vet', 'Vet'], ['family', 'Fam'],
-                     ['single', 'Single'], ['senior', 'Senior']] as const).map(([k, lbl]) => (
-                    <button key={k} disabled={busy === r.id}
-                      className={`tbtn${r.bnlWritePops.includes(k) ? ' tbtn-on' : ''}`}
-                      style={{ padding: '2px 8px', fontSize: 11,
-                        ...(k !== 'all' && r.bnlWritePops.includes('all')
-                          ? { opacity: 0.45 } : {}) }}
-                      onClick={() => toggleWritePop(r, k)}>
-                      {lbl}
-                    </button>
-                  ))}
-                  <button disabled={busy === r.id}
-                    className={`tbtn${r.bnlNoteEdit ? ' tbtn-on' : ''}`}
-                    style={{ padding: '2px 8px', fontSize: 11 }}
-                    title="May EDIT their own notes (typo fixes). Default off; every edit keeps the previous text in an audit history. Deleting is never possible."
-                    onClick={() => setNoteEdit(r, !r.bnlNoteEdit)}>
-                    ✎ Edit own
-                  </button>
-                </span>
-              )}
-              {!r.isAdmin && r.status === 'approved' && (
-                <button className={`tbtn${r.ycAccess ? ' tbtn-on' : ''}`} disabled={busy === r.id}
-                  title="Youth Connect: intake list, review queue, invite links. Intended for Educate Tomorrow."
-                  onClick={() => setYcAccess(r, !r.ycAccess)}>
-                  {r.ycAccess ? 'Revoke Youth Intake' : 'Grant Youth Intake'}
-                </button>
-              )}
-              {!r.isAdmin && r.status === 'approved' && (
-                <button className={`tbtn${r.hlAccess ? ' tbtn-on' : ''}`} disabled={busy === r.id}
-                  title="Helpline Triage: call intake, triage queue, team assignment. For helpline operators and Trust staff."
-                  onClick={() => setHlAccess(r, !r.hlAccess)}>
-                  {r.hlAccess ? 'Revoke Helpline' : 'Grant Helpline'}
-                </button>
-              )}
-              {!r.isAdmin && r.status === 'approved' && r.hlAccess && (
-                <button className={`tbtn${r.hlAdmin ? ' tbtn-on' : ''}`} disabled={busy === r.id}
-                  title="Helpline SETTINGS: manage teams, priority rules, referral resources, custom routing areas, and queue pins — without full dashboard admin. Run supabase/helpline_admin.sql once first."
-                  onClick={() => setHlAdmin(r, !r.hlAdmin)}>
-                  {r.hlAdmin ? 'Revoke Helpline admin' : 'Grant Helpline admin'}
-                </button>
-              )}
-              <button className="tbtn" disabled={busy === r.id}
-                onClick={() => resetPassword(r)}>Reset password</button>
+              {isMe && <span className="au-sub">You can&rsquo;t disable or demote your own account.</span>}
             </div>
-          </td>
-        </tr>
-        {openFor === r.id && (
-          <tr>
-            <td colSpan={6} style={{ background: 'var(--rowhover)' }}>
-              <ProjectPicker
-                projects={projects}
-                initial={r.projectIds}
-                onCancel={() => setOpenFor(null)}
-                onSave={(ids) => saveProjects(r, ids)}
-              />
-            </td>
-          </tr>
-        )}
-      </Fragment>
+            {r.status === 'pending' && (
+              <p className="au-sub" style={{ marginTop: 6 }}>Approve first — access and projects can be set after.</p>
+            )}
+          </section>
+
+          {approved && (
+            <section className="au-sec">
+              <h4>Access</h4>
+              {r.isAdmin ? (
+                <p className="au-sub">Admins have every module and every project — nothing to grant.</p>
+              ) : (
+                <>
+                  <div className="au-btns">
+                    <button className={`tbtn${r.bnlAccess ? ' tbtn-on' : ''}`} disabled={dis}
+                      title="By-Name List contains real client names. Grant only to staff who need it."
+                      onClick={() => setBnlAccess(r, !r.bnlAccess)}>
+                      {r.bnlAccess ? '✓ ' : ''}By-Name List
+                    </button>
+                    <button className={`tbtn${r.hlAccess ? ' tbtn-on' : ''}`} disabled={dis}
+                      title="Helpline Triage: call intake, triage queue, team assignment. For helpline operators and Trust staff."
+                      onClick={() => setHlAccess(r, !r.hlAccess)}>
+                      {r.hlAccess ? '✓ ' : ''}Helpline
+                    </button>
+                    {r.hlAccess && (
+                      <button className={`tbtn${r.hlAdmin ? ' tbtn-on' : ''}`} disabled={dis}
+                        title="Helpline SETTINGS: manage teams, priority rules, referral resources, custom routing areas, and queue pins — without full dashboard admin."
+                        onClick={() => setHlAdmin(r, !r.hlAdmin)}>
+                        {r.hlAdmin ? '✓ ' : ''}Helpline admin
+                      </button>
+                    )}
+                    <button className={`tbtn${r.ycAccess ? ' tbtn-on' : ''}`} disabled={dis}
+                      title="Youth Connect: intake list, review queue, invite links. Intended for Educate Tomorrow."
+                      onClick={() => setYcAccess(r, !r.ycAccess)}>
+                      {r.ycAccess ? '✓ ' : ''}Youth Intake
+                    </button>
+                  </div>
+                  <p className="au-sub" style={{ marginTop: 6 }}>Green = granted. Click to grant or revoke.</p>
+                  {/* Note-WRITING scopes (bnl_write_pops.sql, 2026-08-25):
+                      per BNL population. Only meaningful with BNL access. */}
+                  {r.bnlAccess && (
+                    <div style={{ marginTop: 12 }}
+                      title="Which BNL populations this account may WRITE notes on. A client in two populations is writable by either scope. None selected = read-only.">
+                      <div className="au-k">BNL notes — may write on</div>
+                      <div className="au-btns">
+                        {([['all', 'All'], ['youth', 'Youth'], ['vet', 'Vet'], ['family', 'Family'],
+                           ['single', 'Single'], ['senior', 'Senior']] as const).map(([k, lbl]) => (
+                          <button key={k} disabled={dis}
+                            className={`tbtn${r.bnlWritePops.includes(k) ? ' tbtn-on' : ''}`}
+                            style={k !== 'all' && r.bnlWritePops.includes('all') ? { opacity: 0.45 } : undefined}
+                            onClick={() => toggleWritePop(r, k)}>
+                            {lbl}
+                          </button>
+                        ))}
+                        <button disabled={dis} className={`tbtn${r.bnlNoteEdit ? ' tbtn-on' : ''}`}
+                          title="May EDIT their own notes (typo fixes). Default off; every edit keeps the previous text in an audit history. Deleting is never possible."
+                          onClick={() => setNoteEdit(r, !r.bnlNoteEdit)}>
+                          ✎ Edit own
+                        </button>
+                      </div>
+                      {!r.bnlWritePops.length && <p className="au-sub" style={{ marginTop: 4 }}>None selected — read-only on the BNL.</p>}
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+          )}
+
+          {approved && !r.isAdmin && (
+            <section className="au-sec">
+              <h4>Projects · {fmtInt(r.projectIds.length)}</h4>
+              {openFor === r.id ? (
+                <ProjectPicker
+                  projects={projects}
+                  initial={r.projectIds}
+                  onCancel={() => setOpenFor(null)}
+                  onSave={(ids) => saveProjects(r, ids)}
+                />
+              ) : (
+                <>
+                  <div className="au-projlist">
+                    {r.projectIds.length
+                      ? r.projectIds.map((id) => projName.get(id) ?? `Project ${id}`)
+                          .sort((x, y) => x.localeCompare(y))
+                          .map((n, i) => <div key={`${n}-${i}`}>{n}</div>)
+                      : <span className="au-sub">No projects assigned — they&rsquo;ll see no project data.</span>}
+                  </div>
+                  <button className="tbtn" style={{ marginTop: 8 }} onClick={() => setOpenFor(r.id)}>Edit projects</button>
+                </>
+              )}
+            </section>
+          )}
+
+          <section className="au-sec">
+            <h4>Security</h4>
+            <div className="au-kv"><span>Two-factor sign-in</span>
+              <span style={{ color: r.mfa === 'on' ? 'var(--accent)' : 'var(--muted)', fontWeight: 600 }}>
+                {r.mfa === 'on' ? 'On' : r.mfa === 'started' ? 'Setup started, not finished' : 'Not set up'}
+              </span>
+            </div>
+            <div className="au-btns" style={{ marginTop: 8 }}>
+              <button className="tbtn" disabled={dis} onClick={() => resetPassword(r)}>Reset password</button>
+            </div>
+            {r.mfa && !isMe && (
+              <div className="au-danger">
+                <button className="tbtn au-tbtn-danger" disabled={dis}
+                  title={r.mfa === 'on'
+                    ? 'Removes their authenticator — use when they lost or changed phones.'
+                    : 'Clears an unfinished two-factor setup so they can start over.'}
+                  onClick={() => resetMfa(r)}>
+                  {r.mfa === 'on' ? 'Reset 2FA (authenticator)' : 'Clear 2FA setup'}
+                </button>
+                <span className="au-sub">
+                  Doesn&rsquo;t change their password. They sign in with their password, then set up two-factor again under My account.
+                </span>
+              </div>
+            )}
+            {isMe && r.mfa && <p className="au-sub" style={{ marginTop: 6 }}>Manage your own two-factor under My account.</p>}
+          </section>
+
+          <section className="au-sec">
+            <h4>Activity</h4>
+            <div className="au-kv"><span>Last seen</span><span>{r.lastSeenAt ? new Date(r.lastSeenAt).toLocaleString() : '—'}</span></div>
+            <div className="au-kv"><span>Last sign-in</span><span>{r.lastSignInAt ? new Date(r.lastSignInAt).toLocaleString() : 'never'}</span></div>
+            {approved && (
+              <div className="au-kv"><span>Policies &amp; Procedures</span>
+                <span>{r.policiesAttestedAt ? `acknowledged ${fmtDate(r.policiesAttestedAt)}` : <span style={{ color: 'var(--danger)' }}>not acknowledged</span>}</span>
+              </div>
+            )}
+            <div className="au-kv"><span>Account created</span><span>{fmtDate(r.createdAt)}</span></div>
+          </section>
+        </aside>
+      </div>
     );
   }
 
+  const sel = selId ? list.find((r) => r.id === selId) ?? null : null;
+
+  const thead = (
+    <thead>
+      <tr><th>User</th><th>Agency</th><th>Status</th>
+        <th title="Top: last credential sign-in (Supabase Auth). Below: last real activity in the dashboard — persistent sessions make sign-in alone misleading.">Last sign-in · seen</th>
+        <th>Access</th><th className="num" aria-label="Open" /></tr>
+    </thead>
+  );
+
   return (
     <>
-      {error && <div className="lerror" style={{ marginBottom: 14 }} role="alert">{error}</div>}
+      {error && !sel && <div className="lerror" style={{ marginBottom: 14 }} role="alert">{error}</div>}
 
       {issued && (
         <div className="pwpanel" role="status">
@@ -370,7 +494,7 @@ export default function AdminUsers({
             </button>
           </div>
           <p className="pwnote">
-            Shown once — it isn’t stored anywhere and can’t be retrieved again. Send it to the
+            Shown once — it isn&rsquo;t stored anywhere and can&rsquo;t be retrieved again. Send it to the
             user over a channel you trust (not email if you can avoid it), and tell them to change
             it from <strong>My account</strong> after signing in. Their old password already stopped
             working.
@@ -384,19 +508,14 @@ export default function AdminUsers({
             <h3>Pending requests</h3>
             <div className="meta">
               {pending.length
-                ? `${fmtInt(pending.length)} awaiting approval · assign projects after approving`
+                ? `${fmtInt(pending.length)} awaiting approval · click a request to review it`
                 : 'Nothing waiting'}
             </div>
           </div>
         </div>
         {pending.length > 0 && (
           <div className="scroll">
-            <table>
-              <thead>
-                <tr><th>User</th><th>Agency</th><th>Status</th><th title="Top: last credential sign-in (Supabase Auth). Below: last real activity in the dashboard (/api/seen heartbeat) — persistent sessions make sign-in alone misleading.">Last sign-in · seen</th><th className="num">Scope</th><th className="num">Actions</th></tr>
-              </thead>
-              <tbody>{pending.map(row)}</tbody>
-            </table>
+            <table>{thead}<tbody>{pending.map(row)}</tbody></table>
           </div>
         )}
       </div>
@@ -407,7 +526,7 @@ export default function AdminUsers({
             <h3>All accounts</h3>
             <div className="meta">
               {t ? `${fmtInt(shown.length)} of ${fmtInt(others.length)} shown` : `${fmtInt(list.length)} total`}
-              {' '}· admins see every project
+              {' '}· click a user to open their profile
             </div>
           </div>
           <input className="finput" placeholder="Search name, email, or agency…"
@@ -416,9 +535,7 @@ export default function AdminUsers({
         </div>
         <div className="scroll">
           <table>
-            <thead>
-              <tr><th>User</th><th>Agency</th><th>Status</th><th title="Top: last credential sign-in (Supabase Auth). Below: last real activity in the dashboard (/api/seen heartbeat) — persistent sessions make sign-in alone misleading.">Last sign-in · seen</th><th className="num">Scope</th><th className="num">Actions</th></tr>
-            </thead>
+            {thead}
             <tbody>
               {shown.map(row)}
               {!others.length && <tr><td colSpan={6} className="empty">No approved accounts yet.</td></tr>}
@@ -429,6 +546,8 @@ export default function AdminUsers({
           </table>
         </div>
       </div>
+
+      {sel && profile(sel)}
     </>
   );
 }

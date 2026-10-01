@@ -32,6 +32,11 @@ export default async function AdminPage() {
   // stamps last_sign_in_at; a session kept alive by token refresh does not.
   // Treat it as a floor on activity, not a live "last seen".
   const lastSignIn = new Map<string, string | null>();
+  // Two-factor state per account: 'on' = a verified authenticator,
+  // 'started' = only an abandoned/unverified setup. listUsers does NOT carry
+  // factors, so this is one admin listFactors call per user (~1.4s for ~100,
+  // batches of 25) — started here and awaited alongside the profile queries.
+  const mfaState = new Map<string, 'on' | 'started'>();
   try {
     const admin = supabaseAdmin();
     for (let page = 1; page <= 10; page++) {
@@ -41,6 +46,22 @@ export default async function AdminPage() {
       if (data.users.length < 200) break;
     }
   } catch { /* auth unreachable — the column just shows "—" */ }
+
+  const mfaP = (async () => {
+    try {
+      const admin = supabaseAdmin();
+      const ids = Array.from(lastSignIn.keys());
+      for (let i = 0; i < ids.length; i += 25) {
+        const rs = await Promise.all(ids.slice(i, i + 25).map((userId) =>
+          admin.auth.admin.mfa.listFactors({ userId }).then((r) => [userId, r] as const)));
+        for (const [userId, r] of rs) {
+          const fs = r.data?.factors ?? [];
+          if (fs.some((f) => f.status === 'verified')) mfaState.set(userId, 'on');
+          else if (fs.length) mfaState.set(userId, 'started');
+        }
+      }
+    } catch { /* unreachable — the Reset 2FA button just doesn't show */ }
+  })();
 
   const supabase = supabaseServer();
   const [{ data: profiles }, { data: grants }, { data: projects }] = await Promise.all([
@@ -53,6 +74,7 @@ export default async function AdminPage() {
     supabase.from('user_projects').select('user_id, project_id'),
     supabase.from('projects').select('project_id, name, type_name').order('name'),
   ]);
+  await mfaP;
 
   const byUser = new Map<string, number[]>();
   (grants ?? []).forEach((g: any) => {
@@ -78,6 +100,7 @@ export default async function AdminPage() {
     status: p.status,
     createdAt: p.created_at,
     lastSignInAt: lastSignIn.get(p.id) ?? null,
+    mfa: mfaState.get(p.id) ?? null,
     lastSeenAt: p.last_seen_at ?? null,
     projectIds: byUser.get(p.id) ?? [],
   }));

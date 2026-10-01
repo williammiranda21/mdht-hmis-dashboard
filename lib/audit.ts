@@ -31,7 +31,8 @@ export type AuditAction =
   | 'outliers_view' | 'outliers_export'
   | 'risklist_view' | 'risklist_export'
   | 'predict_view' | 'predict_export'
-  | 'ivx_view' | 'ivx_export';
+  | 'ivx_view' | 'ivx_export'
+  | 'mfa_reset';
 
 export async function audit(
   action: AuditAction,
