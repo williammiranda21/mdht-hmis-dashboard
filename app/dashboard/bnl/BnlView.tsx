@@ -441,7 +441,6 @@ export default function BnlView({
 
   // Bar scale comes from the population aggregate, not the loaded page — using
   // the page max would rescale every bar each time more rows arrived.
-  const maxDays = Math.max(pa.max_days, 1);
   const exportHref = `/api/bnl/export?${params(0)}`;
 
   return (
@@ -755,11 +754,12 @@ export default function BnlView({
                     )}
                     <td {...mkTd(r, 'flags')}><Flags r={r} /></td>
                     <td {...mkTd(r, 'project', { minWidth: 220 })}>{r.project ? <><span className="ty">{r.ptype ?? '?'}</span> {r.project}{r.enrolled ? null : <span className="bnl-sub" title="not a current enrollment — last known project"> (former)</span>}</> : <span className="bnl-sub">—</span>}</td>
-                    <td {...mkTd(r, 'days_homeless')}>
-                      <div className="bnl-dh">
-                        <div className="bnl-dh-tr"><div className="bnl-dh-fl" style={{ width: `${Math.min(100, (100 * r.days_homeless) / maxDays)}%`, background: col }} /></div>
-                        <span className="num">{r.days_homeless.toLocaleString()}</span>
-                      </div>
+                    {/* bar removed 2026-10-01 to save width (user); the 180/365-day
+                        severity color it carried moves onto the number */}
+                    <td className="num" {...mkTd(r, 'days_homeless')}>
+                      <span style={r.days_homeless >= 180 ? { color: col, fontWeight: 700 } : undefined}
+                        title={r.days_homeless >= 365 ? '365+ days' : r.days_homeless >= 180 ? '180+ days' : undefined}>
+                        {r.days_homeless.toLocaleString()}</span>
                     </td>
                     <td className="num" {...mkTd(r, 'sys_days3')}>{r.sys_days3.toLocaleString()} d <span className="bnl-sub">· {r.episodes3} ep</span></td>
                     <td className="num" {...mkTd(r, 'ms_wait')}>{r.ms_wait != null
